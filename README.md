@@ -1,18 +1,14 @@
 **DOMAS: Domain Oriented Mapping of Alternative Splicing**
 
 **DOMAS** is a computational framework designed to bridge the gap
-between genomic variation and functional proteomics. It maps alternative
-splicing (AS) events---sourced from diverse cell types or experimental
-conditions---onto established protein domain architectures using a
+between alternative splicing products and proteins. It maps alternative
+splicing (AS) events onto protein domain architectures using a
 coordinate-aware approach.
 
 **Key Features**
 
-**Functional Annotation:** Identifies domain gain, loss, or alteration
-caused by splicing.
-
-**Comparative Analysis:** Compares junction clusters to highlight shifts
-in protein utility.
+**Functional Annotation:** Identifies domain gain, loss, alteration in sequence or length
+caused by alternative splicing.
 
 **Database Integration:** Utilizes the DoChaP database for high-fidelity
 transcript and domain mapping.
