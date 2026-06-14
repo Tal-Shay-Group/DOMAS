@@ -1,26 +1,21 @@
+[README.md](https://github.com/user-attachments/files/27209600/README.md)
+    
 **DOMAS: Domain Oriented Mapping of Alternative Splicing**
 
-**DOMAS** is a computational framework designed to bridge the gap
-between alternative splicing products and proteins. It maps alternative
-splicing (AS) events onto protein domain architectures using a
-coordinate-aware approach.
+**Domain Oriented Mapping of Alternative Splicing (DOMAS), is a novel computational framework designed to bridge the gap between differential splicing events and their protein level effect. DOMAS accepts as input a list of differential splicing events, and performs a coordinate-aware mapping of these events onto the protein domain architectures. DOMAS then annotates each event with the affected domain(s), and classifies the effect as causing domain loss, gain, alteration, truncation or elongation, compared to the protein encoded by the canonical transcript.**
 
 **Key Features**
 
-**Functional Annotation:** Identifies domain gain, loss, alteration in sequence or length
-caused by alternative splicing.
-
-**Database Integration:** Utilizes the DoChaP database for high-fidelity
-transcript and domain mapping.
+* **Input formats:** Output of multiple differential splicing analysis, including LeafCutter (Li et al., 2018), rMATS2 (Wang et al., 2024), and MAJIQ (Vaquero-Garcia et al., 2023). To accommodate additional input formats, please write to us.  
+* **Output format:** A csv list of domains affected by each alternative splicing event, and the class of the effect compared to the protein encoded by the canonical transcript – loss, gain, alteration, elongation or truncation. Each event is linked to its visualization in DoChaP format (Gal-Oz et al., 2021).   
+* **Protein domain databases:** DOMAS builds upon the DoChaP database (Gal-Oz et al., 2021), which integrates domain annotation from several databases.  
+* Stay tuned \- DOMAS will also be available as a WebServer soon. 
 
 **Installation & Requirements**
 
-Python 3.x
-
-Dependencies: pandas, numpy, argparse, sqlite3, openpyxl (for Excel
-input) and matplotlib
-
-**Database:** Requires access to a local instance of the **DoChaP DB**.
+* Python 3.x  
+* Dependencies: pandas, numpy, argparse, sqlite3, openpyxl (for Excel input) and matplotlib  
+* **Database:** Requires access to a local instance of the **DoChaP DB**. See (Gal-Oz et al., 2021\) for installation instructions.
 
 **Usage**
 
@@ -28,49 +23,89 @@ Run the utility from the command line:
 
 Bash
 
-python3 domas.py -input \<input_file.xlsx\> -dochap \<dochap-path\>
--output_csv \<output_name.csv\>
+python3 [domas.py](https://protect.checkpoint.com/v2/r02/___http://domas.py___.YzJlOmJlbmd1cmlvbnVuaXZlcnNpdHlvZnRoZW5lZ2V2OmM6b2ZmaWNlMzY1X2VtYWlsc19hdHRhY2htZW50OjkyNGUwOTMxNzUxMmFjNTIzOWZmODFhZTNmYjM4MjFhOjc6Mzc3ZTpmZGRjYWUzZDI2ODA0NTQ3Njg0ODJiMTQxZjEyNjQ1OWE5ZDYyZDU5NTM2M2NiNDA3Mzk1ZGY3NDYyM2ZmOTdiOnA6VDpO)  \-lc\_sig \<path-to-leafcutter\_ds\_significane.txt\> \-lc\_effect \<path-to-leafcutter\_ds\_effect\_sizes.txt file\> \-dochap \<dochap-path\> \-output\_csv \<output\_name.csv\> \--input\_format \<input\_format\>
 
 **Input Parameters**
 
-  -------------------- --------------------------------------------------
-  **Parameter**        **Description**
+| Parameter | Description |
+| :---- | :---- |
+| \-lc\_sig | Path to leafcutter\_ds\_significane.txt output file |
+| \-lc\_effect | Path to leafcutter\_ds\_effect\_sizes.txt output file |
+| \-dochap | Path to the DoChaP DB directory/file. |
+| \-output\_csv | The destination path for the generated results. |
+| \-input\_format | Input file format (LeafCutterr,rMATS,MAJIQ) |
 
-  -input               Path to an Excel file (.xlsx) containing junction
-                       data.
-
-  -dochap              Path to the DoChaP DB directory/file.
-
-  -output_csv          The destination path for the generated results.
-  -------------------- --------------------------------------------------
-
-**Input File Format (Excel)**
-
-The input file must contain the following columns:
-
-**h_junction:** Junction coordinates in format Chr:Start:End (e.g.,
-Chr6:33416776:33417096).
-
-**ensembl_h:** Ensembl Gene ID (e.g., ENSG00000112514).
-
-**cluster:** A unique identifier used to group junctions for comparison.
-
-**rank_h:** The exons connected by the junction taken from the canonical
-transcript. Format: \<start-exon\>\_\<end-exon\> (e.g. E2_E4.).Included
-for readability; not used in the core analysis.
-
-**symbol_h:** Gene common name. (e.g. CUTA). Included for readability;
-not used in the core analysis.
-
-**Output Columns**
+**Output format**
 
 The resulting CSV file provides:
 
-**comparison_results:** Specific ID of the affected domain and the
-predicted change (e.g., gain/loss).
+* **comparison\_results:** Specific ID of the affected domain and the predicted change (e.g., gain/loss).  
+* **domain\_descriptions:** Functional description of the affected domain retrieved from DoChaP.  
+* Identification columns taken from the input**:** Includes cluster, gene\_name, gene\_id,coordinates of the alternative splicing event.
 
-**domain_descriptions:** Functional description of the affected domain
-retrieved from DoChaP.
+​
 
-Identification columns taken from the input**:** Includes cluster,
-gene_name, gene_id, start and end columns.
+**References**
+
+​Gal-Oz, S. T., Haiat, N., Eliyahu, D., Shani, G., & Shay, T. (2021). DoChaP: the domain change presenter. *Nucleic Acids Research, 49*(W1), W162–W168. 
+
+​Li, Y. I., Knowles, D. A., & Pritchard, J. K. (2016). LeafCutter: annotation-free quantification of RNA splicing. *Biorxiv,* , 044107\. 
+
+​Vaquero-Garcia, J., Aicher, J. K., Jewell, S., Gazzara, M. R., Radens, C. M., Jha, A., Norton, S. S., Lahens, N. F., Grant, G. R., & Barash, Y. (2023). RNA splicing analysis using heterogeneous and large RNA-seq datasets. *Nature Communications, 14*(1), 1230\. 
+
+​Wang, Y., Xie, Z., Kutschera, E., Adams, J. I., Kadash-Edmondson, K. E., & Xing, Y. (2024). rMATS-turbo: an efficient and flexible computational tool for alternative splicing analysis of large-scale RNA-seq data. *Nature Protocols, 19*(4), 1083–1104. 
+
+​
+**DOMAS: Domain Oriented Mapping of Alternative Splicing**
+
+**Domain Oriented Mapping of Alternative Splicing (DOMAS), is a novel computational framework designed to bridge the gap between differential splicing events and their protein level effect. DOMAS accepts as input a list of differential splicing events, and performs a coordinate-aware mapping of these events onto the protein domain architectures. DOMAS then annotates each event with the affected domain(s), and classifies the effect as causing domain loss, gain, alteration, truncation or elongation, compared to the protein encoded by the canonical transcript.**
+
+**Key Features**
+
+* **Input formats:** Output of multiple differential splicing analysis, including LeafCutter (Li et al., 2016), rMATS2 (Wang et al., 2024), and MAJIQ (Vaquero-Garcia et al., 2023). To accommodate additional input formats, please write to us.  
+* **Output format:** A csv list of domains affected by each alternative splicing event, and the class of the effect – loss, gain, alteration, elongation or truncation. Each event is linked to its visualization in DoCHAP format \[ref\].   
+* **Protein domain databases:** DOMAS builds upon the DoChaP database (Gal-Oz et al., 2021), which includes domain annotation from list of databases and their reference.  
+* Stay tuned \- DOMAS will also be available as a WebServer soon. 
+
+**Installation & Requirements**
+
+* Python 3.x  
+* Dependencies: pandas, numpy, argparse, sqlite3, openpyxl (for Excel input) and matplotlib  
+* **Database:** Requires access to a local instance of the **DoChaP DB**. See (Gal-Oz et al., 2021\) for installation instructions.
+
+**Usage**
+
+Run the utility from the command line:
+
+Bash
+
+python3 [domas.py](http://domas.py)  \-lc\_sig \<path-to-leafcutter\_ds\_significane.txt\> \-lc\_effect \<path-to-leafcutter\_ds\_effect\_sizes.txt file\> \-dochap \<dochap-path\> \-output\_csv \<output\_name.csv\>
+
+**Input Parameters**
+
+| Parameter | Description |
+| :---- | :---- |
+| \-lc\_sig | Path to leafcutter\_ds\_significane.txt output file |
+| \-lc\_effect | Path to leafcutter\_ds\_effect\_sizes.txt output file |
+| \-dochap | Path to the DoChaP DB directory/file. |
+| \-output\_csv | The destination path for the generated results. |
+
+**Output format**
+
+The resulting CSV file provides:
+
+* **comparison\_results:** Specific ID of the affected domain and the predicted change (e.g., gain/loss).  
+* **domain\_descriptions:** Functional description of the affected domain retrieved from DoChaP.  
+* Identification columns taken from the input**:** Includes cluster, gene\_name, gene\_id, start and end columns.
+
+​References
+
+​Gal-Oz, S. T., Haiat, N., Eliyahu, D., Shani, G., & Shay, T. (2021). DoChaP: the domain change presenter. *Nucleic Acids Research, 49*(W1), W162–W168. 
+
+​Li, Y. I., Knowles, D. A., & Pritchard, J. K. (2016). LeafCutter: annotation-free quantification of RNA splicing. *Biorxiv,* , 044107\. 
+
+​Vaquero-Garcia, J., Aicher, J. K., Jewell, S., Gazzara, M. R., Radens, C. M., Jha, A., Norton, S. S., Lahens, N. F., Grant, G. R., & Barash, Y. (2023). RNA splicing analysis using heterogeneous and large RNA-seq datasets. *Nature Communications, 14*(1), 1230\. 
+
+​Wang, Y., Xie, Z., Kutschera, E., Adams, J. I., Kadash-Edmondson, K. E., & Xing, Y. (2024). rMATS-turbo: an efficient and flexible computational tool for alternative splicing analysis of large-scale RNA-seq data. *Nature Protocols, 19*(4), 1083–1104. 
+
+​
