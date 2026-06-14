@@ -427,6 +427,31 @@ class GeneVisualization:
             elif idx_column is not None and col == idx_column:
                 cell.set_text_props(color=junction_colors[row - 1], weight='bold')
 
+    def _draw_results_table(self, ax, df_results):
+        """Draw a compact first-page table summarizing domain comparison results."""
+        ax.axis('off')
+        if df_results is None or len(df_results) == 0:
+            return
+
+        table_df = df_results.fillna('')
+        column_names = list(table_df.columns)
+        table = ax.table(
+            cellText=table_df.astype(str).values,
+            colLabels=column_names,
+            loc='center',
+            cellLoc='center',
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(7)
+        table.scale(1, 1.15)
+
+        for (row, col), cell in table.get_celld().items():
+            cell.set_linewidth(0.6)
+            cell.set_edgecolor('#888888')
+            if row == 0:
+                cell.set_facecolor('#F1F1F1')
+                cell.set_text_props(weight='bold')
+
     def _draw_genomic_junctions(self, ax, junctions, exon_y, exon_height):
         """Draw colored bracket-like junction markers above the genomic exon track."""
         if not junctions:
@@ -443,7 +468,7 @@ class GeneVisualization:
             ax.plot([left, right], [junction_top, junction_top], color=color, linewidth=1.4, zorder=5)
     
     def create_pdf(self, output_file='gene_visualization.pdf', transcripts_per_page=4,
-                   protein_only=False, domains_only=False, df_junction=None):
+                   protein_only=False, domains_only=False, df_junction=None, df_results=None):
         """
         Create PDF visualization of the gene, one page per transcripts_per_page transcripts.
         Each page has its own axis scales at the top so they never overlap with transcript rows.
@@ -460,6 +485,8 @@ class GeneVisualization:
             If True, include only transcripts whose protein has at least one domain.
         df_junction : pandas.DataFrame | None
             Optional junction metadata table with at least `start` and `end` columns.
+        df_results : pandas.DataFrame | None
+            Optional domain comparison results table, displayed on the first page.
         """
         from matplotlib.backends.backend_pdf import PdfPages
 
@@ -468,8 +495,9 @@ class GeneVisualization:
 
         junction_display_df = self._prepare_junction_display_df(df_junction)
 
-        # Skip empty/invalid transcript entries
+        # Skip empty/invalid transcript entries, canonical transcript first
         valid_transcripts = [t for t in self.transcripts if len(t['exons']) > 0]
+        valid_transcripts.sort(key=lambda t: 0 if t['info'].get('canonical') else 1)
         if protein_only:
             valid_transcripts = [t for t in valid_transcripts if self._transcript_produces_protein(t)]
         if domains_only:
@@ -528,20 +556,32 @@ class GeneVisualization:
                 n = len(page_transcripts)
                 show_junction_table = page_idx == 0 and junction_display_df is not None and len(junction_display_df) > 0
 
+                # Per-transcript results tables, sized to fit their row count
+                transcript_results = []
+                for transcript in page_transcripts:
+                    transcript_id = transcript['info']['transcript_ensembl_id']
+                    if df_results is not None and 'transcript_id' in df_results.columns:
+                        rows = df_results[df_results['transcript_id'] == transcript_id]
+                    else:
+                        rows = None
+                    transcript_results.append(rows)
+
                 # Height layout per page:
                 #   row 0  : page title
                 #   row 1  : optional junction table on first page
                 #   next   : axis scales
                 #   next   : spacer
-                #   rows.. : n * (exon/genomic row + protein/domain row + label row)
+                #   rows.. : n * (results table row + exon/genomic row + protein/domain row + label row)
+                height_ratios = [0.55]
                 if show_junction_table:
-                    height_ratios = [0.55, 1.10, 0.75, 0.28] + [0.7, 1.2, 0.03] * n
-                    scale_row = 2
-                    transcript_start_row = 4
-                else:
-                    height_ratios = [0.55, 0.75, 0.28] + [0.7, 1.2, 0.03] * n
-                    scale_row = 1
-                    transcript_start_row = 3
+                    height_ratios.append(1.10)
+                scale_row = len(height_ratios)
+                height_ratios += [0.75, 0.28]
+                for rows in transcript_results:
+                    num_rows = len(rows) if rows is not None else 0
+                    results_height = 0.3 if num_rows == 0 else 0.35 + 0.25 * num_rows
+                    height_ratios += [results_height, 0.7, 1.2, 0.03]
+                transcript_start_row = scale_row + 2
                 total_rows = len(height_ratios)
 
                 fig = plt.figure(figsize=(11, 8.5))
@@ -577,17 +617,20 @@ class GeneVisualization:
 
                 # ── transcript rows ────────────────────────────────────────
                 for i, transcript in enumerate(page_transcripts):
-                    row = transcript_start_row + i * 3
+                    row = transcript_start_row + i * 4
 
-                    ax_genomic = fig.add_subplot(gs[row:row + 2, 0])
+                    ax_results = fig.add_subplot(gs[row, :])
+                    self._draw_results_table(ax_results, transcript_results[i])
+
+                    ax_genomic = fig.add_subplot(gs[row + 1:row + 3, 0])
                     self._draw_genomic_view(ax_genomic, transcript,
                                             genomic_start, genomic_end,
                                             df_junction=junction_display_df)
 
-                    ax_protein = fig.add_subplot(gs[row:row + 2, 1])
+                    ax_protein = fig.add_subplot(gs[row + 1:row + 3, 1])
                     self._draw_protein_view(ax_protein, transcript, max_protein_length)
 
-                    ax_label = fig.add_subplot(gs[row + 2, :])
+                    ax_label = fig.add_subplot(gs[row + 3, :])
                     ax_label.axis('off')
                     transcript_name = transcript['info']['transcript_ensembl_id']
                     protein_name = transcript['info'].get('protein_ensembl_id')

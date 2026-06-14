@@ -150,6 +150,30 @@ def get_gene_transcript_ids(conn, gene_ids):
     transcript_ids = df_gene_transcripts.transcript_ensembl_id_version.values.tolist()
     return np.unique(transcript_ids).tolist()
     
+def get_genes_df_transcripts(conn, gene_ids):
+    """
+    Load all transcripts (with their canonical flag) for a list of genes.
+
+    Args:
+        conn: Database connection
+        gene_ids: List of gene Ensembl IDs
+
+    Returns:
+        DataFrame with one row per transcript, including transcript_ensembl_id,
+        transcript_refseq_id, gene_ensembl_id and canonical columns.
+    """
+    dfs = []
+    batch_size = 500
+    for i in range(0, len(gene_ids), batch_size):
+        batch = gene_ids[i:i + batch_size]
+        placeholders = ','.join(['?' for _ in batch])
+        query = f'SELECT * FROM Transcripts WHERE gene_ensembl_id IN ({placeholders})'
+        dfs.append(pd.read_sql_query(query, conn, params=batch))
+    if not dfs:
+        return pd.DataFrame()
+    return pd.concat(dfs, ignore_index=True)
+
+
 def compare_domains(junctions, cluster_domains):
     if len(cluster_domains) == 1:
         print(f"No domains to compare. {junctions[0]} is the only junction in the cluster, skipping comparison.")
