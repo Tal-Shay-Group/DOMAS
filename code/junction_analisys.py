@@ -601,7 +601,7 @@ class JunctionsAnalysis:
                 except ValueError as e:
                     print(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}, specie {cluster_result.specie}: {e}")
 
-        df_results_columns = ['gene_symbol', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
+        df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
                               'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
         if results:
             df_all_results = pd.concat(
@@ -609,6 +609,7 @@ class JunctionsAnalysis:
                     cluster_result.get_results_df()
                     .rename(columns={'event': 'event_type'})
                     .assign(
+                        cluster=cluster_result.cluster_name,
                         gene_symbol=cluster_result.gene_symbol,
                         canonical_transcript_id=cluster_result.canonical_transcript_id,
                         specie=cluster_result.specie,
