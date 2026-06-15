@@ -382,7 +382,7 @@ def hadas_read_input_file(con, input_path):
         df = pd.read_excel(input_path)
         print("Completed reading input file.")
         # create human df with relevant columns and parsed junction coordinates
-        df_h = df[human_relevant_columns_names]
+        df_h = df[human_relevant_columns_names].copy()
         df_h[['chromosome', 'start_position', 'end_position']] = df_h['h_junction'].str.split(':', expand=True)
         df_h['start_position'] = df_h['start_position'].astype(int)
         df_h['end_position'] = df_h['end_position'].astype(int)
@@ -394,7 +394,7 @@ def hadas_read_input_file(con, input_path):
                       'start_position', 'end_position', 'specie', 'cluster_name', 'rank']]
 
         # create mouse df with relevant columns and parsed junction coordinates
-        df_m = df[mouse_relevant_columns_names]
+        df_m = df[mouse_relevant_columns_names].copy()
         df_m[['chromosome', 'start_position', 'end_position']] = df_m['m_junction'].str.split(':', expand=True)
         df_m['start_position'] = df_m['start_position'].astype(int)
         df_m['end_position'] = df_m['end_position'].astype(int)
