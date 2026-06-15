@@ -1,5 +1,5 @@
 import logging
-
+import time
 import numpy as np
 import pandas as pd
 
@@ -552,12 +552,16 @@ class JunctionsAnalysis:
         group_columns = ['specie', 'cluster_name'] if 'specie' in df_junctions_n.columns else ['cluster_name']
         cluster_groups = df_junctions_n.groupby(group_columns)
         total = len(cluster_groups)
+        print(f"Analyzing {total} clusters...")
+        last_time = time.perf_counter()
 
         results = []
         for count, (_, cluster_df) in enumerate(cluster_groups, start=1):
             cluster_name = cluster_df.cluster_name.iat[0]
             if count % 100 == 0:
-                self.logger.info(f"Analyzing cluster {count}/{total}: {cluster_name}")
+                cur_time = time.perf_counter()
+                self.logger.info(f"Analyzing cluster {count}/{total}: {cluster_name}. last 100 clusters duration: {cur_time - last_time:.2f}")
+                last_time = cur_time
 
             gene_ensembl_id = cluster_df.gene_ensembl_id.iat[0]
             gene_symbol = cluster_df.gene_symbol.iat[0]
@@ -569,6 +573,27 @@ class JunctionsAnalysis:
 
             df_gene_transcripts = df_transcripts[df_transcripts.gene_ensembl_id == gene_ensembl_id]
             cluster_result.analyze_junction(df_gene_transcripts, canonical_transcript_ids, df_exons, df_domains)
+
+        df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
+                              'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
+        if results:
+            df_all_results = pd.concat(
+                (
+                    cluster_result.get_results_df()
+                    .rename(columns={'event': 'event_type'})
+                    .assign(
+                        cluster=cluster_result.cluster_name,
+                        gene_symbol=cluster_result.gene_symbol,
+                        canonical_transcript_id=cluster_result.canonical_transcript_id,
+                        specie=cluster_result.specie,
+                    )
+                    for cluster_result in results
+                ),
+                ignore_index=True,
+            ).reindex(columns=df_results_columns)
+        else:
+            df_all_results = pd.DataFrame(columns=df_results_columns)
+        df_all_results.to_csv(output_path, index=False)
 
         if create_pdf:
             preloaded_gene_data = prepare_gene_data_bulk(
@@ -602,24 +627,4 @@ class JunctionsAnalysis:
                 except ValueError as e:
                     print(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}, specie {cluster_result.specie}: {e}")
 
-        df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
-                              'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
-        if results:
-            df_all_results = pd.concat(
-                (
-                    cluster_result.get_results_df()
-                    .rename(columns={'event': 'event_type'})
-                    .assign(
-                        cluster=cluster_result.cluster_name,
-                        gene_symbol=cluster_result.gene_symbol,
-                        canonical_transcript_id=cluster_result.canonical_transcript_id,
-                        specie=cluster_result.specie,
-                    )
-                    for cluster_result in results
-                ),
-                ignore_index=True,
-            ).reindex(columns=df_results_columns)
-        else:
-            df_all_results = pd.DataFrame(columns=df_results_columns)
-        df_all_results.to_csv(output_path, index=False)
         return results
