@@ -3,7 +3,7 @@ import logging
 import numpy as np
 import pandas as pd
 
-from generate_gene_pdf import GeneVisualization
+from generate_gene_pdf import GeneVisualization, prepare_gene_data_bulk
 import domas
 
 
@@ -567,10 +567,20 @@ class JunctionsAnalysis:
             df_gene_transcripts = df_transcripts[df_transcripts.gene_ensembl_id == gene_ensembl_id]
             cluster_result.analyze_junction(df_gene_transcripts, canonical_transcript_ids, df_exons, df_domains)
 
+        preloaded_gene_data = prepare_gene_data_bulk(
+            self.con, [cluster_result.gene_symbol for cluster_result in results]
+        )
+
+        gene_visualizations = {}
         for count, cluster_result in enumerate(results, start=1):
             try:
                 df_cluster_junctions = pd.DataFrame(cluster_result.junctions, columns=['start', 'end'])
-                viz = self.gene_visualization_cls(self.con, cluster_result.gene_symbol)
+                viz = gene_visualizations.get(cluster_result.gene_symbol)
+                if viz is None:
+                    gene_symbol = cluster_result.gene_symbol
+                    preloaded = preloaded_gene_data.get(gene_symbol.lower()) if isinstance(gene_symbol, str) else None
+                    viz = self.gene_visualization_cls(self.con, gene_symbol, preloaded=preloaded)
+                    gene_visualizations[gene_symbol] = viz
                 if cluster_result.as_event_type is None:
                     file_name = f'{cluster_result.gene_symbol}_{count}_junction_comparison.pdf'
                 else:

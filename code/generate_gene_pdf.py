@@ -27,19 +27,128 @@ PDF_RASTER_DPI = 110
 DOMAIN_STRIP_COUNT = 80
 
 
+def prepare_gene_data_bulk(conn, gene_symbols):
+    """
+    Bulk-load gene/transcript/exon/protein/domain data for many genes at once.
+
+    Returns a dict keyed by lowercased gene symbol, where each value is a dict
+    with 'gene_data' (a Series, as `df_gene.iloc[0]`) and 'transcripts' (a list
+    of {'info', 'exons', 'domains'} dicts), suitable to pass as `preloaded` to
+    `GeneVisualization`. Genes not found in the database are simply absent from
+    the result.
+    """
+    unique_symbols = list(dict.fromkeys(s for s in gene_symbols if isinstance(s, str) and s))
+    if not unique_symbols:
+        return {}
+
+    placeholders = ','.join(['?'] * len(unique_symbols))
+    df_genes = pd.read_sql_query(
+        f"SELECT * FROM Genes WHERE gene_symbol COLLATE NOCASE IN ({placeholders})",
+        conn, params=unique_symbols,
+    )
+    if len(df_genes) == 0:
+        return {}
+
+    df_genes = df_genes.assign(_key=df_genes['gene_symbol'].str.lower())
+    df_genes = df_genes.drop_duplicates(subset='_key', keep='first')
+
+    gene_ensembl_ids = df_genes['gene_ensembl_id'].tolist()
+    ge_placeholders = ','.join(['?'] * len(gene_ensembl_ids))
+    df_transcripts = pd.read_sql_query(
+        f"""SELECT * FROM Transcripts
+            WHERE gene_ensembl_id IN ({ge_placeholders})
+            ORDER BY tx_start""",
+        conn, params=gene_ensembl_ids,
+    )
+
+    transcript_ids = df_transcripts['transcript_ensembl_id'].tolist()
+    if transcript_ids:
+        tx_placeholders = ','.join(['?'] * len(transcript_ids))
+        df_exons_all = pd.read_sql_query(
+            f"SELECT * FROM Transcript_exon WHERE transcript_ensembl_id IN ({tx_placeholders})",
+            conn, params=transcript_ids,
+        )
+        df_proteins_all = pd.read_sql_query(
+            f"SELECT * FROM Proteins WHERE transcript_ensembl_id IN ({tx_placeholders})",
+            conn, params=transcript_ids,
+        )
+    else:
+        df_exons_all = pd.DataFrame()
+        df_proteins_all = pd.DataFrame()
+
+    protein_ids = df_proteins_all['protein_ensembl_id'].dropna().unique().tolist() if len(df_proteins_all) else []
+    if protein_ids:
+        pr_placeholders = ','.join(['?'] * len(protein_ids))
+        df_domains_all = pd.read_sql_query(
+            f"""SELECT de.*, dt.*
+                FROM DomainEvent de
+                JOIN DomainType dt ON de.type_id = dt.type_id
+                WHERE de.protein_ensembl_id IN ({pr_placeholders})
+                ORDER BY de.AA_start""",
+            conn, params=protein_ids,
+        )
+    else:
+        df_domains_all = pd.DataFrame()
+
+    exons_by_transcript = {k: v for k, v in df_exons_all.groupby('transcript_ensembl_id')} if len(df_exons_all) else {}
+    proteins_by_transcript = {k: v for k, v in df_proteins_all.groupby('transcript_ensembl_id')} if len(df_proteins_all) else {}
+    domains_by_protein = {k: v for k, v in df_domains_all.groupby('protein_ensembl_id')} if len(df_domains_all) else {}
+
+    def get_exons(transcript_id):
+        df_exons = exons_by_transcript.get(transcript_id, pd.DataFrame(columns=df_exons_all.columns)).reset_index(drop=True)
+        if len(df_exons) == 0:
+            return df_exons
+        if (df_exons['abs_start_CDS'] == 0).any():
+            non_coding = df_exons[df_exons['abs_start_CDS'] == 0].sort_values('genomic_start_tx')
+            coding = df_exons[df_exons['abs_start_CDS'] > 0].sort_values('abs_start_CDS')
+            df_exons = pd.concat([non_coding, coding], ignore_index=True)
+        else:
+            df_exons = df_exons.sort_values('abs_start_CDS').reset_index(drop=True)
+        return df_exons
+
+    domains_columns = df_domains_all.columns if len(protein_ids) else []
+
+    def get_domains(transcript_id):
+        df_protein = proteins_by_transcript.get(transcript_id)
+        if df_protein is None or len(df_protein) == 0:
+            return pd.DataFrame()
+        protein_id = df_protein.iloc[0]['protein_ensembl_id']
+        return domains_by_protein.get(protein_id, pd.DataFrame(columns=domains_columns)).reset_index(drop=True)
+
+    transcript_groups = {k: v for k, v in df_transcripts.groupby('gene_ensembl_id', sort=False)} if len(df_transcripts) else {}
+
+    result = {}
+    for _, gene_row in df_genes.iterrows():
+        transcripts = []
+        for _, transcript in transcript_groups.get(gene_row['gene_ensembl_id'], pd.DataFrame()).iterrows():
+            tid = transcript['transcript_ensembl_id']
+            transcripts.append({
+                'info': transcript,
+                'exons': get_exons(tid),
+                'domains': get_domains(tid),
+            })
+        result[gene_row['_key']] = {'gene_data': gene_row, 'transcripts': transcripts}
+
+    return result
+
+
 class GeneVisualization:
     """Class to create gene visualization similar to DoChap-web."""
     
-    def __init__(self, conn, gene_name):
+    def __init__(self, conn, gene_name, preloaded=None):
         """
         Initialize gene visualization.
-        
+
         Parameters:
         -----------
         conn : sqlite3.Connection
             Database connection to DoChap database
         gene_name : str
             Gene symbol to visualize
+        preloaded : dict | None
+            Optional pre-fetched data for this gene, as returned per-gene by
+            `prepare_gene_data_bulk()`. When provided, `load_gene_data()` uses
+            it instead of querying the database.
         """
         self.conn = conn
         self.gene_name = gene_name
@@ -47,30 +156,37 @@ class GeneVisualization:
         self.transcripts = []
         self.colors = {}
         self.color_index = 0
-        
+        self._preloaded = preloaded
+
     def load_gene_data(self):
-        """Load gene data from database."""
+        """Load gene data, from preloaded data if available, otherwise from the database."""
+        if self._preloaded is not None:
+            self.gene_data = self._preloaded['gene_data']
+            self.transcripts = self._preloaded['transcripts']
+            self._assign_exon_colors()
+            return
+
         # Get gene info
         gene_query = """
-            SELECT * FROM Genes 
+            SELECT * FROM Genes
             WHERE gene_symbol = ? COLLATE NOCASE
         """
         df_gene = pd.read_sql_query(gene_query, self.conn, params=[self.gene_name])
-        
+
         if len(df_gene) == 0:
             raise ValueError(f"Gene '{self.gene_name}' not found in database")
-        
+
         self.gene_data = df_gene.iloc[0]
-        
+
         # Get transcripts for this gene
         trans_query = """
-            SELECT * FROM Transcripts 
+            SELECT * FROM Transcripts
             WHERE gene_ensembl_id = ?
             ORDER BY tx_start
         """
-        df_transcripts = pd.read_sql_query(trans_query, self.conn, 
+        df_transcripts = pd.read_sql_query(trans_query, self.conn,
                                            params=[self.gene_data['gene_ensembl_id']])
-        
+
         # Load exons and domains for each transcript
         for _, transcript in df_transcripts.iterrows():
             transcript_data = {
@@ -79,7 +195,7 @@ class GeneVisualization:
                 'domains': self._load_domains(transcript['transcript_ensembl_id'])
             }
             self.transcripts.append(transcript_data)
-        
+
         # Assign colors to exons
         self._assign_exon_colors()
         
