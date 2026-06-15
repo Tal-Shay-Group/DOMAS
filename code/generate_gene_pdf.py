@@ -5,6 +5,7 @@ This module creates PDF reports showing gene transcripts with exons and protein 
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse, Rectangle, FancyBboxPatch
+from matplotlib.collections import PatchCollection
 from matplotlib.gridspec import GridSpec
 import matplotlib.patches as mpatches
 import numpy as np
@@ -1115,34 +1116,39 @@ class GeneVisualization:
                 # Multiple exons: color the ellipse in amino-acid strips.
                 num_strips = DOMAIN_STRIP_COUNT
                 strip_width = domain_width / num_strips
-                
+                a = domain_width / 2  # Semi-major axis
+                b = domain_height / 2  # Semi-minor axis
+
+                strip_patches = []
                 for i in range(num_strips):
                     strip_aa_pos = domain_start_aa + (i + 0.5) * strip_width
                     strip_color = overlapping_segments[0]['color']
-                    
+
                     for segment in overlapping_segments:
                         if segment['start_aa'] <= strip_aa_pos <= segment['end_aa']:
                             strip_color = segment['color']
                             break
-                    
+
                     # Calculate ellipse segment height (varies across width)
                     # Using ellipse equation: y = b * sqrt(1 - (x/a)^2)
                     x_from_center = strip_aa_pos - domain_center
-                    a = domain_width / 2  # Semi-major axis
-                    b = domain_height / 2  # Semi-minor axis
-                    
+
                     if abs(x_from_center) < a:
                         # Height at this x position
                         relative_height = np.sqrt(1 - (x_from_center / a) ** 2)
                         strip_height = 2 * b * relative_height
-                        
+
                         # Draw vertical strip
                         rect = Rectangle((strip_aa_pos - strip_width/2, domain_y - strip_height/2),
                                        strip_width * 1.1, strip_height,  # Slight overlap to avoid gaps
-                                       facecolor=strip_color, edgecolor='none',
-                                       alpha=1.0, zorder=2, rasterized=True)
-                        ax.add_patch(rect)
-                
+                                       facecolor=strip_color)
+                        strip_patches.append(rect)
+
+                if strip_patches:
+                    strips = PatchCollection(strip_patches, match_original=True, edgecolor='none',
+                                             alpha=1.0, zorder=2, rasterized=True)
+                    ax.add_collection(strips)
+
                 # Draw border ellipse on top
                 ellipse_border = Ellipse((domain_center, domain_y), domain_width, domain_height,
                                        facecolor='none', edgecolor='black', linewidth=1.2, zorder=3)
