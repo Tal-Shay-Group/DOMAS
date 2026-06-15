@@ -358,11 +358,15 @@ def classify_domain_change(c_count, t_count, c_length, t_length):
 
 
 def choose_domain_display_name(names, prefixes=DOMAIN_NAME_PREFIX_PRIORITY):
+    # Sort for a deterministic choice: iteration order over a `set` of names
+    # depends on Python's per-process string hash seed, which would otherwise
+    # make the chosen name vary between runs.
+    sorted_names = sorted(names)
     for prefix in prefixes:
-        for name in names:
+        for name in sorted_names:
             if name.lower().startswith(prefix.lower()):
                 return name
-    return next(iter(names), None)
+    return sorted_names[0] if sorted_names else None
 
 
 def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, transcript_id,
@@ -453,10 +457,20 @@ class ClusterAnalysisResult:
         relevant genomic window and compare its domains against the canonical
         transcript's, recording one event per domain group.
         """
-        gene_transcript_ids = set(
-            df_gene_transcripts.transcript_ensembl_id.fillna(df_gene_transcripts.transcript_refseq_id)
-        )
-        gene_canonical_ids = canonical_transcript_ids & gene_transcript_ids
+        # Use an order-preserving dedup (not `set`) so the order in which
+        # transcripts are processed - and therefore the order of the output
+        # rows - doesn't depend on Python's per-process string hash seed.
+        # Invalid placeholder ids (e.g. NaN for transcripts with neither an
+        # ensembl nor a refseq id) are dropped so they can't spuriously match
+        # another gene's similarly-invalid "canonical" id.
+        invalid_ids = {'', 'nan', 'None'}
+        gene_transcript_ids = [
+            tid for tid in dict.fromkeys(
+                df_gene_transcripts.transcript_ensembl_id.fillna(df_gene_transcripts.transcript_refseq_id)
+            )
+            if tid is not None and not pd.isna(tid) and tid not in invalid_ids
+        ]
+        gene_canonical_ids = canonical_transcript_ids.intersection(gene_transcript_ids)
         if not gene_canonical_ids:
             self.add_event('no_canonical_transcript')
             logger.warning(f"No canonical transcript found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
@@ -465,7 +479,12 @@ class ClusterAnalysisResult:
             self.add_event('only_one_transcript')
             logger.info(f"Only one transcript found for cluster {self.cluster_name}, specie {self.specie}.")
             return
-        self.canonical_transcript_id, = gene_canonical_ids
+        if len(gene_canonical_ids) > 1:
+            logger.warning(
+                f"Multiple canonical transcripts found for cluster {self.cluster_name}, specie {self.specie}: "
+                f"{sorted(gene_canonical_ids)}. Using the first one (sorted)."
+            )
+        self.canonical_transcript_id = sorted(gene_canonical_ids)[0]
 
         transcript_exons = {
             transcript_id: exon_lookup(transcript_id)
@@ -578,12 +597,11 @@ class JunctionsAnalysis:
 
         gene_ids = df_junctions_n.gene_ensembl_id.unique().tolist()
         df_transcripts = domas.get_genes_df_transcripts(self.con, gene_ids)
-        canonical_transcript_ids = set(
-            df_transcripts[df_transcripts.canonical != 0]
-            .transcript_ensembl_id.fillna(df_transcripts.transcript_refseq_id)
-            .values.tolist()
-        )
-        transcript_ids = set(df_transcripts.transcript_ensembl_id.fillna(df_transcripts.transcript_refseq_id)) - {'', None, 'nan', 'None'}
+        invalid_ids = {'', 'nan', 'None'}
+        all_transcript_ids = df_transcripts.transcript_ensembl_id.fillna(df_transcripts.transcript_refseq_id)
+        valid_mask = all_transcript_ids.notna() & ~all_transcript_ids.isin(invalid_ids)
+        canonical_transcript_ids = set(all_transcript_ids[valid_mask & (df_transcripts.canonical != 0)])
+        transcript_ids = set(all_transcript_ids[valid_mask])
         df_domains = domas.get_transcript_domains_db(self.con, transcript_ids)
 
         # Local import avoids circular imports with aleternative_splicing module.
