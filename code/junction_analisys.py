@@ -377,12 +377,13 @@ def compare_domains(cluster_domains, transcript_exons, canonical_transcript_id, 
 
 
 class ClusterAnalysisResult:
-    def __init__(self, cluster_name, gene_ensembl_id, gene_symbol, chromosome=None, as_event_type=None):
+    def __init__(self, cluster_name, gene_ensembl_id, gene_symbol, chromosome=None, as_event_type=None, specie=None):
         self.cluster_name = cluster_name
         self.gene_ensembl_id = gene_ensembl_id
         self.gene_symbol = gene_symbol
         self.chromosome = chromosome
         self.as_event_type = as_event_type
+        self.specie = specie
         self.canonical_transcript_id = None
         self.junctions = []
         self.events = []
@@ -410,11 +411,11 @@ class ClusterAnalysisResult:
         gene_canonical_ids = canonical_transcript_ids & gene_transcript_ids
         if not gene_canonical_ids:
             self.add_event('no_canonical_transcript')
-            logger.warning(f"No canonical transcript found for cluster {self.cluster_name}. Skipping analysis.")
+            logger.warning(f"No canonical transcript found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
             return
         if len(gene_transcript_ids) == 1:
             self.add_event('only_one_transcript')
-            logger.info(f"Only one transcript found for cluster {self.cluster_name}.")
+            logger.info(f"Only one transcript found for cluster {self.cluster_name}, specie {self.specie}.")
             return
         self.canonical_transcript_id, = gene_canonical_ids
 
@@ -446,7 +447,7 @@ class ClusterAnalysisResult:
         canonical_junctions = transcript_junctions.get(self.canonical_transcript_id, set())
         if not canonical_junctions:
             self.add_event('no_canonical_junctions')
-            logger.warning(f"No canonical junctions found for cluster {self.cluster_name}. Skipping analysis.")
+            logger.warning(f"No canonical junctions found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
             return
 
         for transcript_id, junction_idxs in transcript_junctions.items():
@@ -454,7 +455,7 @@ class ClusterAnalysisResult:
                 continue
             if not junction_idxs:
                 logger.warning(
-                    f"Transcript {transcript_id} in cluster {self.cluster_name} does not have any junctions. "
+                    f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} does not have any junctions. "
                     "This may indicate an issue with the exon mapping for the canonical transcript."
                 )
                 self.add_event('transcript_doesnt_have_junctions', transcript_id=transcript_id)
@@ -463,7 +464,7 @@ class ClusterAnalysisResult:
             unique_junctions = junction_idxs - canonical_junctions
             if not unique_junctions:
                 logger.info(
-                    f"Transcript {transcript_id} in cluster {self.cluster_name} does not have any unique junctions "
+                    f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} does not have any unique junctions "
                     "compared to the canonical transcript. Skipping this transcript for comparison."
                 )
                 self.add_event('no_unique_junctions', transcript_id=transcript_id)
@@ -477,7 +478,7 @@ class ClusterAnalysisResult:
 
     def print_results(self, file_name='analysis_results.txt'):
         with open(file_name, 'a') as f:
-            f.write(f"Cluster: {self.cluster_name}, Gene: {self.gene_symbol} ({self.gene_ensembl_id}), Chromosome: {self.chromosome}\n")
+            f.write(f"Cluster: {self.cluster_name}, Gene: {self.gene_symbol} ({self.gene_ensembl_id}), Chromosome: {self.chromosome}, Specie: {self.specie}\n")
             f.write(f"\tCanonical Transcript ID: {self.canonical_transcript_id}\n")
             f.write(f"\tJunctions: {self.junctions}\n")
             f.write(f"\tEvents:\n")
@@ -494,7 +495,7 @@ class ClusterAnalysisResult:
             columns=['event', 'transcript_id', 'domain_name', 'c_domain_length', 't_domain_length',
                         'c_domains_number', 't_domains_number']
         )
-
+        
 
 class JunctionsAnalysis:
     def __init__(self, con, logger_instance=None, gene_visualization_cls=GeneVisualization):
@@ -503,7 +504,7 @@ class JunctionsAnalysis:
         self.gene_visualization_cls = gene_visualization_cls
 
     def analyze_junctions(self, junctions_csv='as_events_junctions.csv', output_path='as_events_junctions_analysis.csv', df_junctions=None,
-                          hadas_format=False, n=0):
+                          hadas_format=False, n=0, create_pdf=True):
         if df_junctions is None and junctions_csv is None:
             raise ValueError("Either df_junctions or junctions_csv must be provided.")
         elif df_junctions is not None and junctions_csv is not None:
@@ -518,7 +519,7 @@ class JunctionsAnalysis:
         if 'cluster_name' not in df_junctions.columns and 'cluster' in df_junctions.columns:
             df_junctions = df_junctions.rename(columns={'cluster': 'cluster_name'})
 
-        df_junctions = df_junctions[df_junctions['gene_ensembl_id'].str.startswith('ENSG', na=False)]
+        #df_junctions = df_junctions[df_junctions['gene_ensembl_id'].str.startswith('ENSG', na=False)]
         # check all needed columns are in df_junctions
         required_columns = ['gene_ensembl_id', 'start_position', 'end_position', 'cluster_name']
         for col in required_columns:
@@ -548,7 +549,8 @@ class JunctionsAnalysis:
         from aleternative_splicing import get_exons_for_transcripts
 
         df_exons = get_exons_for_transcripts(self.con, transcript_ids)
-        cluster_groups = df_junctions_n.groupby('cluster_name')
+        group_columns = ['specie', 'cluster_name'] if 'specie' in df_junctions_n.columns else ['cluster_name']
+        cluster_groups = df_junctions_n.groupby(group_columns)
         total = len(cluster_groups)
 
         results = []
@@ -559,42 +561,45 @@ class JunctionsAnalysis:
             gene_ensembl_id = cluster_df.gene_ensembl_id.iat[0]
             gene_symbol = cluster_df.gene_symbol.iat[0]
             event_type = cluster_df.event_type.iat[0] if 'event_type' in cluster_df.columns else None
-
-            cluster_result = ClusterAnalysisResult(cluster_name, gene_ensembl_id, gene_symbol, as_event_type=event_type)
+            specie = cluster_df.specie.iat[0] if 'specie' in cluster_df.columns else None
+            cluster_result = ClusterAnalysisResult(cluster_name, gene_ensembl_id, gene_symbol, as_event_type=event_type, specie=specie)
             cluster_result.junctions = list(zip(cluster_df['start_position'], cluster_df['end_position']))
             results.append(cluster_result)
 
             df_gene_transcripts = df_transcripts[df_transcripts.gene_ensembl_id == gene_ensembl_id]
             cluster_result.analyze_junction(df_gene_transcripts, canonical_transcript_ids, df_exons, df_domains)
 
-        preloaded_gene_data = prepare_gene_data_bulk(
-            self.con, [cluster_result.gene_symbol for cluster_result in results]
-        )
+        if create_pdf:
+            preloaded_gene_data = prepare_gene_data_bulk(
+                self.con, [cluster_result.gene_symbol for cluster_result in results]
+            )
 
-        gene_visualizations = {}
-        for count, cluster_result in enumerate(results, start=1):
-            try:
-                df_cluster_junctions = pd.DataFrame(cluster_result.junctions, columns=['start', 'end'])
-                viz = gene_visualizations.get(cluster_result.gene_symbol)
-                if viz is None:
-                    gene_symbol = cluster_result.gene_symbol
-                    preloaded = preloaded_gene_data.get(gene_symbol.lower()) if isinstance(gene_symbol, str) else None
-                    viz = self.gene_visualization_cls(self.con, gene_symbol, preloaded=preloaded)
-                    gene_visualizations[gene_symbol] = viz
-                if cluster_result.as_event_type is None:
+            gene_visualizations = {}
+            for count, cluster_result in enumerate(results, start=1):
+                try:
+                    df_cluster_junctions = pd.DataFrame(cluster_result.junctions, columns=['start', 'end'])
+                    viz = gene_visualizations.get(cluster_result.gene_symbol)
+                    if viz is None:
+                        gene_symbol = cluster_result.gene_symbol
+                        preloaded = preloaded_gene_data.get(gene_symbol.lower()) if isinstance(gene_symbol, str) else None
+                        viz = self.gene_visualization_cls(self.con, gene_symbol, preloaded=preloaded)
+                        gene_visualizations[gene_symbol] = viz
+                    # name should have event_type and specie if available, to distinguish different clusters of the same gene and across species
                     file_name = f'{cluster_result.gene_symbol}_{count}_junction_comparison.pdf'
-                else:
-                    file_name = f'{cluster_result.as_event_type}_{cluster_result.gene_symbol}_{count}_junction_comparison.pdf'
+                    if cluster_result.as_event_type is not None:
+                        file_name = f'{cluster_result.as_event_type}_{file_name}'
+                    if cluster_result.specie is not None:
+                        file_name = f'{cluster_result.specie}_{file_name}'
 
-                viz.create_pdf(
-                    file_name,
-                    protein_only=False,
-                    domains_only=False,
-                    df_junction=df_cluster_junctions,
-                    df_results=cluster_result.get_results_df(),
-                )
-            except ValueError as e:
-                print(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}: {e}")
+                    viz.create_pdf(
+                        file_name,
+                        protein_only=False,
+                        domains_only=False,
+                        df_junction=df_cluster_junctions,
+                        df_results=cluster_result.get_results_df(),
+                    )
+                except ValueError as e:
+                    print(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}, specie {cluster_result.specie}: {e}")
 
         df_results_columns = ['gene_symbol', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
                               'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
@@ -606,6 +611,7 @@ class JunctionsAnalysis:
                     .assign(
                         gene_symbol=cluster_result.gene_symbol,
                         canonical_transcript_id=cluster_result.canonical_transcript_id,
+                        specie=cluster_result.specie,
                     )
                     for cluster_result in results
                 ),

@@ -5,13 +5,7 @@ import argparse
 import sqlite3
 from generate_gene_pdf import GeneVisualization
 
-relevant_columns_names = [
-    'h_junction',
-    'symbol_h', 
-    'ensembl_h',
-    'rank_h',
-    'cluster',
-]
+
 
 domain_name_columns = ['cdd', 'pfam', 'smart', 'tigr', 'interpro','CDD_id']
 
@@ -370,21 +364,59 @@ def parse_args():
 
 # read only relevant columns from input file and
 # parse h_junction into chromosome, start_position, end_position
-def read_input_file(input_path):    
+human_relevant_columns_names = [
+    'h_junction',
+    'symbol_h', 
+    'ensembl_h',
+    'rank_h',
+    'cluster',
+]
+mouse_relevant_columns_names = [
+    'm_junction',
+    'genes', 
+    'rank_m',
+    'cluster'
+]
+def hadas_read_input_file(con, input_path):
     try:
         df = pd.read_excel(input_path)
         print("Completed reading input file.")
-        df = df[relevant_columns_names]
-        df[['chromosome', 'start_position', 'end_position']] = df['h_junction'].str.split(':', expand=True)
-        df['start_position'] = df['start_position'].astype(int)
-        df['end_position'] = df['end_position'].astype(int)
-        df = df[(df.start_position >= 0) & (df.end_position >= 0)]
+        # create human df with relevant columns and parsed junction coordinates
+        df_h = df[human_relevant_columns_names]
+        df_h[['chromosome', 'start_position', 'end_position']] = df_h['h_junction'].str.split(':', expand=True)
+        df_h['start_position'] = df_h['start_position'].astype(int)
+        df_h['end_position'] = df_h['end_position'].astype(int)
+        df_h = df_h[(df_h.start_position >= 0) & (df_h.end_position >= 0)]
+        df_h['specie'] = 'human'
+        df_h.rename(columns={'symbol_h': 'gene_symbol', 'ensembl_h': 'gene_ensembl_id', 'rank_h': 'rank',
+                             'h_junction': 'junction_name', 'cluster': 'cluster_name'}, inplace=True)
+        df_h = df_h[['gene_symbol', 'gene_ensembl_id', 'junction_name', 'chromosome',
+                      'start_position', 'end_position', 'specie', 'cluster_name', 'rank']]
+
+        # create mouse df with relevant columns and parsed junction coordinates
+        df_m = df[mouse_relevant_columns_names]
+        df_m[['chromosome', 'start_position', 'end_position']] = df_m['m_junction'].str.split(':', expand=True)
+        df_m['start_position'] = df_m['start_position'].astype(int)
+        df_m['end_position'] = df_m['end_position'].astype(int)
+        df_m = df_m[(df_m.start_position >= 0) & (df_m.end_position >= 0)]
+        df_m['specie'] = 'mouse'
+        # get gene ensembl id from genes column, which is in the format "gene_symbol (gene_ensembl_id)"
+        query = "SELECT gene_ensembl_id, gene_symbol FROM Genes WHERE specie = 'M_musculus' AND UPPER(gene_symbol) IN ({gene_symbols})"
+        gene_symbols = df_m['genes'].unique().tolist()
+        df_mouse_genes = pd.read_sql_query(query.format(gene_symbols=','.join(['?']*len(gene_symbols))), con, params=gene_symbols)
+        df_mouse_genes['gene_symbol'] = df_mouse_genes['gene_symbol'].str.upper() 
+        df_m = pd.merge(df_m, df_mouse_genes, left_on='genes', right_on='gene_symbol', how='left') 
+        df_m.drop(columns=['genes'], inplace=True)     
+        df_m.rename(columns={ 'm_junction': 'junction_name', 'cluster': 'cluster_name', 'rank_m': 'rank'}, inplace=True)
+        df_m = df_m[['gene_symbol', 'gene_ensembl_id', 'junction_name', 'chromosome', 
+                     'start_position', 'end_position', 'specie', 'cluster_name', 'rank']]
+        merged_df = pd.concat([df_h, df_m], ignore_index=True)
+
         print("Completed parsing junctions.")
-        return df   
+        return merged_df
     except Exception as e:
         print(f"Error reading input file: {e}")
         return None
-
 
 def main():
     pd.set_option('display.max_colwidth', None)

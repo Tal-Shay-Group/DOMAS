@@ -705,9 +705,9 @@ class ClusterAnalysisResult:
         return df
         
 
-def analyze_junctions2(con, df_junctions=None, junctions_csv=None, output_path='as_events_junctions_analysis.csv', n=0):
+def analyze_junctions2(con, df_junctions=None, junctions_csv=None, output_path='as_events_junctions_analysis.csv', n=0, create_pdf=True):
     analyzer = JunctionsAnalysis(con, logger_instance=logger)
-    return analyzer.analyze_junctions(df_junctions=df_junctions, junctions_csv=junctions_csv, output_path=output_path, n=n)
+    return analyzer.analyze_junctions(df_junctions=df_junctions, junctions_csv=junctions_csv, output_path=output_path, n=n, create_pdf=create_pdf)
         
 def get_domain_name(row):
     domain_name_columns = ['interpro', 'pfam', 'cdd', 'smart', 'tigr', 'CDD_id']
@@ -854,26 +854,26 @@ def analyze_ioe_files(con, input_path, pattern, output_csv, examples_per_event=5
         analyze_junctions2(con, df_junctions=df_all_junctions, output_path=output_csv)
 
 def analyze_hadas_input(con, input_file, output_csv):
-    df_junctions = domas.read_hadas_input_file(input_file)
+    df_junctions = domas.hadas_read_input_file(con, input_file)
     gene_ids = df_junctions['gene_ensembl_id'].unique().tolist()
     gene_transcript_counts = utils.get_genes_number_of_transcripts(con, gene_ids)
     df_junctions['num_transcripts'] = df_junctions['gene_ensembl_id'].map(gene_transcript_counts)
     df_junctions.to_csv('hadas_junctions_with_transcript_counts.csv', index=False)
-    df_junctions_filtered = df_junctions[df_junctions['num_transcripts'] <= 3]
+    df_junctions_filtered = df_junctions[df_junctions['num_transcripts'] <= 2]
     df_junctions_filtered.to_csv('hadas_junctions_filtered.csv', index=False)
-    analyze_junctions2(con, df_junctions=df_junctions_filtered, output_path=output_csv)
+    analyze_junctions2(con, df_junctions=df_junctions_filtered, output_path=output_csv, create_pdf=False)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(message)s')
     logger.info("hello")
     input_file = 'clusters_sum_table_H_vs_M_HN6.xlsx'
     output_file = 'clusters_with_3_transcripts.csv'
-    #dochap_path = '/gpfs0/tals/projects/Analysis/ariel/DoChap/DoChaP-db/dbs/DB_merged.sqlite'
-    dochap_path = '/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite'
+    dochap_path = '/gpfs0/tals/projects/Analysis/ariel/DoChap/DoChaP-db/new_dbs/DB_merged.sqlite'
+    #dochap_path = '/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite'
     con = sqlite3.connect(dochap_path)
     
-    #analyze_hadas_input(con, input_file, 'hadas_junctions_analysis.csv')
-    #exit(0)
+    analyze_hadas_input(con, input_file, 'hadas_junctions_analysis.csv')
+    exit(0)
     analyze_ioe_files(con, '/Users/arielmelchior/documents/projects/DOMAS/external_data/', 'output_prefix_.*_strict.ioe', 'output_csv.csv', examples_per_event=5)
     #ioe_file = '/gpfs0/tals/projects/Analysis/ariel2/DOMAS/external_data/output_prefix_MX_strict.ioe'
     #analyze_ioe_file(con, ioe_file, 'ioe_mx_junctions_analysis.csv')
