@@ -554,7 +554,8 @@ class JunctionsAnalysis:
         total = len(cluster_groups)
 
         results = []
-        for count, (cluster_name, cluster_df) in enumerate(cluster_groups, start=1):
+        for count, (_, cluster_df) in enumerate(cluster_groups, start=1):
+            cluster_name = cluster_df.cluster_name.iat[0]
             if count % 100 == 0:
                 self.logger.info(f"Analyzing cluster {count}/{total}: {cluster_name}")
 
