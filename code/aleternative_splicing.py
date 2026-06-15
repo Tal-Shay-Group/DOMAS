@@ -855,13 +855,16 @@ def analyze_ioe_files(con, input_path, pattern, output_csv, examples_per_event=5
 
 def analyze_hadas_input(con, input_file, output_csv):
     df_junctions = domas.hadas_read_input_file(con, input_file)
+    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=True)
+    '''
     gene_ids = df_junctions['gene_ensembl_id'].unique().tolist()
     gene_transcript_counts = utils.get_genes_number_of_transcripts(con, gene_ids)
     df_junctions['num_transcripts'] = df_junctions['gene_ensembl_id'].map(gene_transcript_counts)
     df_junctions.to_csv('hadas_junctions_with_transcript_counts.csv', index=False)
     df_junctions_filtered = df_junctions[df_junctions['num_transcripts'] <= 2]
     df_junctions_filtered.to_csv('hadas_junctions_filtered.csv', index=False)
-    analyze_junctions2(con, df_junctions=df_junctions_filtered, output_path=output_csv, create_pdf=False)
+    analyze_junctions2(con, df_junctions=df_junctions_filtered, output_path=output_csv, create_pdf=True)
+    '''
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(message)s')
