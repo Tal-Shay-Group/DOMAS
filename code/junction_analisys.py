@@ -112,8 +112,43 @@ def find_bp_range_for_domains(df_exons, domains_in_region):
     return min_bp, max_bp
 
 
-def _domains_for_transcript(cluster_domains, transcript_id):
-    return cluster_domains[cluster_domains['transcript_ensembl_id'] == transcript_id]
+def build_exon_lookup(df_exons):
+    """
+    Precompute, once per analyze_junctions() run, a transcript_id -> exons
+    lookup so per-cluster/per-transcript filtering of the full `df_exons`
+    DataFrame (the dominant cost of analyze_junction()) is replaced by O(1)
+    dict lookups.
+    """
+    by_ensembl = {tid: g for tid, g in df_exons.groupby('transcript_ensembl_id')}
+    by_refseq = {tid: g for tid, g in df_exons.groupby('transcript_refseq_id')}
+    empty = df_exons.iloc[0:0]
+
+    def lookup(transcript_id):
+        a = by_ensembl.get(transcript_id)
+        b = by_refseq.get(transcript_id)
+        if a is not None and b is not None:
+            return pd.concat([a, b]).drop_duplicates()
+        return a if a is not None else (b if b is not None else empty)
+
+    return lookup
+
+
+def build_domain_lookup(df_domains):
+    """
+    Precompute, once per analyze_junctions() run, a transcript_id -> domains
+    lookup so per-cluster filtering of the full `df_domains` DataFrame is
+    replaced by O(1) dict lookups.
+    """
+    by_transcript = {
+        tid: g.rename(columns={'transcript_ensembl_id_version': 'transcript_ensembl_id'})
+        for tid, g in df_domains.groupby('transcript_ensembl_id_version')
+    }
+    empty = df_domains.rename(columns={'transcript_ensembl_id_version': 'transcript_ensembl_id'}).iloc[0:0]
+
+    def lookup(transcript_id):
+        return by_transcript.get(transcript_id, empty)
+
+    return lookup
 
 
 def _domains_in_aa_range(df_domains, min_aa, max_aa):
@@ -144,22 +179,35 @@ def collapse_contained_domains(df_domains, tolerance=2):
         return df_domains
 
     df_domains = df_domains.copy()
-    order = (df_domains['AA_end'] - df_domains['AA_start']).sort_values(ascending=False).index.tolist()
+    starts = df_domains['AA_start'].to_numpy()
+    ends = df_domains['AA_end'].to_numpy()
+    index = df_domains.index.to_numpy()
+    order_labels = (df_domains['AA_end'] - df_domains['AA_start']).sort_values(ascending=False).index.tolist()
+    pos_of_label = {label: pos for pos, label in enumerate(df_domains.index)}
+    order = [pos_of_label[label] for label in order_labels]
 
     dropped = set()
-    for i in order:
-        if i in dropped:
+    merges = {}  # position -> list of positions merged into it
+    for oi in order:
+        if oi in dropped:
             continue
-        for j in order:
-            if j == i or j in dropped:
+        for oj in order:
+            if oj == oi or oj in dropped:
                 continue
-            if (df_domains.loc[i, 'AA_start'] - tolerance <= df_domains.loc[j, 'AA_start']
-                    and df_domains.loc[j, 'AA_end'] <= df_domains.loc[i, 'AA_end'] + tolerance):
-                for col in DOMAIN_NAME_COLUMNS:
-                    df_domains.loc[i, col] = _merge_domain_names(df_domains.loc[i, col], df_domains.loc[j, col])
-                dropped.add(j)
+            if starts[oi] - tolerance <= starts[oj] and ends[oj] <= ends[oi] + tolerance:
+                merges.setdefault(oi, []).append(oj)
+                dropped.add(oj)
 
-    return df_domains.drop(index=dropped)
+    if merges:
+        name_block = df_domains[DOMAIN_NAME_COLUMNS].to_numpy(dtype=object)
+        for oi, others in merges.items():
+            for ci in range(len(DOMAIN_NAME_COLUMNS)):
+                values = [name_block[oi, ci]] + [name_block[oj, ci] for oj in others]
+                name_block[oi, ci] = _merge_domain_names(*values)
+        for ci, col in enumerate(DOMAIN_NAME_COLUMNS):
+            df_domains[col] = name_block[:, ci]
+
+    return df_domains.drop(index=index[list(dropped)] if dropped else [])
 
 
 def _min_skip_none(values):
@@ -172,7 +220,7 @@ def _max_skip_none(values):
     return max(present) if present else None
 
 
-def find_relevant_domain_windows(transcript_exons, cluster_domains, canonical_transcript_id, transcript_id,
+def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_transcript_id, transcript_id,
                                   canonical_junctions, transcript_junctions, junctions):
     """
     Determine the genomic window around the differing junctions (refined over
@@ -196,8 +244,8 @@ def find_relevant_domain_windows(transcript_exons, cluster_domains, canonical_tr
     t_min_aa, t_max_aa = get_aa_range(t_first_exon, t_last_exon)
     c_min_aa, c_max_aa = get_aa_range(c_first_exon, c_last_exon)
 
-    df_t_domains = collapse_contained_domains(_domains_for_transcript(cluster_domains, transcript_id))
-    df_c_domains = collapse_contained_domains(_domains_for_transcript(cluster_domains, canonical_transcript_id))
+    df_t_domains = collapse_contained_domains(domain_lookup(transcript_id))
+    df_c_domains = collapse_contained_domains(domain_lookup(canonical_transcript_id))
 
     t_domains_round1 = _domains_in_aa_range(df_t_domains, t_min_aa, t_max_aa)
     c_domains_round1 = _domains_in_aa_range(df_c_domains, c_min_aa, c_max_aa)
@@ -317,7 +365,7 @@ def choose_domain_display_name(names, prefixes=DOMAIN_NAME_PREFIX_PRIORITY):
     return next(iter(names), None)
 
 
-def compare_domains(cluster_domains, transcript_exons, canonical_transcript_id, transcript_id,
+def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, transcript_id,
                      canonical_junctions, transcript_junctions, junctions):
     """
     Compare the domains of `transcript_id` against `canonical_transcript_id`
@@ -339,7 +387,7 @@ def compare_domains(cluster_domains, transcript_exons, canonical_transcript_id, 
     - C>1, T>1, C>T     -> 'reduced_domain_number'
     """
     t_domains, c_domains = find_relevant_domain_windows(
-        transcript_exons, cluster_domains, canonical_transcript_id, transcript_id,
+        transcript_exons, domain_lookup, canonical_transcript_id, transcript_id,
         canonical_junctions, transcript_junctions, junctions,
     )
 
@@ -393,7 +441,7 @@ class ClusterAnalysisResult:
         self.events.append((event, transcript_id, domain_name, canonical_domain_length,
                             transcript_domain_length, canonical_domains_number, transcript_domains_number))
 
-    def analyze_junction(self, df_gene_transcripts, canonical_transcript_ids, df_exons, df_domains):
+    def analyze_junction(self, df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup):
         """
         Run the DOMAS algorithm for this cluster:
 
@@ -419,15 +467,8 @@ class ClusterAnalysisResult:
             return
         self.canonical_transcript_id, = gene_canonical_ids
 
-        cluster_domains = df_domains[
-            df_domains.transcript_ensembl_id_version.isin(gene_transcript_ids)
-        ].rename(columns={'transcript_ensembl_id_version': 'transcript_ensembl_id'})
-
         transcript_exons = {
-            transcript_id: df_exons[
-                (df_exons.transcript_ensembl_id == transcript_id)
-                | (df_exons.transcript_refseq_id == transcript_id)
-            ]
+            transcript_id: exon_lookup(transcript_id)
             for transcript_id in gene_transcript_ids
         }
 
@@ -471,7 +512,7 @@ class ClusterAnalysisResult:
                 continue
 
             for event in compare_domains(
-                cluster_domains, transcript_exons, self.canonical_transcript_id, transcript_id,
+                domain_lookup, transcript_exons, self.canonical_transcript_id, transcript_id,
                 canonical_junctions, junction_idxs, self.junctions,
             ):
                 self.add_event(**event)
@@ -549,6 +590,11 @@ class JunctionsAnalysis:
         from aleternative_splicing import get_exons_for_transcripts
 
         df_exons = get_exons_for_transcripts(self.con, transcript_ids)
+        exon_lookup = build_exon_lookup(df_exons)
+        domain_lookup = build_domain_lookup(df_domains)
+        transcripts_by_gene = {gid: g for gid, g in df_transcripts.groupby('gene_ensembl_id')}
+        empty_transcripts = df_transcripts.iloc[0:0]
+
         group_columns = ['specie', 'cluster_name'] if 'specie' in df_junctions_n.columns else ['cluster_name']
         cluster_groups = df_junctions_n.groupby(group_columns)
         total = len(cluster_groups)
@@ -571,8 +617,8 @@ class JunctionsAnalysis:
             cluster_result.junctions = list(zip(cluster_df['start_position'], cluster_df['end_position']))
             results.append(cluster_result)
 
-            df_gene_transcripts = df_transcripts[df_transcripts.gene_ensembl_id == gene_ensembl_id]
-            cluster_result.analyze_junction(df_gene_transcripts, canonical_transcript_ids, df_exons, df_domains)
+            df_gene_transcripts = transcripts_by_gene.get(gene_ensembl_id, empty_transcripts)
+            cluster_result.analyze_junction(df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup)
 
         df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
                               'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
