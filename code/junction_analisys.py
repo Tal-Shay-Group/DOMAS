@@ -17,15 +17,22 @@ DOMAIN_NAME_PREFIX_PRIORITY = ['IPR', 'pfam', 'cd', 'smart', 'tigr', 'CDD']
 # Phase 1: junction <-> exon matching
 # ---------------------------------------------------------------------------
 
-def find_matching_junction_indices(df_transcript_exons, junctions):
+def find_matching_junction_indices(df_transcript_exons, junctions, strand='+'):
     """
     Return the set of indices (into `junctions`) of junctions that match this
     transcript's exon structure.
 
     A junction (start_position, end_position) matches the transcript if there
     are two exons, adjacent in transcript order, such that one exon's
-    genomic_end_tx is within 1bp of the junction's start_position and the
-    other exon's genomic_start_tx is within 1bp of the junction's end_position.
+    genomic_end_tx is within 1bp of the junction's intron-left boundary and the
+    other exon's genomic_start_tx is within 1bp of the junction's intron-right
+    boundary.
+
+    On the positive strand the intron-left boundary is start_position and the
+    intron-right boundary is end_position.  On the negative strand the
+    transcript runs right-to-left in genomic coordinates, so the roles are
+    reversed: the intron-left boundary (in genomic terms) is end_position and
+    the intron-right boundary is start_position.
     """
     if df_transcript_exons.empty or not junctions:
         return set()
@@ -36,8 +43,13 @@ def find_matching_junction_indices(df_transcript_exons, junctions):
 
     matched = set()
     for idx, (start_position, end_position) in enumerate(junctions):
-        upstream_orders = exon_orders[np.abs(exon_ends - start_position) <= 1]
-        downstream_orders = exon_orders[np.abs(exon_starts - end_position) <= 1]
+        if strand == '-':
+            intron_left, intron_right = end_position, start_position
+        else:
+            intron_left, intron_right = start_position, end_position
+
+        upstream_orders = exon_orders[np.abs(exon_ends - intron_left) <= 1]
+        downstream_orders = exon_orders[np.abs(exon_starts - intron_right) <= 1]
         if len(upstream_orders) == 1 and len(downstream_orders) == 1:
             if abs(int(downstream_orders[0]) - int(upstream_orders[0])) == 1:
                 matched.add(idx)
@@ -343,7 +355,7 @@ def classify_domain_change(c_count, t_count, c_length, t_length):
     compared transcript) into one of the Phase 3 result categories.
     """
     if c_count == 0:
-        return 'new domain'
+        return 'added_domain'
     if t_count == 0:
         return 'dropped domain'
     if c_count == 1 and t_count == 1:
@@ -429,13 +441,14 @@ def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, tr
 
 
 class ClusterAnalysisResult:
-    def __init__(self, cluster_name, gene_ensembl_id, gene_symbol, chromosome=None, as_event_type=None, specie=None):
+    def __init__(self, cluster_name, gene_ensembl_id, gene_symbol, chromosome=None, as_event_type=None, specie=None, strand=None):
         self.cluster_name = cluster_name
         self.gene_ensembl_id = gene_ensembl_id
         self.gene_symbol = gene_symbol
         self.chromosome = chromosome
         self.as_event_type = as_event_type
         self.specie = specie
+        self.strand = strand
         self.canonical_transcript_id = None
         self.junctions = []
         self.events = []
@@ -492,7 +505,7 @@ class ClusterAnalysisResult:
         }
 
         transcript_junctions = {
-            transcript_id: find_matching_junction_indices(exons, self.junctions)
+            transcript_id: find_matching_junction_indices(exons, self.junctions, strand=self.strand or '+')
             for transcript_id, exons in transcript_exons.items()
         }
 
@@ -530,11 +543,15 @@ class ClusterAnalysisResult:
                 self.add_event('no_unique_junctions', transcript_id=transcript_id)
                 continue
 
-            for event in compare_domains(
+            events = list(compare_domains(
                 domain_lookup, transcript_exons, self.canonical_transcript_id, transcript_id,
                 canonical_junctions, junction_idxs, self.junctions,
-            ):
-                self.add_event(**event)
+            ))
+            if events:
+                for event in events:
+                    self.add_event(**event)
+            else:
+                self.add_event('no_domains_in_region', transcript_id=transcript_id)
 
     def print_results(self, file_name='analysis_results.txt'):
         with open(file_name, 'a') as f:
@@ -596,6 +613,13 @@ class JunctionsAnalysis:
             df_junctions_n = df_junctions
 
         gene_ids = df_junctions_n.gene_ensembl_id.unique().tolist()
+        placeholders = ','.join('?' * len(gene_ids))
+        df_genes = pd.read_sql_query(
+            f"SELECT gene_ensembl_id, strand FROM Genes WHERE gene_ensembl_id IN ({placeholders})",
+            self.con, params=gene_ids
+        )
+        gene_strand = dict(zip(df_genes['gene_ensembl_id'], df_genes['strand']))
+
         df_transcripts = domas.get_genes_df_transcripts(self.con, gene_ids)
         invalid_ids = {'', 'nan', 'None'}
         all_transcript_ids = df_transcripts.transcript_ensembl_id.fillna(df_transcripts.transcript_refseq_id)
@@ -604,8 +628,8 @@ class JunctionsAnalysis:
         transcript_ids = set(all_transcript_ids[valid_mask])
         df_domains = domas.get_transcript_domains_db(self.con, transcript_ids)
 
-        # Local import avoids circular imports with aleternative_splicing module.
-        from aleternative_splicing import get_exons_for_transcripts
+        # Local import avoids circular imports with alternative_splicing module.
+        from alternative_splicing import get_exons_for_transcripts
 
         df_exons = get_exons_for_transcripts(self.con, transcript_ids)
         exon_lookup = build_exon_lookup(df_exons)
@@ -631,7 +655,8 @@ class JunctionsAnalysis:
             gene_symbol = cluster_df.gene_symbol.iat[0]
             event_type = cluster_df.event_type.iat[0] if 'event_type' in cluster_df.columns else None
             specie = cluster_df.specie.iat[0] if 'specie' in cluster_df.columns else None
-            cluster_result = ClusterAnalysisResult(cluster_name, gene_ensembl_id, gene_symbol, as_event_type=event_type, specie=specie)
+            strand = gene_strand.get(gene_ensembl_id)
+            cluster_result = ClusterAnalysisResult(cluster_name, gene_ensembl_id, gene_symbol, as_event_type=event_type, specie=specie, strand=strand)
             cluster_result.junctions = list(zip(cluster_df['start_position'], cluster_df['end_position']))
             results.append(cluster_result)
 

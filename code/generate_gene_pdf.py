@@ -582,12 +582,11 @@ class GeneVisualization:
         table = ax.table(
             cellText=display_df.astype(str).values,
             colLabels=column_names,
-            loc='center',
             cellLoc='center',
+            bbox=[0, 0, 1, 1],
         )
         table.auto_set_font_size(False)
         table.set_fontsize(7)
-        table.scale(1, 1.15)
 
         width_map = {
             'idx': 0.035,
@@ -620,12 +619,11 @@ class GeneVisualization:
         table = ax.table(
             cellText=table_df.astype(str).values,
             colLabels=column_names,
-            loc='center',
             cellLoc='center',
+            bbox=[0, 0, 1, 1],
         )
         table.auto_set_font_size(False)
         table.set_fontsize(7)
-        table.scale(1, 1.15)
 
         for (row, col), cell in table.get_celld().items():
             cell.set_linewidth(0.6)
@@ -755,8 +753,11 @@ class GeneVisualization:
                 transcript_results = []
                 for transcript in page_transcripts:
                     transcript_id = transcript['info']['transcript_ensembl_id']
+                    transcript_refseq_id = transcript['info'].get('transcript_refseq_id')
                     if df_results is not None and 'transcript_id' in df_results.columns:
-                        rows = df_results[df_results['transcript_id'] == transcript_id]
+                        ids_to_match = [i for i in [transcript_id, transcript_refseq_id]
+                                        if i is not None and not pd.isna(i)]
+                        rows = df_results[df_results['transcript_id'].isin(ids_to_match)]
                     else:
                         rows = None
                     transcript_results.append(rows)
@@ -769,13 +770,13 @@ class GeneVisualization:
                 #   rows.. : n * (results table row + exon/genomic row + protein/domain row + label row)
                 height_ratios = [0.55]
                 if show_junction_table:
-                    height_ratios.append(1.10)
+                    height_ratios.append(1.50)
                 scale_row = len(height_ratios)
                 height_ratios += [0.75, 0.28]
                 for rows in transcript_results:
                     num_rows = len(rows) if rows is not None else 0
-                    results_height = 0.3 if num_rows == 0 else 0.35 + 0.25 * num_rows
-                    height_ratios += [results_height, 0.7, 1.2, 0.03]
+                    results_height = 0.18 if num_rows == 0 else 0.42 + 0.30 * num_rows
+                    height_ratios += [results_height, 0.7, 1.2, 0.18]
                 transcript_start_row = scale_row + 2
                 total_rows = len(height_ratios)
 
@@ -785,7 +786,7 @@ class GeneVisualization:
                     figure=fig,
                     height_ratios=height_ratios,
                     width_ratios=[1.2, 1],
-                    hspace=0.16,
+                    hspace=0.30,
                     wspace=0.35,
                     left=0.08,
                     right=0.95,
@@ -1107,7 +1108,7 @@ class GeneVisualization:
     def _draw_protein_view(self, ax, transcript, max_protein_length):
         """Draw protein/domain view on the right (protein above domains)."""
         ax.set_xlim(0, max_protein_length)
-        ax.set_ylim(0, 1)
+        ax.set_ylim(-0.35, 1)
         # Keep labels/borders as vector, but rasterize dense protein/domain fills.
         ax.set_rasterization_zorder(2.5)
         ax.set_yticks([])
@@ -1319,7 +1320,7 @@ class GeneVisualization:
                 zorder=5,
                 rotation=32,
                 color='black',
-                clip_on=False,
+                clip_on=True,
             )
 
 
