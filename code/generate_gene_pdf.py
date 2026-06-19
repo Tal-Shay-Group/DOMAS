@@ -483,22 +483,6 @@ class GeneVisualization:
         normalized['end'] = pd.to_numeric(normalized['end'], errors='coerce')
         return normalized
 
-    def _junction_matches_boundaries(self, junction_a, junction_b, exon_starts, exon_ends):
-        """Return True when both junction breakpoints hit exon boundaries."""
-        exon_boundaries = list(exon_starts) + list(exon_ends)
-        a_hits_boundary = any(abs(junction_a - boundary) <= 1 for boundary in exon_boundaries)
-        b_hits_boundary = any(abs(junction_b - boundary) <= 1 for boundary in exon_boundaries)
-        return a_hits_boundary and b_hits_boundary
-
-    def _junction_has_no_middle_exon(self, junction_a, junction_b, exon_ranges):
-        """Return True when no complete exon is contained between the two breakpoints."""
-        left = min(junction_a, junction_b)
-        right = max(junction_a, junction_b)
-        return not any(
-            exon_start > left and exon_end < right
-            for exon_start, exon_end in exon_ranges
-        )
-
     def _is_transcript_canonical(self, transcript):
         """Check if the transcript is marked canonical."""
         canonical_val = transcript['info'].get('canonical')
@@ -507,29 +491,42 @@ class GeneVisualization:
         return int(canonical_val) != 0
 
     def _filter_junctions_for_transcript(self, transcript, junction_items):
-        """Keep only junctions that are truly supported by this transcript."""
+        """Keep only junctions that are truly supported by this transcript.
+
+        Uses the same adjacency-aware logic as find_matching_junction_indices in
+        junction_analisys.py: intron_left must hit an exon END, intron_right must
+        hit an exon START, and those two exons must be directly adjacent in the
+        transcript (order_in_transcript differing by exactly 1).  This ensures the
+        visualization and the analysis agree on which junctions are mapped.
+        """
         if not junction_items:
             return []
 
-        exon_ranges = []
-        exon_starts = set()
-        exon_ends = set()
-        for _, exon in transcript['exons'].iterrows():
-            exon_start = int(min(exon['genomic_start_tx'], exon['genomic_end_tx']))
-            exon_end = int(max(exon['genomic_start_tx'], exon['genomic_end_tx']))
-            exon_ranges.append((exon_start, exon_end))
-            exon_starts.add(exon_start)
-            exon_ends.add(exon_end)
+        df_exons = transcript['exons']
+        exon_ends = df_exons['genomic_end_tx'].to_numpy()
+        exon_starts = df_exons['genomic_start_tx'].to_numpy()
+        exon_orders = df_exons['order_in_transcript'].to_numpy()
+        strand = '-' if self._is_negative_strand() else '+'
 
         relevant = []
         for junction in junction_items:
             if pd.isna(junction.get('start')) or pd.isna(junction.get('end')):
                 continue
-            j_start = int(junction['start'])
-            j_end = int(junction['end'])
+            start_pos = int(junction['start'])
+            end_pos = int(junction['end'])
+
+            if strand == '-':
+                intron_left, intron_right = end_pos, start_pos
+                upstream = exon_orders[np.abs(exon_starts - intron_left) <= 1]
+                downstream = exon_orders[np.abs(exon_ends - intron_right) <= 1]
+            else:
+                intron_left, intron_right = start_pos, end_pos
+                upstream = exon_orders[np.abs(exon_ends - intron_left) <= 1]
+                downstream = exon_orders[np.abs(exon_starts - intron_right) <= 1]
             if (
-                self._junction_matches_boundaries(j_start, j_end, exon_starts, exon_ends)
-                and self._junction_has_no_middle_exon(j_start, j_end, exon_ranges)
+                len(upstream) == 1
+                and len(downstream) == 1
+                and abs(int(downstream[0]) - int(upstream[0])) == 1
             ):
                 relevant.append(junction)
         return relevant
@@ -744,6 +741,22 @@ class GeneVisualization:
                  for i in range(0, num_transcripts, transcripts_per_page)]
         num_pages = len(pages)
 
+        # Cluster-level events (not tied to a specific transcript) shown once above canonical
+        _CLUSTER_EVENTS = {'junction_not_mapped', 'no_canonical_junctions',
+                           'no_canonical_transcript', 'only_one_transcript'}
+        cluster_events_df = None
+        if df_results is not None and 'event' in df_results.columns:
+            _mask = df_results['event'].isin(_CLUSTER_EVENTS)
+            if _mask.any():
+                _ce = df_results[_mask][['event', 'transcript_id']].copy()
+                _ce['transcript_id'] = _ce.apply(
+                    lambda r: f"junction #{int(r['transcript_id'])}"
+                              if r['event'] == 'junction_not_mapped' and pd.notna(r['transcript_id'])
+                              else '',
+                    axis=1,
+                )
+                cluster_events_df = _ce.rename(columns={'transcript_id': 'details'})
+
         with PdfPages(output_file) as pdf:
             for page_idx, page_transcripts in enumerate(pages):
                 n = len(page_transcripts)
@@ -767,17 +780,27 @@ class GeneVisualization:
                 #   row 1  : optional junction table on first page
                 #   next   : axis scales
                 #   next   : spacer
+                #   next   : optional cluster-level events table (page 1 only)
+                #   next   : spacer after cluster table (page 1 only)
                 #   rows.. : n * (results table row + exon/genomic row + protein/domain row + label row)
+                show_cluster_events = page_idx == 0 and cluster_events_df is not None
                 height_ratios = [0.55]
                 if show_junction_table:
                     height_ratios.append(1.50)
                 scale_row = len(height_ratios)
                 height_ratios += [0.75, 0.28]
+                if show_cluster_events:
+                    _num_ce = len(cluster_events_df)
+                    _ce_height = 0.42 + 0.30 * _num_ce
+                    cluster_events_row = scale_row + 2
+                    height_ratios += [_ce_height, 0.20]
+                    transcript_start_row = cluster_events_row + 2
+                else:
+                    transcript_start_row = scale_row + 2
                 for rows in transcript_results:
                     num_rows = len(rows) if rows is not None else 0
                     results_height = 0.18 if num_rows == 0 else 0.42 + 0.30 * num_rows
                     height_ratios += [results_height, 0.7, 1.2, 0.18]
-                transcript_start_row = scale_row + 2
                 total_rows = len(height_ratios)
 
                 fig = plt.figure(figsize=(11, 8.5))
@@ -806,6 +829,10 @@ class GeneVisualization:
                 if show_junction_table:
                     ax_table = fig.add_subplot(gs[1, :])
                     self._draw_junction_table(ax_table, junction_display_df)
+
+                if show_cluster_events:
+                    ax_cluster = fig.add_subplot(gs[cluster_events_row, :])
+                    self._draw_results_table(ax_cluster, cluster_events_df)
 
                 # ── axis scale row (repeated on every page) ────────────────
                 self._draw_genomic_scale(fig, gs[scale_row, 0], genomic_start, genomic_end)

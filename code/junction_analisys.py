@@ -44,12 +44,19 @@ def find_matching_junction_indices(df_transcript_exons, junctions, strand='+'):
     matched = set()
     for idx, (start_position, end_position) in enumerate(junctions):
         if strand == '-':
+            # Negative strand: transcript runs from high to low genomic coords.
+            # DB always stores genomic_start_tx < genomic_end_tx, so:
+            #   - the upstream exon's intron boundary is its genomic_start_tx (lower bound of the higher exon)
+            #   - the downstream exon's intron boundary is its genomic_end_tx (upper bound of the lower exon)
+            # Junction end_position is near the upstream exon's genomic_start_tx.
+            # Junction start_position is near the downstream exon's genomic_end_tx.
             intron_left, intron_right = end_position, start_position
+            upstream_orders = exon_orders[np.abs(exon_starts - intron_left) <= 1]
+            downstream_orders = exon_orders[np.abs(exon_ends - intron_right) <= 1]
         else:
             intron_left, intron_right = start_position, end_position
-
-        upstream_orders = exon_orders[np.abs(exon_ends - intron_left) <= 1]
-        downstream_orders = exon_orders[np.abs(exon_starts - intron_right) <= 1]
+            upstream_orders = exon_orders[np.abs(exon_ends - intron_left) <= 1]
+            downstream_orders = exon_orders[np.abs(exon_starts - intron_right) <= 1]
         if len(upstream_orders) == 1 and len(downstream_orders) == 1:
             if abs(int(downstream_orders[0]) - int(upstream_orders[0])) == 1:
                 matched.add(idx)

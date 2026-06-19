@@ -874,7 +874,8 @@ if __name__ == "__main__":
     #input_file = 'clusters_sum_table_H_vs_M_HN6.xlsx'
     #input_file = '/gpfs0/tals/users/melchio/clusters_sum_table_HN6.xlsx'
     #input_file = '/gpfs0/tals/users/melchio/short_H_vs_M_HN6.xlsx'
-    input_file = 'short_H_vs_M_HN6.xlsx'
+    #input_file = 'short_H_vs_M_HN6.xlsx'
+    input_file = "hadas_prefered.xlsx"
     print_genes = ['PFDN5', 'CD6','HNRNPH3','USP16', 'DOCK8', 'HNRNPK']
     output_file = 'clusters_with_3_transcripts.csv'
     #dochap_path = '/gpfs0/tals/projects/Analysis/ariel/DoChap/DoChaP-db/DB_merged.sqlite'
