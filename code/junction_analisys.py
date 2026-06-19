@@ -564,7 +564,7 @@ class JunctionsAnalysis:
         self.gene_visualization_cls = gene_visualization_cls
 
     def analyze_junctions(self, junctions_csv='as_events_junctions.csv', output_path='as_events_junctions_analysis.csv', df_junctions=None,
-                          hadas_format=False, n=0, create_pdf=True):
+                          hadas_format=False, n=0, create_pdf=True, print_genes=None):
         if df_junctions is None and junctions_csv is None:
             raise ValueError("Either df_junctions or junctions_csv must be provided.")
         elif df_junctions is not None and junctions_csv is not None:
@@ -640,40 +640,63 @@ class JunctionsAnalysis:
 
         df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
                               'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
-        if results:
+        result_frames = []
+        for cluster_result in results:
+            df_cluster_results = cluster_result.get_results_df()
+            if df_cluster_results.empty:
+                continue
+            result_frames.append(
+                df_cluster_results
+                .rename(columns={'event': 'event_type'})
+                .assign(
+                    cluster=cluster_result.cluster_name,
+                    gene_symbol=cluster_result.gene_symbol,
+                    canonical_transcript_id=cluster_result.canonical_transcript_id,
+                    specie=cluster_result.specie,
+                )
+            )
+
+        if result_frames:
             df_all_results = pd.concat(
-                (
-                    cluster_result.get_results_df()
-                    .rename(columns={'event': 'event_type'})
-                    .assign(
-                        cluster=cluster_result.cluster_name,
-                        gene_symbol=cluster_result.gene_symbol,
-                        canonical_transcript_id=cluster_result.canonical_transcript_id,
-                        specie=cluster_result.specie,
-                    )
-                    for cluster_result in results
-                ),
+                result_frames,
                 ignore_index=True,
+                sort=False,
             ).reindex(columns=df_results_columns)
         else:
             df_all_results = pd.DataFrame(columns=df_results_columns)
         df_all_results.to_csv(output_path, index=False)
 
         if create_pdf:
+            print_gene_set = {gene.upper() for gene in print_genes} if print_genes is not None else None
+
+            def _gene_symbol_key(value):
+                if isinstance(value, str):
+                    return value.upper()
+                return None
+
+            filtered_results = (
+                [cluster_result for cluster_result in results if _gene_symbol_key(cluster_result.gene_symbol) in print_gene_set]
+                if print_gene_set is not None
+                else results
+            )
             preloaded_gene_data = prepare_gene_data_bulk(
-                self.con, [cluster_result.gene_symbol for cluster_result in results]
+                self.con, [cluster_result.gene_ensembl_id for cluster_result in filtered_results if _gene_symbol_key(cluster_result.gene_symbol) is not None]
             )
 
             gene_visualizations = {}
             for count, cluster_result in enumerate(results, start=1):
                 try:
                     df_cluster_junctions = pd.DataFrame(cluster_result.junctions, columns=['start', 'end'])
-                    viz = gene_visualizations.get(cluster_result.gene_symbol)
+                    cluster_gene_key = _gene_symbol_key(cluster_result.gene_symbol)
+                    if print_gene_set is not None and cluster_gene_key not in print_gene_set:
+                        continue
+                    viz = gene_visualizations.get(cluster_result.gene_ensembl_id)
                     if viz is None:
                         gene_symbol = cluster_result.gene_symbol
-                        preloaded = preloaded_gene_data.get(gene_symbol.lower()) if isinstance(gene_symbol, str) else None
+                        gene_ensembl_id = cluster_result.gene_ensembl_id
+                        preloaded = preloaded_gene_data.get(gene_ensembl_id) if isinstance(gene_ensembl_id, str) else None
                         viz = self.gene_visualization_cls(self.con, gene_symbol, preloaded=preloaded)
-                        gene_visualizations[gene_symbol] = viz
+                        gene_visualizations[gene_ensembl_id] = viz
                     # name should have event_type and specie if available, to distinguish different clusters of the same gene and across species
                     file_name = f'{cluster_result.gene_symbol}_{count}_junction_comparison.pdf'
                     if cluster_result.as_event_type is not None:

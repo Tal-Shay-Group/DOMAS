@@ -416,7 +416,7 @@ def hadas_read_input_file(con, input_path):
         return merged_df
     except Exception as e:
         print(f"Error reading input file: {e}")
-        return None
+        raise(e)
 
 def main():
     pd.set_option('display.max_colwidth', None)

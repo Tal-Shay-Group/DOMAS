@@ -27,32 +27,43 @@ DOMAIN_LABEL_MAX_LEN = 14
 PDF_RASTER_DPI = 110
 DOMAIN_STRIP_COUNT = 80
 
+SPECIES_ALIASES = {
+    'h_sapiens': 'H_sapiens',
+    'human': 'H_sapiens',
+    'm_musculus': 'M_musculus',
+    'mouse': 'M_musculus',
+    'Frog': 'X_tropicalis',
+    'x_tropicalis': 'X_tropicalis',
+    'zebrafish': 'D_rerio',
+    'd_rerio': 'D_rerio',
+    'rat': 'R_norvegicus',
+    'r_norvegicus': 'R_norvegicus',   
+}
 
-def prepare_gene_data_bulk(conn, gene_symbols):
+
+def prepare_gene_data_bulk(conn, gene_ensembl_ids):
     """
     Bulk-load gene/transcript/exon/protein/domain data for many genes at once.
 
-    Returns a dict keyed by lowercased gene symbol, where each value is a dict
+    Returns a dict keyed by lowercased gene ensembl id, where each value is a dict
     with 'gene_data' (a Series, as `df_gene.iloc[0]`) and 'transcripts' (a list
     of {'info', 'exons', 'domains'} dicts), suitable to pass as `preloaded` to
     `GeneVisualization`. Genes not found in the database are simply absent from
     the result.
     """
-    unique_symbols = list(dict.fromkeys(s for s in gene_symbols if isinstance(s, str) and s))
-    if not unique_symbols:
+    unique_ids = list(dict.fromkeys(s for s in gene_ensembl_ids if isinstance(s, str) and s))
+    if not unique_ids:
         return {}
 
-    placeholders = ','.join(['?'] * len(unique_symbols))
+    placeholders = ','.join(['?'] * len(unique_ids))
     df_genes = pd.read_sql_query(
-        f"SELECT * FROM Genes WHERE gene_symbol COLLATE NOCASE IN ({placeholders})",
-        conn, params=unique_symbols,
+        f"SELECT * FROM Genes WHERE gene_ensembl_id COLLATE NOCASE IN ({placeholders})",
+        conn, params=unique_ids,
     )
     if len(df_genes) == 0:
         return {}
 
-    df_genes = df_genes.assign(_key=df_genes['gene_symbol'].str.lower())
-    df_genes = df_genes.drop_duplicates(subset='_key', keep='first')
-
+    df_genes = df_genes.drop_duplicates(subset='gene_ensembl_id', keep='first')
     gene_ensembl_ids = df_genes['gene_ensembl_id'].tolist()
     ge_placeholders = ','.join(['?'] * len(gene_ensembl_ids))
     df_transcripts = pd.read_sql_query(
@@ -128,7 +139,7 @@ def prepare_gene_data_bulk(conn, gene_symbols):
                 'exons': get_exons(tid),
                 'domains': get_domains(tid),
             })
-        result[gene_row['_key']] = {'gene_data': gene_row, 'transcripts': transcripts}
+        result[gene_row['gene_ensembl_id']] = {'gene_data': gene_row, 'transcripts': transcripts}
 
     return result
 
@@ -158,7 +169,29 @@ class GeneVisualization:
         self.colors = {}
         self.color_index = 0
         self._preloaded = preloaded
+        self.species_hint = None
 
+    def _normalize_species_value(self, species_value):
+        """Normalize common species aliases to the values used in the DB."""
+        if species_value is None or pd.isna(species_value):
+            return None
+        text = str(species_value).strip()
+        if not text:
+            return None
+        if text in SPECIES_ALIASES:
+            return SPECIES_ALIASES[text]
+        return text
+
+    def _infer_species_hint_from_dataframe(self, df_junction):
+        """Read species hints from a junction DataFrame when available."""
+        if df_junction is None or len(df_junction) == 0:
+            return 'H_sapiens'  # Default to human when no data is available
+        if 'specie' not in df_junction.columns:
+            return 'H_sapiens'
+        value = df_junction['specie'].dropna().unique()[0]
+        normalized_value = self._normalize_species_value(value)
+        return normalized_value   
+            
     def load_gene_data(self):
         """Load gene data, from preloaded data if available, otherwise from the database."""
         if self._preloaded is not None:
@@ -168,11 +201,19 @@ class GeneVisualization:
             return
 
         # Get gene info
-        gene_query = """
+        base_query = """
             SELECT * FROM Genes
             WHERE gene_symbol = ? COLLATE NOCASE
         """
-        df_gene = pd.read_sql_query(gene_query, self.conn, params=[self.gene_name])
+        params = [self.gene_name]
+        if self.species_hint is not None:
+            query = base_query + " AND specie = ?"
+            params.append(self.species_hint)
+            df_gene = pd.read_sql_query(query, self.conn, params=params)
+            if len(df_gene) == 0:
+                df_gene = pd.read_sql_query(base_query, self.conn, params=[self.gene_name])
+        else:
+            df_gene = pd.read_sql_query(base_query, self.conn, params=[self.gene_name])
 
         if len(df_gene) == 0:
             raise ValueError(f"Gene '{self.gene_name}' not found in database")
@@ -425,17 +466,49 @@ class GeneVisualization:
         ]
         return display_df
 
-    def _get_matching_junctions(self, transcript, df_junction):
-        """Return matched junction rows with coordinates, idx, and display color.
-
-        Draw criteria per transcript:
-          1) Breakpoints sit at exon boundaries: left breakpoint at an exon end and right
-              breakpoint at an exon start, with no fully contained exon in between.
-        2) At least one breakpoint is inside an exon (not at exon boundary).
-        """
+    def _normalize_junction_df(self, df_junction):
+        """Return a junction DataFrame with normalized start/end columns."""
         if df_junction is None or len(df_junction) == 0:
-            return []
-        if 'start' not in df_junction.columns or 'end' not in df_junction.columns:
+            return None
+
+        normalized = df_junction.copy()
+        if 'start' not in normalized.columns and 'start_position' in normalized.columns:
+            normalized['start'] = normalized['start_position']
+        if 'end' not in normalized.columns and 'end_position' in normalized.columns:
+            normalized['end'] = normalized['end_position']
+        if 'start' not in normalized.columns or 'end' not in normalized.columns:
+            return None
+
+        normalized['start'] = pd.to_numeric(normalized['start'], errors='coerce')
+        normalized['end'] = pd.to_numeric(normalized['end'], errors='coerce')
+        return normalized
+
+    def _junction_matches_boundaries(self, junction_a, junction_b, exon_starts, exon_ends):
+        """Return True when both junction breakpoints hit exon boundaries."""
+        exon_boundaries = list(exon_starts) + list(exon_ends)
+        a_hits_boundary = any(abs(junction_a - boundary) <= 1 for boundary in exon_boundaries)
+        b_hits_boundary = any(abs(junction_b - boundary) <= 1 for boundary in exon_boundaries)
+        return a_hits_boundary and b_hits_boundary
+
+    def _junction_has_no_middle_exon(self, junction_a, junction_b, exon_ranges):
+        """Return True when no complete exon is contained between the two breakpoints."""
+        left = min(junction_a, junction_b)
+        right = max(junction_a, junction_b)
+        return not any(
+            exon_start > left and exon_end < right
+            for exon_start, exon_end in exon_ranges
+        )
+
+    def _is_transcript_canonical(self, transcript):
+        """Check if the transcript is marked canonical."""
+        canonical_val = transcript['info'].get('canonical')
+        if canonical_val is None or pd.isna(canonical_val):
+            return False
+        return int(canonical_val) != 0
+
+    def _filter_junctions_for_transcript(self, transcript, junction_items):
+        """Keep only junctions that are truly supported by this transcript."""
+        if not junction_items:
             return []
 
         exon_ranges = []
@@ -448,45 +521,37 @@ class GeneVisualization:
             exon_starts.add(exon_start)
             exon_ends.add(exon_end)
 
-        matches = []
-        for _, junction in df_junction.iterrows():
+        relevant = []
+        for junction in junction_items:
+            if pd.isna(junction.get('start')) or pd.isna(junction.get('end')):
+                continue
+            j_start = int(junction['start'])
+            j_end = int(junction['end'])
+            if (
+                self._junction_matches_boundaries(j_start, j_end, exon_starts, exon_ends)
+                and self._junction_has_no_middle_exon(j_start, j_end, exon_ranges)
+            ):
+                relevant.append(junction)
+        return relevant
+
+    def _get_matching_junctions(self, transcript, df_junction):
+        """Return only transcript-relevant junctions for display."""
+        normalized = self._normalize_junction_df(df_junction)
+        if normalized is None or len(normalized) == 0:
+            return []
+
+        items = []
+        for _, junction in normalized.iterrows():
             if pd.isna(junction['start']) or pd.isna(junction['end']):
                 continue
-            start = int(junction['start'])
-            end = int(junction['end'])
+            items.append({
+                'start': int(junction['start']),
+                'end': int(junction['end']),
+                'idx': int(junction['idx']) if 'idx' in junction and pd.notna(junction['idx']) else None,
+                'color': junction['junction_color'] if 'junction_color' in junction else 'red',
+            })
 
-            left = min(start, end)
-            right = max(start, end)
-
-            # Rule 1: boundary pair with zero complete exon(s) contained between breakpoints.
-            left_is_exon_end = left in exon_ends
-            right_is_exon_start = right in exon_starts
-            boundary_pair = left_is_exon_end and right_is_exon_start
-            contains_complete_exon = any(
-                exon_start > left and exon_end < right
-                for exon_start, exon_end in exon_ranges
-            )
-            criterion_boundary = boundary_pair and not contains_complete_exon
-
-            # Rule 2: either breakpoint is strictly inside any exon (not first/last base).
-            left_inside_exon = any(
-                exon_start < left < exon_end for exon_start, exon_end in exon_ranges
-            )
-            right_inside_exon = any(
-                exon_start < right < exon_end for exon_start, exon_end in exon_ranges
-            )
-            criterion_inside_exon = left_inside_exon or right_inside_exon
-
-            if criterion_boundary or criterion_inside_exon:
-                matches.append({
-                    'start': start,
-                    'end': end,
-                    'idx': int(junction['idx']) if 'idx' in junction and pd.notna(junction['idx']) else None,
-                    'color': junction['junction_color'] if 'junction_color' in junction else 'red',
-                })
-
-        matches.sort(key=lambda item: (item['start'], item['end'], item['idx'] if item['idx'] is not None else 0))
-        return matches
+        return self._filter_junctions_for_transcript(transcript, items)
 
     def _draw_junction_table(self, ax, df_junction):
         """Draw a compact first-page table for provided junction metadata."""
@@ -579,13 +644,18 @@ class GeneVisualization:
             left = min(junction['start'], junction['end'])
             right = max(junction['start'], junction['end'])
             junction_top = min(0.95, baseline_top + 0.10 + index * 0.08)
-            color = junction['color']
-            ax.plot([left, left], [baseline_top, junction_top], color=color, linewidth=1.4, zorder=5)
-            ax.plot([right, right], [baseline_top, junction_top], color=color, linewidth=1.4, zorder=5)
-            ax.plot([left, right], [junction_top, junction_top], color=color, linewidth=1.4, zorder=5)
+            color = junction.get('color', 'red')
+            linestyle = junction.get('linestyle', 'solid')
+            ax.plot([left, left], [baseline_top, junction_top], color=color, linewidth=1.4,
+                    linestyle=linestyle, zorder=5)
+            ax.plot([right, right], [baseline_top, junction_top], color=color, linewidth=1.4,
+                    linestyle=linestyle, zorder=5)
+            ax.plot([left, right], [junction_top, junction_top], color=color, linewidth=1.4,
+                    linestyle=linestyle, zorder=5)
     
     def create_pdf(self, output_file='gene_visualization.pdf', transcripts_per_page=4,
-                   protein_only=False, domains_only=False, df_junction=None, df_results=None):
+                   protein_only=False, domains_only=False, df_junction=None,
+                   df_results=None, show_canonical_non_relevant_junctions=True):
         """
         Create PDF visualization of the gene, one page per transcripts_per_page transcripts.
         Each page has its own axis scales at the top so they never overlap with transcript rows.
@@ -604,8 +674,16 @@ class GeneVisualization:
             Optional junction metadata table with at least `start` and `end` columns.
         df_results : pandas.DataFrame | None
             Optional domain comparison results table, displayed on the first page.
+        show_canonical_non_relevant_junctions : bool
+            If True, the canonical transcript shows all junctions with dashed lines
+            for those that are not relevant to that transcript.
         """
         from matplotlib.backends.backend_pdf import PdfPages
+
+        if df_junction is not None and len(df_junction) > 0:
+            inferred_species = self._infer_species_hint_from_dataframe(df_junction)
+            if inferred_species is not None:
+                self.species_hint = inferred_species
 
         if self.gene_data is None:
             self.load_gene_data()
@@ -740,9 +818,14 @@ class GeneVisualization:
                     self._draw_results_table(ax_results, transcript_results[i])
 
                     ax_genomic = fig.add_subplot(gs[row + 1:row + 3, 0])
-                    self._draw_genomic_view(ax_genomic, transcript,
-                                            genomic_start, genomic_end,
-                                            df_junction=junction_display_df)
+                    self._draw_genomic_view(
+                        ax_genomic,
+                        transcript,
+                        genomic_start,
+                        genomic_end,
+                        df_junction=junction_display_df,
+                        show_canonical_non_relevant_junctions=show_canonical_non_relevant_junctions,
+                    )
 
                     ax_protein = fig.add_subplot(gs[row + 1:row + 3, 1])
                     self._draw_protein_view(ax_protein, transcript, max_protein_length)
@@ -818,7 +901,8 @@ class GeneVisualization:
         ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=6, prune='both'))
         ax.tick_params(axis='x', labelsize=6.5, rotation=40)
     
-    def _draw_genomic_view(self, ax, transcript, genomic_start, genomic_end, df_junction=None):
+    def _draw_genomic_view(self, ax, transcript, genomic_start, genomic_end,
+                          df_junction=None, show_canonical_non_relevant_junctions=False):
         """Draw genomic view with exons."""
         left = min(genomic_start, genomic_end)
         right = max(genomic_start, genomic_end)
@@ -967,8 +1051,31 @@ class GeneVisualization:
             )
             ax.add_patch(coding_rect)
 
-        matched_junctions = self._get_matching_junctions(transcript, df_junction)
-        self._draw_genomic_junctions(ax, matched_junctions, exon_y, exon_height)
+        normalized = self._normalize_junction_df(df_junction)
+        if normalized is None or len(normalized) == 0:
+            return
+
+        if self._is_transcript_canonical(transcript) and show_canonical_non_relevant_junctions:
+            all_junctions = []
+            for _, junction in normalized.iterrows():
+                if pd.isna(junction['start']) or pd.isna(junction['end']):
+                    continue
+                all_junctions.append({
+                    'start': int(junction['start']),
+                    'end': int(junction['end']),
+                    'idx': int(junction['idx']) if 'idx' in junction and pd.notna(junction['idx']) else None,
+                    'color': junction['junction_color'] if 'junction_color' in junction else 'red',
+                    'linestyle': 'dashed',
+                })
+            relevant_junctions = self._filter_junctions_for_transcript(transcript, all_junctions)
+            relevant_ids = {(item['start'], item['end']) for item in relevant_junctions}
+            for item in all_junctions:
+                if (item['start'], item['end']) in relevant_ids:
+                    item['linestyle'] = 'solid'
+            self._draw_genomic_junctions(ax, all_junctions, exon_y, exon_height)
+        else:
+            matched_junctions = self._get_matching_junctions(transcript, normalized)
+            self._draw_genomic_junctions(ax, matched_junctions, exon_y, exon_height)
 
     def _draw_transcript_view(self, ax, transcript, max_protein_length):
         """Draw the transcript/protein rectangle view above the domain view."""
