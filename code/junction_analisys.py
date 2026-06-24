@@ -4,6 +4,7 @@ import shutil
 import time
 import numpy as np
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from generate_gene_pdf import GeneVisualization, prepare_gene_data_bulk
 import domas
@@ -343,22 +344,26 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
     c_domains_round1 = _domains_in_aa_range(df_c_domains, c_min_aa, c_max_aa)
 
     # Round 2: widen the window to cover the domains found in round 1.
-    t_min_bp, t_max_bp = find_bp_range_for_domains(t_exons, t_domains_round1)
-    c_min_bp, c_max_bp = find_bp_range_for_domains(c_exons, c_domains_round1)
-    common_min_bp = _min_skip_none([min_bp, t_min_bp, c_min_bp])
-    common_max_bp = _max_skip_none([max_bp, t_max_bp, c_max_bp])
-
-    if common_min_bp is None or common_max_bp is None:
+    # Skip refinement if no domains found in round 1
+    if t_domains_round1.empty and c_domains_round1.empty:
         t_domains_round2, c_domains_round2 = t_domains_round1, c_domains_round1
     else:
-        t_first_exon2, t_last_exon2 = find_boundary_exons(t_exons, common_min_bp, common_max_bp)
-        c_first_exon2, c_last_exon2 = find_boundary_exons(c_exons, common_min_bp, common_max_bp)
+        t_min_bp, t_max_bp = find_bp_range_for_domains(t_exons, t_domains_round1)
+        c_min_bp, c_max_bp = find_bp_range_for_domains(c_exons, c_domains_round1)
+        common_min_bp = _min_skip_none([min_bp, t_min_bp, c_min_bp])
+        common_max_bp = _max_skip_none([max_bp, t_max_bp, c_max_bp])
 
-        t_min_aa2, t_max_aa2 = get_aa_range(t_first_exon2, t_last_exon2, common_min_bp, common_max_bp)
-        c_min_aa2, c_max_aa2 = get_aa_range(c_first_exon2, c_last_exon2, common_min_bp, common_max_bp)
+        if common_min_bp is None or common_max_bp is None:
+            t_domains_round2, c_domains_round2 = t_domains_round1, c_domains_round1
+        else:
+            t_first_exon2, t_last_exon2 = find_boundary_exons(t_exons, common_min_bp, common_max_bp)
+            c_first_exon2, c_last_exon2 = find_boundary_exons(c_exons, common_min_bp, common_max_bp)
 
-        t_domains_round2 = _domains_in_aa_range(df_t_domains, t_min_aa2, t_max_aa2)
-        c_domains_round2 = _domains_in_aa_range(df_c_domains, c_min_aa2, c_max_aa2)
+            t_min_aa2, t_max_aa2 = get_aa_range(t_first_exon2, t_last_exon2, common_min_bp, common_max_bp)
+            c_min_aa2, c_max_aa2 = get_aa_range(c_first_exon2, c_last_exon2, common_min_bp, common_max_bp)
+
+            t_domains_round2 = _domains_in_aa_range(df_t_domains, t_min_aa2, t_max_aa2)
+            c_domains_round2 = _domains_in_aa_range(df_c_domains, c_min_aa2, c_max_aa2)
 
     t_domains_round2['length'] = t_domains_round2['AA_end'] - t_domains_round2['AA_start'] + 1
     c_domains_round2['length'] = c_domains_round2['AA_end'] - c_domains_round2['AA_start'] + 1
@@ -654,6 +659,29 @@ class ClusterAnalysisResult:
         )
         
 
+def _analyze_single_cluster(cluster_tuple, exon_lookup, domain_lookup, canonical_transcript_ids,
+                           gene_strand, transcripts_by_gene, empty_transcripts):
+    """Analyze a single cluster (worker function for threading)."""
+    _, cluster_df = cluster_tuple
+
+    gene_ensembl_id = cluster_df.gene_ensembl_id.iat[0]
+    gene_symbol = cluster_df.gene_symbol.iat[0]
+    event_type = cluster_df.event_type.iat[0] if 'event_type' in cluster_df.columns else None
+    specie = cluster_df.specie.iat[0] if 'specie' in cluster_df.columns else None
+    strand = gene_strand.get(gene_ensembl_id)
+
+    cluster_result = ClusterAnalysisResult(
+        cluster_df.cluster_name.iat[0], gene_ensembl_id, gene_symbol,
+        as_event_type=event_type, specie=specie, strand=strand
+    )
+    cluster_result.junctions = list(zip(cluster_df['start_position'], cluster_df['end_position']))
+
+    df_gene_transcripts = transcripts_by_gene.get(gene_ensembl_id, empty_transcripts)
+    cluster_result.analyze_junction(df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup)
+
+    return cluster_result
+
+
 class JunctionsAnalysis:
     def __init__(self, con, logger_instance=None, gene_visualization_cls=GeneVisualization):
         self.con = con
@@ -661,7 +689,7 @@ class JunctionsAnalysis:
         self.gene_visualization_cls = gene_visualization_cls
 
     def analyze_junctions(self, junctions_csv='as_events_junctions.csv', output_path='as_events_junctions_analysis.csv', df_junctions=None,
-                          hadas_format=False, n=0, create_pdf=True, print_genes=None):
+                          hadas_format=False, n=0, create_pdf=True, print_genes=None, num_workers=4):
         if df_junctions is None and junctions_csv is None:
             raise ValueError("Either df_junctions or junctions_csv must be provided.")
         elif df_junctions is not None and junctions_csv is not None:
@@ -690,7 +718,7 @@ class JunctionsAnalysis:
             ids_n = df_t[df_t['gene_count'] == n].gene_GeneID_id.unique().tolist()
             df_junctions_n = df_junctions[df_junctions['gene_ensembl_id'].isin(ids_n)]
         else:
-            df_junctions_n = df_junctions
+            df_junctions_n = df_junctions.copy()
 
         gene_ids = df_junctions_n.gene_ensembl_id.unique().tolist()
         placeholders = ','.join('?' * len(gene_ids))
@@ -718,30 +746,45 @@ class JunctionsAnalysis:
         empty_transcripts = df_transcripts.iloc[0:0]
 
         group_columns = ['specie', 'cluster_name'] if 'specie' in df_junctions_n.columns else ['cluster_name']
-        cluster_groups = df_junctions_n.groupby(group_columns)
+        cluster_groups = list(df_junctions_n.groupby(group_columns))
         total = len(cluster_groups)
-        print(f"Analyzing {total} clusters...")
+        print(f"Analyzing {total} clusters with {num_workers} workers...")
         last_time = time.perf_counter()
 
         results = []
-        for count, (_, cluster_df) in enumerate(cluster_groups, start=1):
-            cluster_name = cluster_df.cluster_name.iat[0]
-            if count % 100 == 0:
-                cur_time = time.perf_counter()
-                self.logger.info(f"Analyzing cluster {count}/{total}: {cluster_name}. last 100 clusters duration: {cur_time - last_time:.2f}")
-                last_time = cur_time
+        processed_count = 0
 
-            gene_ensembl_id = cluster_df.gene_ensembl_id.iat[0]
-            gene_symbol = cluster_df.gene_symbol.iat[0]
-            event_type = cluster_df.event_type.iat[0] if 'event_type' in cluster_df.columns else None
-            specie = cluster_df.specie.iat[0] if 'specie' in cluster_df.columns else None
-            strand = gene_strand.get(gene_ensembl_id)
-            cluster_result = ClusterAnalysisResult(cluster_name, gene_ensembl_id, gene_symbol, as_event_type=event_type, specie=specie, strand=strand)
-            cluster_result.junctions = list(zip(cluster_df['start_position'], cluster_df['end_position']))
-            results.append(cluster_result)
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # Submit all tasks
+            futures = {
+                executor.submit(
+                    _analyze_single_cluster,
+                    cluster_tuple,
+                    exon_lookup,
+                    domain_lookup,
+                    canonical_transcript_ids,
+                    gene_strand,
+                    transcripts_by_gene,
+                    empty_transcripts
+                ): i
+                for i, cluster_tuple in enumerate(cluster_groups)
+            }
 
-            df_gene_transcripts = transcripts_by_gene.get(gene_ensembl_id, empty_transcripts)
-            cluster_result.analyze_junction(df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup)
+            # Collect results as they complete
+            for future in as_completed(futures):
+                processed_count += 1
+                cluster_result = future.result()
+                results.append(cluster_result)
+
+                # Progress logging every 10000 clusters
+                if processed_count % 10000 == 0:
+                    cur_time = time.perf_counter()
+                    self.logger.info(
+                        f"Analyzed {processed_count}/{total} clusters. "
+                        f"Last 10000 took {cur_time - last_time:.2f}s. "
+                        f"ETA: {(cur_time - last_time) * (total - processed_count) / 10000 / 60:.1f}min"
+                    )
+                    last_time = cur_time
 
         df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
                               'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
