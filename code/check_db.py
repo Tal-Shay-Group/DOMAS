@@ -1,6 +1,12 @@
 """
 DB sanity-check script for the DoChaP merged SQLite database.
 
+Canonical field values in Transcripts table:
+    0 = not canonical
+    1 = canonical from RefSeq only
+    2 = canonical from Ensembl only
+    3 = canonical from both RefSeq and Ensembl
+
 Two kinds of checks:
 
 1. `run_anomaly_checks(con)` - purely local SQL-based consistency checks
@@ -44,7 +50,11 @@ SPECIE_TO_ENSEMBL = {
 # ---------------------------------------------------------------------------
 
 def check_multiple_canonical_transcripts(con):
-    """Genes with more than one transcript flagged canonical."""
+    """Genes with more than one transcript flagged canonical.
+
+    Canonical field: 0=not canonical, 1=RefSeq only, 2=Ensembl only, 3=both.
+    canonical != 0 detects any canonical source.
+    """
     query = """
         SELECT gene_GeneID_id, gene_ensembl_id, COUNT(*) AS canonical_count
         FROM Transcripts
@@ -56,7 +66,11 @@ def check_multiple_canonical_transcripts(con):
 
 
 def check_genes_without_canonical_transcript(con):
-    """Genes that have transcripts but none flagged canonical."""
+    """Genes that have transcripts but none flagged canonical.
+
+    Canonical field: 0=not canonical, 1=RefSeq only, 2=Ensembl only, 3=both.
+    Detects genes where all transcripts have canonical=0 (no canonical source).
+    """
     query = """
         SELECT g.gene_GeneID_id, g.gene_ensembl_id, g.gene_symbol, g.specie
         FROM Genes g
@@ -173,6 +187,9 @@ def check_canonical_without_protein(con):
     """
     Canonical transcripts that declare a protein id but have no matching row
     in Proteins.
+
+    Canonical field: 0=not canonical, 1=RefSeq only, 2=Ensembl only, 3=both.
+    canonical != 0 selects any canonical transcript.
     """
     query = """
         SELECT t.gene_ensembl_id, t.transcript_ensembl_id, t.transcript_refseq_id,
@@ -284,6 +301,9 @@ def check_protein_length_vs_cds(con):
     For canonical transcripts, compare Proteins.length against the CDS
     length implied by Transcript_Exon.abs_end_CDS (max abs_end_CDS should be
     ~ protein_length * 3 + 3 for the stop codon).
+
+    Canonical field: 0=not canonical, 1=RefSeq only, 2=Ensembl only, 3=both.
+    canonical != 0 selects any canonical transcript.
     """
     query = """
         SELECT t.gene_ensembl_id, t.transcript_ensembl_id, t.transcript_refseq_id,
@@ -345,6 +365,9 @@ def check_proteins_without_domains(con):
     at all. Informational - a protein genuinely may have no annotated
     domains, but a large fraction of canonical proteins with zero domains
     can indicate a loading problem.
+
+    Canonical field: 0=not canonical, 1=RefSeq only, 2=Ensembl only, 3=both.
+    canonical != 0 selects any canonical transcript.
     """
     query = """
         SELECT p.protein_ensembl_id, p.protein_refseq_id,
@@ -533,6 +556,7 @@ def compare_random_genes_with_external_dbs(
         transcripts = pd.read_sql_query(
             "SELECT * FROM Transcripts WHERE gene_GeneID_id = ?", con, params=(gene.gene_GeneID_id,)
         )
+        # canonical field: 0=not canonical, 1=RefSeq only, 2=Ensembl only, 3=both
         canonical = transcripts[transcripts.canonical != 0]
         row['local_transcript_count'] = len(transcripts)
         row['local_canonical_count'] = len(canonical)

@@ -1,4 +1,6 @@
 import logging
+import os
+import shutil
 import time
 import numpy as np
 import pandas as pd
@@ -11,6 +13,77 @@ logger = logging.getLogger(__name__)
 
 DOMAIN_NAME_COLUMNS = ['interpro', 'pfam', 'cdd', 'smart', 'tigr', 'CDD_id']
 DOMAIN_NAME_PREFIX_PRIORITY = ['IPR', 'pfam', 'cd', 'smart', 'tigr', 'CDD']
+
+
+# ---------------------------------------------------------------------------
+# Utility functions
+# ---------------------------------------------------------------------------
+
+def write_results_to_csv_chunked(result_frames, df_results_columns, output_path, max_buffer_mb=100):
+    """
+    Write concatenated dataframes to CSV with memory-efficient chunking.
+
+    Buffers dataframes in memory up to max_buffer_mb, writes chunks to disk,
+    then combines them into the final CSV. This prevents memory issues with
+    large datasets (>5M rows).
+
+    Args:
+        result_frames: List of pandas DataFrames to concatenate
+        df_results_columns: List of column names for final output
+        output_path: Path where final CSV will be written
+        max_buffer_mb: Memory threshold (MB) for flushing chunks (default 100)
+
+    Returns:
+        pd.DataFrame: The combined results dataframe
+    """
+    output_dir = 'temp_chunks'
+    os.makedirs(output_dir, exist_ok=True)
+
+    batch_frames = []
+    bytes_in_buffer = 0
+    chunk_num = 0
+    total_rows = 0
+
+    for i, df_transformed in enumerate(result_frames):
+        # Add to buffer
+        batch_frames.append(df_transformed)
+        bytes_in_buffer += df_transformed.memory_usage(deep=True).sum()
+
+        # Write chunk when buffer reaches size limit or at end of loop
+        should_flush = (bytes_in_buffer >= max_buffer_mb * 1e6) or (i == len(result_frames) - 1)
+        if should_flush and batch_frames:
+            df_chunk = pd.concat(batch_frames, ignore_index=True)
+            df_chunk = df_chunk.reindex(columns=df_results_columns)
+
+            chunk_path = os.path.join(output_dir, f'chunk_{chunk_num:04d}.csv')
+            df_chunk.to_csv(chunk_path, index=False)
+
+            chunk_rows = len(df_chunk)
+            total_rows += chunk_rows
+            print(f"✓ Wrote chunk {chunk_num} ({bytes_in_buffer / 1e6:.1f}MB, {chunk_rows} rows)")
+
+            batch_frames = []
+            bytes_in_buffer = 0
+            chunk_num += 1
+
+    # Combine all chunks into final CSV
+    chunk_files = sorted([os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.csv')])
+
+    if chunk_files:
+        print(f"Combining {len(chunk_files)} chunks...")
+        df_all_results = pd.concat([pd.read_csv(f) for f in chunk_files], ignore_index=True)
+        df_all_results.to_csv(output_path, index=False)
+        print(f"✓ Final CSV written: {output_path} ({len(df_all_results)} rows)")
+    else:
+        # No results
+        df_all_results = pd.DataFrame(columns=df_results_columns)
+        df_all_results.to_csv(output_path, index=False)
+        print(f"✓ Empty results CSV written: {output_path}")
+
+    # Cleanup temporary chunks
+    shutil.rmtree(output_dir)
+
+    return df_all_results
 
 
 # ---------------------------------------------------------------------------
@@ -672,12 +745,15 @@ class JunctionsAnalysis:
 
         df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
                               'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
+
+        # Build transformed dataframes for each result
         result_frames = []
         for cluster_result in results:
             df_cluster_results = cluster_result.get_results_df()
             if df_cluster_results.empty:
                 continue
-            result_frames.append(
+
+            df_transformed = (
                 df_cluster_results
                 .rename(columns={'event': 'event_type'})
                 .assign(
@@ -687,16 +763,10 @@ class JunctionsAnalysis:
                     specie=cluster_result.specie,
                 )
             )
+            result_frames.append(df_transformed)
 
-        if result_frames:
-            df_all_results = pd.concat(
-                result_frames,
-                ignore_index=True,
-                sort=False,
-            ).reindex(columns=df_results_columns)
-        else:
-            df_all_results = pd.DataFrame(columns=df_results_columns)
-        df_all_results.to_csv(output_path, index=False)
+        # Write results to CSV with memory-efficient chunking
+        df_all_results = write_results_to_csv_chunked(result_frames, df_results_columns, output_path)
 
         if create_pdf:
             print_gene_set = {gene.upper() for gene in print_genes} if print_genes is not None else None
