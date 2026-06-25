@@ -655,22 +655,25 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
                     result_frames.append(df_transformed)
 
                 if result_frames:
-                    df_chunk = pd.concat(result_frames, ignore_index=True)
+                    # Filter out empty DataFrames before concatenating to avoid FutureWarning
+                    non_empty_frames = [df for df in result_frames if not df.empty]
+                    if non_empty_frames:
+                        df_chunk = pd.concat(non_empty_frames, ignore_index=True)
 
-                    # Validate and select columns
-                    missing_cols = set(df_results_columns) - set(df_chunk.columns)
-                    if missing_cols:
-                        raise ValueError(f"Missing columns in result: {missing_cols}")
-                    df_chunk = df_chunk[df_results_columns]
+                        # Validate and select columns
+                        missing_cols = set(df_results_columns) - set(df_chunk.columns)
+                        if missing_cols:
+                            raise ValueError(f"Missing columns in result: {missing_cols}")
+                        df_chunk = df_chunk[df_results_columns]
 
-                    chunk_path = os.path.join(output_dir, f'chunk_{chunk_num:04d}.csv')
-                    df_chunk.to_csv(chunk_path, index=False)
+                        chunk_path = os.path.join(output_dir, f'chunk_{chunk_num:04d}.csv')
+                        df_chunk.to_csv(chunk_path, index=False)
 
-                    chunk_rows = len(df_chunk)
-                    total_rows += chunk_rows
-                    log.info(f"[Writer] Wrote chunk {chunk_num} ({chunk_rows} rows)")
+                        chunk_rows = len(df_chunk)
+                        total_rows += chunk_rows
+                        log.info(f"[Writer] Wrote chunk {chunk_num} ({chunk_rows} rows)")
 
-                    chunk_num += 1
+                        chunk_num += 1
 
         # Combine all chunks into final CSV
         chunk_files = sorted([os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.csv')])
