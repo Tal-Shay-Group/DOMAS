@@ -1,11 +1,13 @@
 import logging
 import os
+import queue
 import shutil
 import tempfile
+import threading
 import time
 import numpy as np
 import pandas as pd
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from generate_gene_pdf import GeneVisualization, prepare_gene_data_bulk
 import domas
@@ -20,81 +22,6 @@ DOMAIN_NAME_PREFIX_PRIORITY = ['IPR', 'pfam', 'cd', 'smart', 'tigr', 'CDD']
 # ---------------------------------------------------------------------------
 # Utility functions
 # ---------------------------------------------------------------------------
-
-def write_results_to_csv_chunked(result_frames, df_results_columns, output_path, max_buffer_rows=10000):
-    """
-    Write concatenated dataframes to CSV with memory-efficient chunking.
-
-    Buffers dataframes in memory up to max_buffer_rows, writes chunks to disk,
-    then combines them into the final CSV. This prevents memory issues with
-    large datasets (>5M rows).
-
-    Args:
-        result_frames: List of pandas DataFrames to concatenate
-        df_results_columns: List of column names for final output
-        output_path: Path where final CSV will be written
-        max_buffer_rows: Row count threshold for flushing chunks (default 10000)
-
-    Returns:
-        pd.DataFrame: The combined results dataframe
-    """
-    if not result_frames:
-        df_all_results = pd.DataFrame(columns=df_results_columns)
-        df_all_results.to_csv(output_path, index=False)
-        logger.info(f"Empty results CSV written: {output_path}")
-        return df_all_results
-
-    output_dir = tempfile.mkdtemp(prefix='domas_chunks_')
-
-    try:
-        batch_frames = []
-        row_count = 0
-        chunk_num = 0
-
-        for i, df_transformed in enumerate(result_frames):
-            # Add to buffer
-            batch_frames.append(df_transformed)
-            row_count += len(df_transformed)
-
-            # Write chunk when buffer reaches row limit or at end of loop
-            should_flush = (row_count >= max_buffer_rows) or (i == len(result_frames) - 1)
-            if should_flush and batch_frames:
-                df_chunk = pd.concat(batch_frames, ignore_index=True)
-
-                # Validate and select columns
-                missing_cols = set(df_results_columns) - set(df_chunk.columns)
-                if missing_cols:
-                    raise ValueError(f"Missing columns in result: {missing_cols}")
-                df_chunk = df_chunk[df_results_columns]
-
-                chunk_path = os.path.join(output_dir, f'chunk_{chunk_num:04d}.csv')
-                df_chunk.to_csv(chunk_path, index=False)
-
-                chunk_rows = len(df_chunk)
-                logger.info(f"Wrote chunk {chunk_num} ({chunk_rows} rows)")
-
-                batch_frames = []
-                row_count = 0
-                chunk_num += 1
-
-        # Combine all chunks into final CSV
-        chunk_files = sorted([os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.csv')])
-
-        if chunk_files:
-            logger.info(f"Combining {len(chunk_files)} chunks...")
-            df_all_results = pd.concat([pd.read_csv(f) for f in chunk_files], ignore_index=True)
-            df_all_results.to_csv(output_path, index=False)
-            logger.info(f"Final CSV written: {output_path} ({len(df_all_results)} rows)")
-        else:
-            df_all_results = pd.DataFrame(columns=df_results_columns)
-            df_all_results.to_csv(output_path, index=False)
-            logger.info(f"Empty results CSV written: {output_path}")
-
-    finally:
-        # Cleanup temporary chunks
-        shutil.rmtree(output_dir, ignore_errors=True)
-
-    return df_all_results
 
 
 # ---------------------------------------------------------------------------
@@ -685,6 +612,84 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
     return cluster_result
 
 
+def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_instance=None):
+    """
+    Dedicated writer thread that processes results from a queue and writes to CSV.
+
+    Runs continuously until it receives a None sentinel value.
+    Writes results incrementally as they arrive from compute workers.
+    """
+    log = logger_instance or logger
+    output_dir = tempfile.mkdtemp(prefix='domas_csv_')
+
+    try:
+        chunk_num = 0
+        total_rows = 0
+
+        while True:
+            # Get results from queue (blocks until available)
+            chunk_results = result_queue.get()
+
+            # None is sentinel for end-of-stream
+            if chunk_results is None:
+                break
+
+            # Convert results to DataFrame and write
+            if chunk_results:
+                result_frames = []
+                for cluster_result in chunk_results:
+                    df_cluster_results = cluster_result.get_results_df()
+                    if df_cluster_results.empty:
+                        continue
+
+                    df_transformed = (
+                        df_cluster_results
+                        .rename(columns={'event': 'event_type'})
+                        .assign(
+                            cluster=cluster_result.cluster_name,
+                            gene_symbol=cluster_result.gene_symbol,
+                            canonical_transcript_id=cluster_result.canonical_transcript_id,
+                            specie=cluster_result.specie,
+                        )
+                    )
+                    result_frames.append(df_transformed)
+
+                if result_frames:
+                    df_chunk = pd.concat(result_frames, ignore_index=True)
+
+                    # Validate and select columns
+                    missing_cols = set(df_results_columns) - set(df_chunk.columns)
+                    if missing_cols:
+                        raise ValueError(f"Missing columns in result: {missing_cols}")
+                    df_chunk = df_chunk[df_results_columns]
+
+                    chunk_path = os.path.join(output_dir, f'chunk_{chunk_num:04d}.csv')
+                    df_chunk.to_csv(chunk_path, index=False)
+
+                    chunk_rows = len(df_chunk)
+                    total_rows += chunk_rows
+                    log.info(f"[Writer] Wrote chunk {chunk_num} ({chunk_rows} rows)")
+
+                    chunk_num += 1
+
+        # Combine all chunks into final CSV
+        chunk_files = sorted([os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.csv')])
+
+        if chunk_files:
+            log.info(f"[Writer] Combining {len(chunk_files)} chunks...")
+            df_all_results = pd.concat([pd.read_csv(f) for f in chunk_files], ignore_index=True)
+            df_all_results.to_csv(output_path, index=False)
+            log.info(f"[Writer] Final CSV written: {output_path} ({len(df_all_results)} rows)")
+        else:
+            df_all_results = pd.DataFrame(columns=df_results_columns)
+            df_all_results.to_csv(output_path, index=False)
+            log.info(f"[Writer] Empty results CSV written: {output_path}")
+
+    finally:
+        # Cleanup temporary chunks
+        shutil.rmtree(output_dir, ignore_errors=True)
+
+
 def _process_cluster_chunk(chunk_info, df_exons=None, df_domains=None, canonical_transcript_ids=None,
                           gene_strand=None, transcripts_by_gene=None, empty_transcripts=None):
     """Process a chunk of clusters sequentially (worker function for ProcessPoolExecutor).
@@ -707,16 +712,24 @@ def _process_cluster_chunk(chunk_info, df_exons=None, df_domains=None, canonical
     processed_in_chunk = 0
 
     for cluster_tuple in chunk:
-        result = _analyze_single_cluster(
-            cluster_tuple,
-            exon_lookup=exon_lookup,
-            domain_lookup=domain_lookup,
-            canonical_transcript_ids=canonical_transcript_ids,
-            gene_strand=gene_strand,
-            transcripts_by_gene=transcripts_by_gene,
-            empty_transcripts=empty_transcripts
-        )
-        chunk_results.append(result)
+        try:
+            result = _analyze_single_cluster(
+                cluster_tuple,
+                exon_lookup=exon_lookup,
+                domain_lookup=domain_lookup,
+                canonical_transcript_ids=canonical_transcript_ids,
+                gene_strand=gene_strand,
+                transcripts_by_gene=transcripts_by_gene,
+                empty_transcripts=empty_transcripts
+            )
+            chunk_results.append(result)
+        except (KeyError, ValueError, AttributeError, TypeError) as e:
+            # Handle expected data issues (malformed input, missing fields, etc.)
+            cluster_name = cluster_tuple[1].cluster_name.iat[0] if len(cluster_tuple) > 1 else "unknown"
+            logger.error(f"[Worker {worker_id}] Error processing cluster {cluster_name}: {type(e).__name__}: {e}")
+            # Continue processing other clusters instead of crashing
+            continue
+
         processed_in_chunk += 1
 
         # Progress logging every 10000 clusters within the chunk
@@ -811,8 +824,8 @@ class JunctionsAnalysis:
         return cluster_groups
 
     def _run_parallel_analysis(self, cluster_groups, df_exons, df_domains, canonical_transcript_ids,
-                               gene_strand, transcripts_by_gene, empty_transcripts, num_workers):
-        """Execute cluster analysis in parallel."""
+                               gene_strand, transcripts_by_gene, empty_transcripts, num_workers, output_path):
+        """Execute cluster analysis in parallel with dedicated writer thread."""
         total = len(cluster_groups)
 
         # Divide clusters into chunks (one per worker, as many as needed)
@@ -826,9 +839,24 @@ class JunctionsAnalysis:
 
         total_chunks = len(chunks)
 
-        self.logger.info(f"Starting analysis with {actual_workers} workers")
+        self.logger.info(f"Starting analysis with {actual_workers} workers + 1 writer thread")
         self.logger.info(f"Total clusters: {total}")
         self.logger.info(f"Processing {total_chunks} chunks (~{chunk_size} clusters per chunk)")
+
+        # Prepare column definitions for CSV
+        df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
+                              'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
+
+        # Create queue for results (backpressure if writer lags)
+        result_queue = queue.Queue(maxsize=actual_workers * 2)
+
+        # Start dedicated writer thread
+        writer_thread = threading.Thread(
+            target=_csv_writer_worker,
+            args=(result_queue, output_path, df_results_columns, self.logger),
+            daemon=False
+        )
+        writer_thread.start()
 
         chunks_with_info = [
             (chunk_idx % total_chunks, chunk_idx, total_chunks, chunk)
@@ -846,55 +874,38 @@ class JunctionsAnalysis:
             empty_transcripts=empty_transcripts
         )
 
-        results = []
+        all_results = []  # Collect results for PDF generation
         processed_count = 0
         last_time = time.perf_counter()
 
         with ProcessPoolExecutor(max_workers=actual_workers) as executor:
-            for chunk_results in executor.map(chunk_worker, chunks_with_info):
-                for cluster_result in chunk_results:
-                    results.append(cluster_result)
-                    processed_count += 1
+            # Submit all tasks
+            futures = [executor.submit(chunk_worker, chunk_info) for chunk_info in chunks_with_info]
 
-                    if processed_count % 10000 == 0:
-                        cur_time = time.perf_counter()
-                        self.logger.info(
-                            f"[Main] Analyzed {processed_count}/{total} clusters. "
-                            f"Last 10000 took {cur_time - last_time:.2f}s. "
-                            f"ETA: {(cur_time - last_time) * (total - processed_count) / 10000 / 60:.1f}min"
-                        )
-                        last_time = cur_time
+            # Process results as they complete: send to writer AND collect for PDFs
+            for future in as_completed(futures):
+                chunk_results = future.result()
+                result_queue.put(chunk_results)  # Send to writer thread for CSV
+                all_results.extend(chunk_results)  # Collect for PDF generation
+                processed_count += len(chunk_results)
+
+                if processed_count % 10000 == 0:
+                    cur_time = time.perf_counter()
+                    self.logger.info(
+                        f"[Main] Analyzed {processed_count}/{total} clusters. "
+                        f"Last 10000 took {cur_time - last_time:.2f}s. "
+                        f"ETA: {(cur_time - last_time) * (total - processed_count) / 10000 / 60:.1f}min"
+                    )
+                    last_time = cur_time
+
+        # Signal writer to stop
+        result_queue.put(None)
+        writer_thread.join()  # Wait for writer to finish
 
         self.logger.info(f"[Main] Analysis complete: processed {processed_count}/{total} clusters")
-        return results
+        return all_results
 
-    def _process_and_write_results(self, results, output_path):
-        """Transform cluster results and write to CSV."""
-        df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
-                              'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
-
-        result_frames = []
-        for cluster_result in results:
-            df_cluster_results = cluster_result.get_results_df()
-            if df_cluster_results.empty:
-                continue
-
-            df_transformed = (
-                df_cluster_results
-                .rename(columns={'event': 'event_type'})
-                .assign(
-                    cluster=cluster_result.cluster_name,
-                    gene_symbol=cluster_result.gene_symbol,
-                    canonical_transcript_id=cluster_result.canonical_transcript_id,
-                    specie=cluster_result.specie,
-                )
-            )
-            result_frames.append(df_transformed)
-
-        df_all_results = write_results_to_csv_chunked(result_frames, df_results_columns, output_path)
-        return df_all_results
-
-    def _generate_pdfs(self, results, print_genes):
+def _generate_pdfs(self, results, print_genes):
         """Generate PDF visualizations for clusters."""
         print_gene_set = {gene.upper() for gene in print_genes} if print_genes is not None else None
 
@@ -978,14 +989,12 @@ class JunctionsAnalysis:
         # Group junctions into clusters
         cluster_groups = self._prepare_cluster_groups(df_junctions)
 
-        # Run parallel analysis
+        # Run parallel analysis (with dedicated writer thread for CSV output)
         results = self._run_parallel_analysis(
             cluster_groups, df_exons, df_domains, canonical_transcript_ids,
-            gene_strand, transcripts_by_gene, empty_transcripts, num_workers
+            gene_strand, transcripts_by_gene, empty_transcripts, num_workers,
+            output_path
         )
-
-        # Process and write results to CSV
-        self._process_and_write_results(results, output_path)
 
         # Generate PDFs if requested
         if create_pdf:
