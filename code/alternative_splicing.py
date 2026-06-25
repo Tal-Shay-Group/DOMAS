@@ -798,7 +798,7 @@ def analyze_ioe_file(con, ioe_file, output_csv):
     gene_symbols_dict = utils.get_gene_symbols(con, df_junctions.gene_ensembl_id.unique().tolist())
     # add gene symbols to df_junctions
     df_junctions['gene_symbol'] = df_junctions['gene_ensembl_id'].map(gene_symbols_dict)
-    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv)
+    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False)
 
 
 def keep_min_transcript_clusters(df, examples_per_event=2):
@@ -844,16 +844,16 @@ def analyze_ioe_files(con, input_path, pattern, output_csv, examples_per_event=5
     df_all_junctions['num_transcripts'] = df_all_junctions['gene_ensembl_id'].map(gene_transcript_counts)
     canonical_exon_counts = utils.get_canonical_exon_counts(con, gene_ensembl_ids)
     df_all_junctions['num_canonical_exons'] = df_all_junctions['gene_ensembl_id'].map(canonical_exon_counts)
-    df_all_junctions = df_all_junctions[df_all_junctions['num_transcripts'] >= 2]
-    df_all_junctions = df_all_junctions[df_all_junctions['num_canonical_exons'] <= 6]
+    #df_all_junctions = df_all_junctions[df_all_junctions['num_transcripts'] >= 2]
+    #df_all_junctions = df_all_junctions[df_all_junctions['num_canonical_exons'] <= 6]
     if examples_per_event > 0:
         # per event type, keep only examples_per_event unique cluster_name with minimum number of transcripts for the gene
         df_examples = keep_min_transcript_clusters(df_all_junctions, examples_per_event=examples_per_event)
         df_examples.to_csv('ioe_example_junctions.csv', index=False)
-        analyze_junctions2(con, df_junctions=df_examples, output_path=output_csv)
+        analyze_junctions2(con, df_junctions=df_examples, output_path=output_csv, create_pdf=False)
     else:
         df_all_junctions.to_csv('ioe_all_junctions.csv', index=False)
-        analyze_junctions2(con, df_junctions=df_all_junctions, output_path=output_csv)
+        analyze_junctions2(con, df_junctions=df_all_junctions, output_path=output_csv, create_pdf=False)
 
 def analyze_hadas_input(con, input_file, output_csv, print_genes=None):
     df_junctions = domas.hadas_read_input_file(con, input_file)
@@ -875,17 +875,17 @@ if __name__ == "__main__":
     #input_file = '/gpfs0/tals/users/melchio/clusters_sum_table_HN6.xlsx'
     #input_file = '/gpfs0/tals/users/melchio/short_H_vs_M_HN6.xlsx'
     #input_file = 'short_H_vs_M_HN6.xlsx'
-    input_file = "hadas_prefered.xlsx"
-    print_genes = ['PFDN5', 'CD6','HNRNPH3','USP16', 'DOCK8', 'HNRNPK']
-    output_file = 'clusters_with_3_transcripts.csv'
-    #dochap_path = '/gpfs0/tals/projects/Analysis/ariel/DoChap/DoChaP-db/DB_merged.sqlite'
-    dochap_path = '/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite'
+    #input_file = "hadas_prefered.xlsx"
+    #print_genes = ['PFDN5', 'CD6','HNRNPH3','USP16', 'DOCK8', 'HNRNPK']
+    #output_file = 'clusters_with_3_transcripts.csv'
+    dochap_path = '/gpfs0/tals/projects/Analysis/ariel/DoChap/DoChaP-db/dbs/DB_merged.sqlite'
+    #dochap_path = '/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite'
     con = sqlite3.connect(dochap_path)
     
-    analyze_hadas_input(con, input_file, 'hadas_junctions_analysis.csv', print_genes=print_genes)
-    exit(0)
-    #analyze_ioe_files(con, '/Users/arielmelchior/documents/projects/DOMAS/external_data/', 'output_prefix_.*_strict.ioe', 'output_csv.csv', examples_per_event=5)
-    analyze_ioe_files(con, 'external_data/', 'output_prefix_.*_strict.ioe', 'output_csv.csv', examples_per_event=5)
+    #analyze_hadas_input(con, input_file, 'hadas_junctions_analysis.csv', print_genes=print_genes)
+    #exit(0)
+    #analyze_ioe_files(con, '/Users/arielmelchior/documents/projects/DOMAS/external_data/', 'output_prefix_.*_strict.ioe', 'output_csv.csv', examples_per_event=0)
+    analyze_ioe_files(con, '/gpfs0/tals/projects/Analysis/ariel2/DOMAS/external_data/', 'output_prefix_.*_strict.ioe', 'output_csv.csv', examples_per_event=0)
     #ioe_file = '/gpfs0/tals/projects/Analysis/ariel2/DOMAS/external_data/output_prefix_MX_strict.ioe'
     #analyze_ioe_file(con, ioe_file, 'ioe_mx_junctions_analysis.csv')
     exit(0 )
