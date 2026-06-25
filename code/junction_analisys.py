@@ -707,30 +707,23 @@ def _process_cluster_chunk(chunk_info, df_exons=None, df_domains=None, canonical
     processed_in_chunk = 0
 
     for cluster_tuple in chunk:
-        try:
-            result = _analyze_single_cluster(
-                cluster_tuple,
-                exon_lookup=exon_lookup,
-                domain_lookup=domain_lookup,
-                canonical_transcript_ids=canonical_transcript_ids,
-                gene_strand=gene_strand,
-                transcripts_by_gene=transcripts_by_gene,
-                empty_transcripts=empty_transcripts
-            )
-            chunk_results.append(result)
-        except Exception as e:
-            cluster_name = cluster_tuple[1].cluster_name.iat[0] if len(cluster_tuple) > 1 else "unknown"
-            logger.error(f"[Worker {worker_id}] Error processing cluster {cluster_name}: {e}", exc_info=True)
-            # Continue processing other clusters in chunk instead of crashing
-            continue
-
+        result = _analyze_single_cluster(
+            cluster_tuple,
+            exon_lookup=exon_lookup,
+            domain_lookup=domain_lookup,
+            canonical_transcript_ids=canonical_transcript_ids,
+            gene_strand=gene_strand,
+            transcripts_by_gene=transcripts_by_gene,
+            empty_transcripts=empty_transcripts
+        )
+        chunk_results.append(result)
         processed_in_chunk += 1
 
         # Progress logging every 10000 clusters within the chunk
         if processed_in_chunk % 10000 == 0:
             logger.info(f"[Worker {worker_id}] Chunk {chunk_index + 1}/{total_chunks}: processed {processed_in_chunk}/{chunk_size}")
 
-    logger.info(f"[Worker {worker_id}] Completed chunk {chunk_index + 1}/{total_chunks} ({chunk_size} clusters, {len(chunk_results)} successful)")
+    logger.info(f"[Worker {worker_id}] Completed chunk {chunk_index + 1}/{total_chunks} ({chunk_size} clusters)")
     return chunk_results
 
 
