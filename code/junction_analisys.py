@@ -675,9 +675,16 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
     return cluster_result
 
 
-def _process_cluster_chunk(chunk, exon_lookup=None, domain_lookup=None, canonical_transcript_ids=None,
+def _process_cluster_chunk(chunk, df_exons=None, df_domains=None, canonical_transcript_ids=None,
                           gene_strand=None, transcripts_by_gene=None, empty_transcripts=None):
-    """Process a chunk of clusters sequentially (worker function for ProcessPoolExecutor)."""
+    """Process a chunk of clusters sequentially (worker function for ProcessPoolExecutor).
+
+    Builds lookups inside the worker to avoid pickling issues with closures.
+    """
+    # Build lookups once per worker process
+    exon_lookup = build_exon_lookup(df_exons)
+    domain_lookup = build_domain_lookup(df_domains)
+
     chunk_results = []
     for cluster_tuple in chunk:
         result = _analyze_single_cluster(
@@ -770,8 +777,8 @@ class JunctionsAnalysis:
         from functools import partial
         chunk_worker = partial(
             _process_cluster_chunk,
-            exon_lookup=exon_lookup,
-            domain_lookup=domain_lookup,
+            df_exons=df_exons,
+            df_domains=df_domains,
             canonical_transcript_ids=canonical_transcript_ids,
             gene_strand=gene_strand,
             transcripts_by_gene=transcripts_by_gene,
