@@ -4,7 +4,7 @@ import shutil
 import time
 import numpy as np
 import pandas as pd
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 
 from generate_gene_pdf import GeneVisualization, prepare_gene_data_bulk
 import domas
@@ -61,7 +61,7 @@ def write_results_to_csv_chunked(result_frames, df_results_columns, output_path,
 
             chunk_rows = len(df_chunk)
             total_rows += chunk_rows
-            print(f"✓ Wrote chunk {chunk_num} ({bytes_in_buffer / 1e6:.1f}MB, {chunk_rows} rows)")
+            logger.info(f"Wrote chunk {chunk_num} ({bytes_in_buffer / 1e6:.1f}MB, {chunk_rows} rows)")
 
             batch_frames = []
             bytes_in_buffer = 0
@@ -71,15 +71,15 @@ def write_results_to_csv_chunked(result_frames, df_results_columns, output_path,
     chunk_files = sorted([os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.csv')])
 
     if chunk_files:
-        print(f"Combining {len(chunk_files)} chunks...")
+        logger.info(f"Combining {len(chunk_files)} chunks...")
         df_all_results = pd.concat([pd.read_csv(f) for f in chunk_files], ignore_index=True)
         df_all_results.to_csv(output_path, index=False)
-        print(f"✓ Final CSV written: {output_path} ({len(df_all_results)} rows)")
+        logger.info(f"Final CSV written: {output_path} ({len(df_all_results)} rows)")
     else:
         # No results
         df_all_results = pd.DataFrame(columns=df_results_columns)
         df_all_results.to_csv(output_path, index=False)
-        print(f"✓ Empty results CSV written: {output_path}")
+        logger.info(f"Empty results CSV written: {output_path}")
 
     # Cleanup temporary chunks
     shutil.rmtree(output_dir)
@@ -571,15 +571,14 @@ class ClusterAnalysisResult:
         gene_canonical_ids = canonical_transcript_ids.intersection(gene_transcript_ids)
         if not gene_canonical_ids:
             self.add_event('no_canonical_transcript')
-            logger.warning(f"No canonical transcript found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
+            logger.debug(f"No canonical transcript found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
             return
         if len(gene_transcript_ids) == 1:
             self.add_event('only_one_transcript')
-            logger.info(f"Only one transcript found for cluster {self.cluster_name}, specie {self.specie}.")
+            logger.debug(f"Only one transcript found for cluster {self.cluster_name}, specie {self.specie}.")
             return
         if len(gene_canonical_ids) > 1:
-            logger.warning(
-                f"Multiple canonical transcripts found for cluster {self.cluster_name}, specie {self.specie}: "
+            logger.warning(f"Multiple canonical transcripts found for cluster {self.cluster_name}, specie {self.specie}: "
                 f"{sorted(gene_canonical_ids)}. Using the first one (sorted)."
             )
         self.canonical_transcript_id = sorted(gene_canonical_ids)[0]
@@ -596,32 +595,26 @@ class ClusterAnalysisResult:
 
         for idx, junction in enumerate(self.junctions):
             if not any(idx in junction_idxs for junction_idxs in transcript_junctions.values()):
-                logger.warning(
-                    f"Junction {junction} in cluster {self.cluster_name} does not map to any transcript. "
-                    "This may indicate an issue with the junction definition or exon mapping."
-                )
+                logger.debug(f"Junction {junction} in cluster {self.cluster_name} does not map to any transcript. ")
                 self.add_event('junction_not_mapped', idx)
 
         canonical_junctions = transcript_junctions.get(self.canonical_transcript_id, set())
         if not canonical_junctions:
             self.add_event('no_canonical_junctions')
-            logger.warning(f"No canonical junctions found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
+            logger.debug(f"No canonical junctions found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
             return
 
         for transcript_id, junction_idxs in transcript_junctions.items():
             if transcript_id == self.canonical_transcript_id:
                 continue
             if not junction_idxs:
-                logger.warning(
-                    f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} does not have any junctions. "
-                    "This may indicate an issue with the exon mapping for the canonical transcript."
-                )
+                logger.debug(f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} does not have any junctions. ")
                 self.add_event('transcript_doesnt_have_junctions', transcript_id=transcript_id)
                 continue
 
             unique_junctions = junction_idxs - canonical_junctions
             if not unique_junctions:
-                logger.info(
+                logger.debug(
                     f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} does not have any unique junctions "
                     "compared to the canonical transcript. Skipping this transcript for comparison."
                 )
@@ -659,9 +652,9 @@ class ClusterAnalysisResult:
         )
         
 
-def _analyze_single_cluster(cluster_tuple, exon_lookup, domain_lookup, canonical_transcript_ids,
-                           gene_strand, transcripts_by_gene, empty_transcripts):
-    """Analyze a single cluster (worker function for threading)."""
+def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None, canonical_transcript_ids=None,
+                           gene_strand=None, transcripts_by_gene=None, empty_transcripts=None):
+    """Analyze a single cluster."""
     _, cluster_df = cluster_tuple
 
     gene_ensembl_id = cluster_df.gene_ensembl_id.iat[0]
@@ -680,6 +673,24 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup, domain_lookup, canonical
     cluster_result.analyze_junction(df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup)
 
     return cluster_result
+
+
+def _process_cluster_chunk(chunk, exon_lookup=None, domain_lookup=None, canonical_transcript_ids=None,
+                          gene_strand=None, transcripts_by_gene=None, empty_transcripts=None):
+    """Process a chunk of clusters sequentially (worker function for ProcessPoolExecutor)."""
+    chunk_results = []
+    for cluster_tuple in chunk:
+        result = _analyze_single_cluster(
+            cluster_tuple,
+            exon_lookup=exon_lookup,
+            domain_lookup=domain_lookup,
+            canonical_transcript_ids=canonical_transcript_ids,
+            gene_strand=gene_strand,
+            transcripts_by_gene=transcripts_by_gene,
+            empty_transcripts=empty_transcripts
+        )
+        chunk_results.append(result)
+    return chunk_results
 
 
 class JunctionsAnalysis:
@@ -748,43 +759,43 @@ class JunctionsAnalysis:
         group_columns = ['specie', 'cluster_name'] if 'specie' in df_junctions_n.columns else ['cluster_name']
         cluster_groups = list(df_junctions_n.groupby(group_columns))
         total = len(cluster_groups)
-        print(f"Analyzing {total} clusters with {num_workers} workers...")
+        self.logger.info(f"Analyzing {total} clusters with {num_workers} workers...")
         last_time = time.perf_counter()
+
+        # Divide clusters into chunks (one per worker)
+        chunk_size = max(1, (total + num_workers - 1) // num_workers)
+        chunks = [cluster_groups[i:i+chunk_size] for i in range(0, len(cluster_groups), chunk_size)]
+        self.logger.info(f"Processing {len(chunks)} chunks ({chunk_size} clusters per chunk)")
+
+        from functools import partial
+        chunk_worker = partial(
+            _process_cluster_chunk,
+            exon_lookup=exon_lookup,
+            domain_lookup=domain_lookup,
+            canonical_transcript_ids=canonical_transcript_ids,
+            gene_strand=gene_strand,
+            transcripts_by_gene=transcripts_by_gene,
+            empty_transcripts=empty_transcripts
+        )
 
         results = []
         processed_count = 0
 
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            # Submit all tasks
-            futures = {
-                executor.submit(
-                    _analyze_single_cluster,
-                    cluster_tuple,
-                    exon_lookup,
-                    domain_lookup,
-                    canonical_transcript_ids,
-                    gene_strand,
-                    transcripts_by_gene,
-                    empty_transcripts
-                ): i
-                for i, cluster_tuple in enumerate(cluster_groups)
-            }
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            for chunk_results in executor.map(chunk_worker, chunks):
+                for cluster_result in chunk_results:
+                    results.append(cluster_result)
+                    processed_count += 1
 
-            # Collect results as they complete
-            for future in as_completed(futures):
-                processed_count += 1
-                cluster_result = future.result()
-                results.append(cluster_result)
-
-                # Progress logging every 10000 clusters
-                if processed_count % 10000 == 0:
-                    cur_time = time.perf_counter()
-                    self.logger.info(
-                        f"Analyzed {processed_count}/{total} clusters. "
-                        f"Last 10000 took {cur_time - last_time:.2f}s. "
-                        f"ETA: {(cur_time - last_time) * (total - processed_count) / 10000 / 60:.1f}min"
-                    )
-                    last_time = cur_time
+                    # Progress logging every 10000 clusters
+                    if processed_count % 10000 == 0:
+                        cur_time = time.perf_counter()
+                        self.logger.info(
+                            f"Analyzed {processed_count}/{total} clusters. "
+                            f"Last 10000 took {cur_time - last_time:.2f}s. "
+                            f"ETA: {(cur_time - last_time) * (total - processed_count) / 10000 / 60:.1f}min"
+                        )
+                        last_time = cur_time
 
         df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
                               'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
@@ -857,6 +868,6 @@ class JunctionsAnalysis:
                         df_results=cluster_result.get_results_df(),
                     )
                 except ValueError as e:
-                    print(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}, specie {cluster_result.specie}: {e}")
+                    logger.warning(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}, specie {cluster_result.specie}: {e}")
 
         return results
