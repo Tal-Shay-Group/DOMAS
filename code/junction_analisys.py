@@ -20,11 +20,11 @@ DOMAIN_NAME_PREFIX_PRIORITY = ['IPR', 'pfam', 'cd', 'smart', 'tigr', 'CDD']
 # Utility functions
 # ---------------------------------------------------------------------------
 
-def write_results_to_csv_chunked(result_frames, df_results_columns, output_path, max_buffer_mb=100):
+def write_results_to_csv_chunked(result_frames, df_results_columns, output_path, max_buffer_rows=10000):
     """
     Write concatenated dataframes to CSV with memory-efficient chunking.
 
-    Buffers dataframes in memory up to max_buffer_mb, writes chunks to disk,
+    Buffers dataframes in memory up to max_buffer_rows, writes chunks to disk,
     then combines them into the final CSV. This prevents memory issues with
     large datasets (>5M rows).
 
@@ -32,39 +32,45 @@ def write_results_to_csv_chunked(result_frames, df_results_columns, output_path,
         result_frames: List of pandas DataFrames to concatenate
         df_results_columns: List of column names for final output
         output_path: Path where final CSV will be written
-        max_buffer_mb: Memory threshold (MB) for flushing chunks (default 100)
+        max_buffer_rows: Row count threshold for flushing chunks (default 10000)
 
     Returns:
         pd.DataFrame: The combined results dataframe
     """
+    if not result_frames:
+        df_all_results = pd.DataFrame(columns=df_results_columns)
+        df_all_results.to_csv(output_path, index=False)
+        logger.info(f"Empty results CSV written: {output_path}")
+        return df_all_results
+
     output_dir = 'temp_chunks'
     os.makedirs(output_dir, exist_ok=True)
 
     batch_frames = []
-    bytes_in_buffer = 0
+    row_count = 0
     chunk_num = 0
     total_rows = 0
 
     for i, df_transformed in enumerate(result_frames):
         # Add to buffer
         batch_frames.append(df_transformed)
-        bytes_in_buffer += df_transformed.memory_usage(deep=True).sum()
+        row_count += len(df_transformed)
 
-        # Write chunk when buffer reaches size limit or at end of loop
-        should_flush = (bytes_in_buffer >= max_buffer_mb * 1e6) or (i == len(result_frames) - 1)
+        # Write chunk when buffer reaches row limit or at end of loop
+        should_flush = (row_count >= max_buffer_rows) or (i == len(result_frames) - 1)
         if should_flush and batch_frames:
             df_chunk = pd.concat(batch_frames, ignore_index=True)
-            df_chunk = df_chunk.reindex(columns=df_results_columns)
+            df_chunk = df_chunk[df_results_columns]  # Select columns (faster than reindex)
 
             chunk_path = os.path.join(output_dir, f'chunk_{chunk_num:04d}.csv')
             df_chunk.to_csv(chunk_path, index=False)
 
             chunk_rows = len(df_chunk)
             total_rows += chunk_rows
-            logger.info(f"Wrote chunk {chunk_num} ({bytes_in_buffer / 1e6:.1f}MB, {chunk_rows} rows)")
+            logger.info(f"Wrote chunk {chunk_num} ({chunk_rows} rows)")
 
             batch_frames = []
-            bytes_in_buffer = 0
+            row_count = 0
             chunk_num += 1
 
     # Combine all chunks into final CSV
@@ -76,13 +82,14 @@ def write_results_to_csv_chunked(result_frames, df_results_columns, output_path,
         df_all_results.to_csv(output_path, index=False)
         logger.info(f"Final CSV written: {output_path} ({len(df_all_results)} rows)")
     else:
-        # No results
         df_all_results = pd.DataFrame(columns=df_results_columns)
         df_all_results.to_csv(output_path, index=False)
         logger.info(f"Empty results CSV written: {output_path}")
 
     # Cleanup temporary chunks
     shutil.rmtree(output_dir)
+
+    return df_all_results
 
     return df_all_results
 
@@ -675,17 +682,27 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
     return cluster_result
 
 
-def _process_cluster_chunk(chunk, df_exons=None, df_domains=None, canonical_transcript_ids=None,
+def _process_cluster_chunk(chunk_info, df_exons=None, df_domains=None, canonical_transcript_ids=None,
                           gene_strand=None, transcripts_by_gene=None, empty_transcripts=None):
     """Process a chunk of clusters sequentially (worker function for ProcessPoolExecutor).
 
     Builds lookups inside the worker to avoid pickling issues with closures.
+
+    Args:
+        chunk_info: tuple of (worker_id, chunk_index, total_chunks, chunk)
     """
+    worker_id, chunk_index, total_chunks, chunk = chunk_info
+    chunk_size = len(chunk)
+
     # Build lookups once per worker process
     exon_lookup = build_exon_lookup(df_exons)
     domain_lookup = build_domain_lookup(df_domains)
 
+    logger.info(f"[Worker {worker_id}] Processing chunk {chunk_index + 1}/{total_chunks} ({chunk_size} clusters)")
+
     chunk_results = []
+    processed_in_chunk = 0
+
     for cluster_tuple in chunk:
         result = _analyze_single_cluster(
             cluster_tuple,
@@ -697,6 +714,13 @@ def _process_cluster_chunk(chunk, df_exons=None, df_domains=None, canonical_tran
             empty_transcripts=empty_transcripts
         )
         chunk_results.append(result)
+        processed_in_chunk += 1
+
+        # Progress logging every 10000 clusters within the chunk
+        if processed_in_chunk % 10000 == 0:
+            logger.info(f"[Worker {worker_id}] Chunk {chunk_index + 1}/{total_chunks}: processed {processed_in_chunk}/{chunk_size}")
+
+    logger.info(f"[Worker {worker_id}] Completed chunk {chunk_index + 1}/{total_chunks} ({chunk_size} clusters)")
     return chunk_results
 
 
@@ -772,7 +796,17 @@ class JunctionsAnalysis:
         # Divide clusters into chunks (one per worker)
         chunk_size = max(1, (total + num_workers - 1) // num_workers)
         chunks = [cluster_groups[i:i+chunk_size] for i in range(0, len(cluster_groups), chunk_size)]
-        self.logger.info(f"Processing {len(chunks)} chunks ({chunk_size} clusters per chunk)")
+        total_chunks = len(chunks)
+        self.logger.info(f"Starting analysis with {num_workers} workers")
+        self.logger.info(f"Total clusters: {total}")
+        self.logger.info(f"Processing {total_chunks} chunks ({chunk_size} clusters per chunk)")
+
+        # Prepare chunk_info tuples: (worker_id, chunk_index, total_chunks, chunk)
+        # Worker IDs are assigned sequentially as chunks complete
+        chunks_with_info = [
+            (chunk_idx % num_workers, chunk_idx, total_chunks, chunk)
+            for chunk_idx, chunk in enumerate(chunks)
+        ]
 
         from functools import partial
         chunk_worker = partial(
@@ -789,7 +823,7 @@ class JunctionsAnalysis:
         processed_count = 0
 
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            for chunk_results in executor.map(chunk_worker, chunks):
+            for chunk_results in executor.map(chunk_worker, chunks_with_info):
                 for cluster_result in chunk_results:
                     results.append(cluster_result)
                     processed_count += 1
@@ -798,11 +832,14 @@ class JunctionsAnalysis:
                     if processed_count % 10000 == 0:
                         cur_time = time.perf_counter()
                         self.logger.info(
-                            f"Analyzed {processed_count}/{total} clusters. "
+                            f"[Main] Analyzed {processed_count}/{total} clusters. "
                             f"Last 10000 took {cur_time - last_time:.2f}s. "
                             f"ETA: {(cur_time - last_time) * (total - processed_count) / 10000 / 60:.1f}min"
                         )
                         last_time = cur_time
+
+        total_time = time.perf_counter() - last_time
+        self.logger.info(f"[Main] Analysis complete: processed {processed_count}/{total} clusters")
 
         df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
                               'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
