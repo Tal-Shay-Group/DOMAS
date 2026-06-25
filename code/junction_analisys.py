@@ -1,6 +1,7 @@
 import logging
 import os
 import shutil
+import tempfile
 import time
 import numpy as np
 import pandas as pd
@@ -43,53 +44,55 @@ def write_results_to_csv_chunked(result_frames, df_results_columns, output_path,
         logger.info(f"Empty results CSV written: {output_path}")
         return df_all_results
 
-    output_dir = 'temp_chunks'
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir = tempfile.mkdtemp(prefix='domas_chunks_')
 
-    batch_frames = []
-    row_count = 0
-    chunk_num = 0
-    total_rows = 0
+    try:
+        batch_frames = []
+        row_count = 0
+        chunk_num = 0
 
-    for i, df_transformed in enumerate(result_frames):
-        # Add to buffer
-        batch_frames.append(df_transformed)
-        row_count += len(df_transformed)
+        for i, df_transformed in enumerate(result_frames):
+            # Add to buffer
+            batch_frames.append(df_transformed)
+            row_count += len(df_transformed)
 
-        # Write chunk when buffer reaches row limit or at end of loop
-        should_flush = (row_count >= max_buffer_rows) or (i == len(result_frames) - 1)
-        if should_flush and batch_frames:
-            df_chunk = pd.concat(batch_frames, ignore_index=True)
-            df_chunk = df_chunk[df_results_columns]  # Select columns (faster than reindex)
+            # Write chunk when buffer reaches row limit or at end of loop
+            should_flush = (row_count >= max_buffer_rows) or (i == len(result_frames) - 1)
+            if should_flush and batch_frames:
+                df_chunk = pd.concat(batch_frames, ignore_index=True)
 
-            chunk_path = os.path.join(output_dir, f'chunk_{chunk_num:04d}.csv')
-            df_chunk.to_csv(chunk_path, index=False)
+                # Validate and select columns
+                missing_cols = set(df_results_columns) - set(df_chunk.columns)
+                if missing_cols:
+                    raise ValueError(f"Missing columns in result: {missing_cols}")
+                df_chunk = df_chunk[df_results_columns]
 
-            chunk_rows = len(df_chunk)
-            total_rows += chunk_rows
-            logger.info(f"Wrote chunk {chunk_num} ({chunk_rows} rows)")
+                chunk_path = os.path.join(output_dir, f'chunk_{chunk_num:04d}.csv')
+                df_chunk.to_csv(chunk_path, index=False)
 
-            batch_frames = []
-            row_count = 0
-            chunk_num += 1
+                chunk_rows = len(df_chunk)
+                logger.info(f"Wrote chunk {chunk_num} ({chunk_rows} rows)")
 
-    # Combine all chunks into final CSV
-    chunk_files = sorted([os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.csv')])
+                batch_frames = []
+                row_count = 0
+                chunk_num += 1
 
-    if chunk_files:
-        logger.info(f"Combining {len(chunk_files)} chunks...")
-        df_all_results = pd.concat([pd.read_csv(f) for f in chunk_files], ignore_index=True)
-        df_all_results.to_csv(output_path, index=False)
-        logger.info(f"Final CSV written: {output_path} ({len(df_all_results)} rows)")
-    else:
-        df_all_results = pd.DataFrame(columns=df_results_columns)
-        df_all_results.to_csv(output_path, index=False)
-        logger.info(f"Empty results CSV written: {output_path}")
+        # Combine all chunks into final CSV
+        chunk_files = sorted([os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.csv')])
 
-    # Cleanup temporary chunks
-    shutil.rmtree(output_dir)
+        if chunk_files:
+            logger.info(f"Combining {len(chunk_files)} chunks...")
+            df_all_results = pd.concat([pd.read_csv(f) for f in chunk_files], ignore_index=True)
+            df_all_results.to_csv(output_path, index=False)
+            logger.info(f"Final CSV written: {output_path} ({len(df_all_results)} rows)")
+        else:
+            df_all_results = pd.DataFrame(columns=df_results_columns)
+            df_all_results.to_csv(output_path, index=False)
+            logger.info(f"Empty results CSV written: {output_path}")
 
-    return df_all_results
+    finally:
+        # Cleanup temporary chunks
+        shutil.rmtree(output_dir, ignore_errors=True)
 
     return df_all_results
 
@@ -704,23 +707,30 @@ def _process_cluster_chunk(chunk_info, df_exons=None, df_domains=None, canonical
     processed_in_chunk = 0
 
     for cluster_tuple in chunk:
-        result = _analyze_single_cluster(
-            cluster_tuple,
-            exon_lookup=exon_lookup,
-            domain_lookup=domain_lookup,
-            canonical_transcript_ids=canonical_transcript_ids,
-            gene_strand=gene_strand,
-            transcripts_by_gene=transcripts_by_gene,
-            empty_transcripts=empty_transcripts
-        )
-        chunk_results.append(result)
+        try:
+            result = _analyze_single_cluster(
+                cluster_tuple,
+                exon_lookup=exon_lookup,
+                domain_lookup=domain_lookup,
+                canonical_transcript_ids=canonical_transcript_ids,
+                gene_strand=gene_strand,
+                transcripts_by_gene=transcripts_by_gene,
+                empty_transcripts=empty_transcripts
+            )
+            chunk_results.append(result)
+        except Exception as e:
+            cluster_name = cluster_tuple[1].cluster_name.iat[0] if len(cluster_tuple) > 1 else "unknown"
+            logger.error(f"[Worker {worker_id}] Error processing cluster {cluster_name}: {e}", exc_info=True)
+            # Continue processing other clusters in chunk instead of crashing
+            continue
+
         processed_in_chunk += 1
 
         # Progress logging every 10000 clusters within the chunk
         if processed_in_chunk % 10000 == 0:
             logger.info(f"[Worker {worker_id}] Chunk {chunk_index + 1}/{total_chunks}: processed {processed_in_chunk}/{chunk_size}")
 
-    logger.info(f"[Worker {worker_id}] Completed chunk {chunk_index + 1}/{total_chunks} ({chunk_size} clusters)")
+    logger.info(f"[Worker {worker_id}] Completed chunk {chunk_index + 1}/{total_chunks} ({chunk_size} clusters, {len(chunk_results)} successful)")
     return chunk_results
 
 
@@ -730,8 +740,8 @@ class JunctionsAnalysis:
         self.logger = logger_instance or logger
         self.gene_visualization_cls = gene_visualization_cls
 
-    def analyze_junctions(self, junctions_csv='as_events_junctions.csv', output_path='as_events_junctions_analysis.csv', df_junctions=None,
-                          hadas_format=False, n=0, create_pdf=True, print_genes=None, num_workers=4):
+    def _load_junctions_data(self, junctions_csv, df_junctions, hadas_format):
+        """Load and validate junctions from CSV or DataFrame."""
         if df_junctions is None and junctions_csv is None:
             raise ValueError("Either df_junctions or junctions_csv must be provided.")
         elif df_junctions is not None and junctions_csv is not None:
@@ -743,26 +753,30 @@ class JunctionsAnalysis:
                 df_junctions = pd.read_csv(junctions_csv)
         else:
             df_junctions = df_junctions.copy()
+
         if 'cluster_name' not in df_junctions.columns and 'cluster' in df_junctions.columns:
             df_junctions = df_junctions.rename(columns={'cluster': 'cluster_name'})
 
-        #df_junctions = df_junctions[df_junctions['gene_ensembl_id'].str.startswith('ENSG', na=False)]
-        # check all needed columns are in df_junctions
         required_columns = ['gene_ensembl_id', 'start_position', 'end_position', 'cluster_name']
         for col in required_columns:
             if col not in df_junctions.columns:
                 raise ValueError(f"Column '{col}' is required in df_junctions but not found.")
 
-        if n > 0:
-            df_t = pd.read_sql_query('select * from transcripts', self.con)
-            gene_count = df_t.value_counts('gene_GeneID_id')
-            df_t['gene_count'] = df_t['gene_GeneID_id'].map(gene_count)
-            ids_n = df_t[df_t['gene_count'] == n].gene_GeneID_id.unique().tolist()
-            df_junctions_n = df_junctions[df_junctions['gene_ensembl_id'].isin(ids_n)]
-        else:
-            df_junctions_n = df_junctions.copy()
+        return df_junctions
 
-        gene_ids = df_junctions_n.gene_ensembl_id.unique().tolist()
+    def _filter_junctions_by_transcript_count(self, df_junctions, filter_transcript_count):
+        """Filter junctions to genes with exactly filter_transcript_count transcripts."""
+        if filter_transcript_count <= 0:
+            return df_junctions.copy()
+
+        df_transcripts = pd.read_sql_query('select * from transcripts', self.con)
+        gene_count = df_transcripts.value_counts('gene_GeneID_id')
+        df_transcripts['gene_count'] = df_transcripts['gene_GeneID_id'].map(gene_count)
+        genes_with_count = df_transcripts[df_transcripts['gene_count'] == filter_transcript_count].gene_GeneID_id.unique().tolist()
+        return df_junctions[df_junctions['gene_ensembl_id'].isin(genes_with_count)]
+
+    def _load_database_data(self, gene_ids):
+        """Load genes, transcripts, domains, and exons from database."""
         placeholders = ','.join('?' * len(gene_ids))
         df_genes = pd.read_sql_query(
             f"SELECT gene_ensembl_id, strand FROM Genes WHERE gene_ensembl_id IN ({placeholders})",
@@ -771,40 +785,55 @@ class JunctionsAnalysis:
         gene_strand = dict(zip(df_genes['gene_ensembl_id'], df_genes['strand']))
 
         df_transcripts = domas.get_genes_df_transcripts(self.con, gene_ids)
+        df_domains = domas.get_transcript_domains_db(self.con, set(df_transcripts.transcript_ensembl_id))
+
+        from alternative_splicing import get_exons_for_transcripts
+        df_exons = get_exons_for_transcripts(self.con, set(df_transcripts.transcript_ensembl_id))
+
+        return df_genes, df_transcripts, df_domains, df_exons, gene_strand
+
+    def _prepare_lookup_structures(self, df_transcripts, df_exons, df_domains):
+        """Build lookup structures and transcript groupings."""
         invalid_ids = {'', 'nan', 'None'}
         all_transcript_ids = df_transcripts.transcript_ensembl_id.fillna(df_transcripts.transcript_refseq_id)
         valid_mask = all_transcript_ids.notna() & ~all_transcript_ids.isin(invalid_ids)
         canonical_transcript_ids = set(all_transcript_ids[valid_mask & (df_transcripts.canonical != 0)])
-        transcript_ids = set(all_transcript_ids[valid_mask])
-        df_domains = domas.get_transcript_domains_db(self.con, transcript_ids)
 
-        # Local import avoids circular imports with alternative_splicing module.
-        from alternative_splicing import get_exons_for_transcripts
-
-        df_exons = get_exons_for_transcripts(self.con, transcript_ids)
-        exon_lookup = build_exon_lookup(df_exons)
-        domain_lookup = build_domain_lookup(df_domains)
         transcripts_by_gene = {gid: g for gid, g in df_transcripts.groupby('gene_ensembl_id')}
         empty_transcripts = df_transcripts.iloc[0:0]
 
-        group_columns = ['specie', 'cluster_name'] if 'specie' in df_junctions_n.columns else ['cluster_name']
-        cluster_groups = list(df_junctions_n.groupby(group_columns))
-        total = len(cluster_groups)
-        self.logger.info(f"Analyzing {total} clusters with {num_workers} workers...")
-        last_time = time.perf_counter()
+        return canonical_transcript_ids, transcripts_by_gene, empty_transcripts
 
-        # Divide clusters into chunks (one per worker)
-        chunk_size = max(1, (total + num_workers - 1) // num_workers)
-        chunks = [cluster_groups[i:i+chunk_size] for i in range(0, len(cluster_groups), chunk_size)]
+    def _prepare_cluster_groups(self, df_junctions):
+        """Group junctions into clusters."""
+        group_columns = ['specie', 'cluster_name'] if 'specie' in df_junctions.columns else ['cluster_name']
+        cluster_groups = list(df_junctions.groupby(group_columns))
+        return cluster_groups
+
+    def _run_parallel_analysis(self, cluster_groups, df_exons, df_domains, canonical_transcript_ids,
+                               gene_strand, transcripts_by_gene, empty_transcripts, num_workers):
+        """Execute cluster analysis in parallel."""
+        total = len(cluster_groups)
+
+        # Ensure we have exactly min(num_workers, total) chunks (one per worker)
+        actual_workers = min(num_workers, total)
+        chunk_size = max(1, (total + actual_workers - 1) // actual_workers)
+
+        # Create exactly actual_workers chunks
+        chunks = []
+        for i in range(actual_workers):
+            start = i * chunk_size
+            end = start + chunk_size if i < actual_workers - 1 else total
+            chunks.append(cluster_groups[start:end])
+
         total_chunks = len(chunks)
-        self.logger.info(f"Starting analysis with {num_workers} workers")
+
+        self.logger.info(f"Starting analysis with {actual_workers} workers")
         self.logger.info(f"Total clusters: {total}")
         self.logger.info(f"Processing {total_chunks} chunks ({chunk_size} clusters per chunk)")
 
-        # Prepare chunk_info tuples: (worker_id, chunk_index, total_chunks, chunk)
-        # Worker IDs are assigned sequentially as chunks complete
         chunks_with_info = [
-            (chunk_idx % num_workers, chunk_idx, total_chunks, chunk)
+            (chunk_idx % actual_workers, chunk_idx, total_chunks, chunk)
             for chunk_idx, chunk in enumerate(chunks)
         ]
 
@@ -821,14 +850,14 @@ class JunctionsAnalysis:
 
         results = []
         processed_count = 0
+        last_time = time.perf_counter()
 
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        with ProcessPoolExecutor(max_workers=actual_workers) as executor:
             for chunk_results in executor.map(chunk_worker, chunks_with_info):
                 for cluster_result in chunk_results:
                     results.append(cluster_result)
                     processed_count += 1
 
-                    # Progress logging every 10000 clusters
                     if processed_count % 10000 == 0:
                         cur_time = time.perf_counter()
                         self.logger.info(
@@ -838,13 +867,14 @@ class JunctionsAnalysis:
                         )
                         last_time = cur_time
 
-        total_time = time.perf_counter() - last_time
         self.logger.info(f"[Main] Analysis complete: processed {processed_count}/{total} clusters")
+        return results
 
+    def _process_and_write_results(self, results, output_path):
+        """Transform cluster results and write to CSV."""
         df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
                               'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
 
-        # Build transformed dataframes for each result
         result_frames = []
         for cluster_result in results:
             df_cluster_results = cluster_result.get_results_df()
@@ -863,55 +893,104 @@ class JunctionsAnalysis:
             )
             result_frames.append(df_transformed)
 
-        # Write results to CSV with memory-efficient chunking
         df_all_results = write_results_to_csv_chunked(result_frames, df_results_columns, output_path)
+        return df_all_results
 
+    def _generate_pdfs(self, results, print_genes):
+        """Generate PDF visualizations for clusters."""
+        print_gene_set = {gene.upper() for gene in print_genes} if print_genes is not None else None
+
+        def _gene_symbol_key(value):
+            if isinstance(value, str):
+                return value.upper()
+            return None
+
+        filtered_results = (
+            [cluster_result for cluster_result in results if _gene_symbol_key(cluster_result.gene_symbol) in print_gene_set]
+            if print_gene_set is not None
+            else results
+        )
+        preloaded_gene_data = prepare_gene_data_bulk(
+            self.con, [cluster_result.gene_ensembl_id for cluster_result in filtered_results if _gene_symbol_key(cluster_result.gene_symbol) is not None]
+        )
+
+        gene_visualizations = {}
+        for count, cluster_result in enumerate(results, start=1):
+            try:
+                df_cluster_junctions = pd.DataFrame(cluster_result.junctions, columns=['start', 'end'])
+                cluster_gene_key = _gene_symbol_key(cluster_result.gene_symbol)
+                if print_gene_set is not None and cluster_gene_key not in print_gene_set:
+                    continue
+                viz = gene_visualizations.get(cluster_result.gene_ensembl_id)
+                if viz is None:
+                    gene_symbol = cluster_result.gene_symbol
+                    gene_ensembl_id = cluster_result.gene_ensembl_id
+                    preloaded = preloaded_gene_data.get(gene_ensembl_id) if isinstance(gene_ensembl_id, str) else None
+                    viz = self.gene_visualization_cls(self.con, gene_symbol, preloaded=preloaded)
+                    gene_visualizations[gene_ensembl_id] = viz
+
+                file_name = f'{cluster_result.gene_symbol}_{count}_junction_comparison.pdf'
+                if cluster_result.as_event_type is not None:
+                    file_name = f'{cluster_result.as_event_type}_{file_name}'
+                if cluster_result.specie is not None:
+                    file_name = f'{cluster_result.specie}_{file_name}'
+
+                viz.create_pdf(
+                    file_name,
+                    protein_only=False,
+                    domains_only=False,
+                    df_junction=df_cluster_junctions,
+                    df_results=cluster_result.get_results_df(),
+                )
+            except ValueError as e:
+                self.logger.warning(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}, specie {cluster_result.specie}: {e}")
+
+    def analyze_junctions(self, junctions_csv='as_events_junctions.csv', output_path='as_events_junctions_analysis.csv', df_junctions=None,
+                          hadas_format=False, filter_transcript_count=0, create_pdf=True, print_genes=None, num_workers=4):
+        """
+        Analyze junctions and detect domain changes across alternative transcripts.
+
+        Args:
+            junctions_csv: Path to junction CSV file (if df_junctions not provided)
+            output_path: Path for output CSV file
+            df_junctions: DataFrame of junctions (if not reading from CSV)
+            hadas_format: Whether to read CSV in HADAS format
+            filter_transcript_count: If > 0, only analyze genes with exactly this many transcripts
+            create_pdf: Whether to generate PDF visualizations
+            print_genes: List of gene symbols to generate PDFs for (or all if None)
+            num_workers: Number of parallel workers for analysis
+
+        Returns:
+            List of ClusterAnalysisResult objects
+        """
+        # Load and validate input
+        df_junctions = self._load_junctions_data(junctions_csv, df_junctions, hadas_format)
+        df_junctions = self._filter_junctions_by_transcript_count(df_junctions, filter_transcript_count)
+
+        gene_ids = df_junctions.gene_ensembl_id.unique().tolist()
+        self.logger.info(f"Analyzing {len(gene_ids)} genes")
+
+        # Load data from database
+        df_genes, df_transcripts, df_domains, df_exons, gene_strand = self._load_database_data(gene_ids)
+
+        # Prepare lookup structures
+        canonical_transcript_ids, transcripts_by_gene, empty_transcripts = \
+            self._prepare_lookup_structures(df_transcripts, df_exons, df_domains)
+
+        # Group junctions into clusters
+        cluster_groups = self._prepare_cluster_groups(df_junctions)
+
+        # Run parallel analysis
+        results = self._run_parallel_analysis(
+            cluster_groups, df_exons, df_domains, canonical_transcript_ids,
+            gene_strand, transcripts_by_gene, empty_transcripts, num_workers
+        )
+
+        # Process and write results to CSV
+        self._process_and_write_results(results, output_path)
+
+        # Generate PDFs if requested
         if create_pdf:
-            print_gene_set = {gene.upper() for gene in print_genes} if print_genes is not None else None
-
-            def _gene_symbol_key(value):
-                if isinstance(value, str):
-                    return value.upper()
-                return None
-
-            filtered_results = (
-                [cluster_result for cluster_result in results if _gene_symbol_key(cluster_result.gene_symbol) in print_gene_set]
-                if print_gene_set is not None
-                else results
-            )
-            preloaded_gene_data = prepare_gene_data_bulk(
-                self.con, [cluster_result.gene_ensembl_id for cluster_result in filtered_results if _gene_symbol_key(cluster_result.gene_symbol) is not None]
-            )
-
-            gene_visualizations = {}
-            for count, cluster_result in enumerate(results, start=1):
-                try:
-                    df_cluster_junctions = pd.DataFrame(cluster_result.junctions, columns=['start', 'end'])
-                    cluster_gene_key = _gene_symbol_key(cluster_result.gene_symbol)
-                    if print_gene_set is not None and cluster_gene_key not in print_gene_set:
-                        continue
-                    viz = gene_visualizations.get(cluster_result.gene_ensembl_id)
-                    if viz is None:
-                        gene_symbol = cluster_result.gene_symbol
-                        gene_ensembl_id = cluster_result.gene_ensembl_id
-                        preloaded = preloaded_gene_data.get(gene_ensembl_id) if isinstance(gene_ensembl_id, str) else None
-                        viz = self.gene_visualization_cls(self.con, gene_symbol, preloaded=preloaded)
-                        gene_visualizations[gene_ensembl_id] = viz
-                    # name should have event_type and specie if available, to distinguish different clusters of the same gene and across species
-                    file_name = f'{cluster_result.gene_symbol}_{count}_junction_comparison.pdf'
-                    if cluster_result.as_event_type is not None:
-                        file_name = f'{cluster_result.as_event_type}_{file_name}'
-                    if cluster_result.specie is not None:
-                        file_name = f'{cluster_result.specie}_{file_name}'
-
-                    viz.create_pdf(
-                        file_name,
-                        protein_only=False,
-                        domains_only=False,
-                        df_junction=df_cluster_junctions,
-                        df_results=cluster_result.get_results_df(),
-                    )
-                except ValueError as e:
-                    logger.warning(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}, specie {cluster_result.specie}: {e}")
+            self._generate_pdfs(results, print_genes)
 
         return results
