@@ -905,7 +905,7 @@ class JunctionsAnalysis:
         self.logger.info(f"[Main] Analysis complete: processed {processed_count}/{total} clusters")
         return all_results
 
-def _generate_pdfs(self, results, print_genes):
+    def _generate_pdfs(self, results, print_genes):
         """Generate PDF visualizations for clusters."""
         print_gene_set = {gene.upper() for gene in print_genes} if print_genes is not None else None
 
