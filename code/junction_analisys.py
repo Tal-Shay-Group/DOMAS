@@ -778,10 +778,17 @@ class JunctionsAnalysis:
         gene_strand = dict(zip(df_genes['gene_ensembl_id'], df_genes['strand']))
 
         df_transcripts = domas.get_genes_df_transcripts(self.con, gene_ids)
-        df_domains = domas.get_transcript_domains_db(self.con, set(df_transcripts.transcript_ensembl_id))
+
+        # Combine ensembl and refseq IDs, filtering out invalid entries
+        invalid_ids = {'', 'nan', 'None'}
+        transcript_ids = set(
+            df_transcripts.transcript_ensembl_id.fillna(df_transcripts.transcript_refseq_id)
+        ) - {None} - invalid_ids
+
+        df_domains = domas.get_transcript_domains_db(self.con, transcript_ids)
 
         from alternative_splicing import get_exons_for_transcripts
-        df_exons = get_exons_for_transcripts(self.con, set(df_transcripts.transcript_ensembl_id))
+        df_exons = get_exons_for_transcripts(self.con, transcript_ids)
 
         return df_genes, df_transcripts, df_domains, df_exons, gene_strand
 
@@ -808,25 +815,23 @@ class JunctionsAnalysis:
         """Execute cluster analysis in parallel."""
         total = len(cluster_groups)
 
-        # Ensure we have exactly min(num_workers, total) chunks (one per worker)
+        # Divide clusters into chunks (one per worker, as many as needed)
         actual_workers = min(num_workers, total)
         chunk_size = max(1, (total + actual_workers - 1) // actual_workers)
 
-        # Create exactly actual_workers chunks
+        # Create chunks with only as many as needed (no empty chunks)
         chunks = []
-        for i in range(actual_workers):
-            start = i * chunk_size
-            end = start + chunk_size if i < actual_workers - 1 else total
-            chunks.append(cluster_groups[start:end])
+        for i in range(0, total, chunk_size):
+            chunks.append(cluster_groups[i:i+chunk_size])
 
         total_chunks = len(chunks)
 
         self.logger.info(f"Starting analysis with {actual_workers} workers")
         self.logger.info(f"Total clusters: {total}")
-        self.logger.info(f"Processing {total_chunks} chunks ({chunk_size} clusters per chunk)")
+        self.logger.info(f"Processing {total_chunks} chunks (~{chunk_size} clusters per chunk)")
 
         chunks_with_info = [
-            (chunk_idx % actual_workers, chunk_idx, total_chunks, chunk)
+            (chunk_idx % total_chunks, chunk_idx, total_chunks, chunk)
             for chunk_idx, chunk in enumerate(chunks)
         ]
 
