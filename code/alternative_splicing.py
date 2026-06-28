@@ -709,7 +709,7 @@ def analyze_junctions2(con, df_junctions=None, junctions_csv=None, output_path='
                         n=0, create_pdf=True, print_genes=None):
     analyzer = JunctionsAnalysis(con, logger_instance=logger)
     return analyzer.analyze_junctions(df_junctions=df_junctions, junctions_csv=junctions_csv, output_path=output_path, 
-                                      n=n, create_pdf=create_pdf, print_genes=print_genes)
+                                      filter_transcript_count=n, create_pdf=create_pdf, print_genes=print_genes)
 
 def get_domain_name(row):
     domain_name_columns = ['interpro', 'pfam', 'cdd', 'smart', 'tigr', 'CDD_id']
@@ -874,16 +874,17 @@ if __name__ == "__main__":
     #input_file = 'clusters_sum_table_H_vs_M_HN6.xlsx'
     #input_file = '/gpfs0/tals/users/melchio/clusters_sum_table_HN6.xlsx'
     #input_file = '/gpfs0/tals/users/melchio/short_H_vs_M_HN6.xlsx'
-    #input_file = 'short_H_vs_M_HN6.xlsx'
+    input_file = 'short_H_vs_M_HN6.xlsx'
     #input_file = "hadas_prefered.xlsx"
     #print_genes = ['PFDN5', 'CD6','HNRNPH3','USP16', 'DOCK8', 'HNRNPK']
+    print_genes = None
     #output_file = 'clusters_with_3_transcripts.csv'
-    dochap_path = '/gpfs0/tals/projects/Analysis/ariel/DoChap/DoChaP-db/dbs/DB_merged.sqlite'
-    #dochap_path = '/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite'
+    #dochap_path = '/gpfs0/tals/projects/Analysis/ariel/DoChap/DoChaP-db/xdDB_merged.sqlite'
+    dochap_path = '/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite'
     con = sqlite3.connect(dochap_path)
     
-    #analyze_hadas_input(con, input_file, 'hadas_junctions_analysis.csv', print_genes=print_genes)
-    #exit(0)
+    analyze_hadas_input(con, input_file, 'hadas_junctions_analysis.csv', print_genes=print_genes)
+    exit(0)
     #analyze_ioe_files(con, '/Users/arielmelchior/documents/projects/DOMAS/external_data/', 'output_prefix_.*_strict.ioe', 'output_csv.csv', examples_per_event=0)
     analyze_ioe_files(con, '/gpfs0/tals/projects/Analysis/ariel2/DOMAS/external_data/', 'output_prefix_.*_strict.ioe', 'output_csv.csv', examples_per_event=0)
     #ioe_file = '/gpfs0/tals/projects/Analysis/ariel2/DOMAS/external_data/output_prefix_MX_strict.ioe'

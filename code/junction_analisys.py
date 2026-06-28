@@ -5,12 +5,16 @@ import shutil
 import tempfile
 import threading
 import time
+import warnings
 import numpy as np
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from generate_gene_pdf import GeneVisualization, prepare_gene_data_bulk
 import domas
+
+# Suppress FutureWarning about DataFrame concatenation behavior
+warnings.filterwarnings('ignore', category=FutureWarning, message='.*DataFrame concatenation.*')
 
 
 logger = logging.getLogger(__name__)
@@ -533,7 +537,7 @@ class ClusterAnalysisResult:
         for idx, junction in enumerate(self.junctions):
             if not any(idx in junction_idxs for junction_idxs in transcript_junctions.values()):
                 logger.debug(f"Junction {junction} in cluster {self.cluster_name} does not map to any transcript. ")
-                self.add_event('junction_not_mapped', idx)
+                self.add_event('junction_not_mapped', None)
 
         canonical_junctions = transcript_junctions.get(self.canonical_transcript_id, set())
         if not canonical_junctions:
