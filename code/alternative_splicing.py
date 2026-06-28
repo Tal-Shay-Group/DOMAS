@@ -706,10 +706,10 @@ class ClusterAnalysisResult:
         
 
 def analyze_junctions2(con, df_junctions=None, junctions_csv=None, output_path='as_events_junctions_analysis.csv',
-                        n=0, create_pdf=True, print_genes=None):
+                        n=0, create_pdf=True, print_genes=None, num_workers=5):
     analyzer = JunctionsAnalysis(con, logger_instance=logger)
     return analyzer.analyze_junctions(df_junctions=df_junctions, junctions_csv=junctions_csv, output_path=output_path, 
-                                      filter_transcript_count=n, create_pdf=create_pdf, print_genes=print_genes)
+                                      filter_transcript_count=n, create_pdf=create_pdf, print_genes=print_genes, num_workers=num_workers)
 
 def get_domain_name(row):
     domain_name_columns = ['interpro', 'pfam', 'cdd', 'smart', 'tigr', 'CDD_id']

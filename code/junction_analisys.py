@@ -962,7 +962,8 @@ class JunctionsAnalysis:
                 self.logger.warning(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}, specie {cluster_result.specie}: {e}")
 
     def analyze_junctions(self, junctions_csv='as_events_junctions.csv', output_path='as_events_junctions_analysis.csv', df_junctions=None,
-                          hadas_format=False, filter_transcript_count=0, create_pdf=True, print_genes=None, num_workers=4):
+                          hadas_format=False, filter_transcript_count=0, create_pdf=True, print_genes=None, 
+                          num_workers=4, use_longest_cds=False, use_ensembl_only=False):
         """
         Analyze junctions and detect domain changes across alternative transcripts.
 
