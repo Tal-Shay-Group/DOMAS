@@ -6,6 +6,7 @@ ioe_example_junctions.csv (plain CSV format) and short_H_vs_M_HN6.xlsx
 """
 import glob
 import os
+import shutil
 import sqlite3
 import sys
 
@@ -38,6 +39,14 @@ FLAG_COMBINATIONS = [
     (True, False),
     (True, True),
 ]
+
+INPUT_FILES = [
+    ('ioe_csv', IOE_CSV, False),
+    ('hadas_xlsx', HADAS_XLSX, True),
+]
+
+REFERENCE_OUTPUTS_DIR = os.path.join(TESTS_DIR, 'reference_outputs')
+GENERATED_OUTPUTS_DIR = os.path.join(TESTS_DIR, 'generated_outputs')
 
 
 @pytest.fixture(scope='module')
@@ -123,6 +132,81 @@ def test_hadas_xlsx_all_flag_combinations(con, tmp_path, use_longest_cds, restri
     assert len(pdf_files) > 0, "Expected at least one PDF to be generated"
 
     _assert_longest_cds_invariant(results, use_longest_cds)
+
+
+# ---------------------------------------------------------------------------
+# Automatic comparison against the committed golden reference outputs
+# ---------------------------------------------------------------------------
+
+def _case_name(label, use_longest_cds, restrict_pdf_to_comparable):
+    return f"{label}__longestcds_{use_longest_cds}__restrict_{restrict_pdf_to_comparable}"
+
+
+def _run_case_to_dir(con, case_dir, junctions_csv, hadas_format, use_longest_cds, restrict_pdf_to_comparable):
+    """Run analyze_junctions, writing results.csv + PDFs into a freshly-created case_dir."""
+    if os.path.exists(case_dir):
+        shutil.rmtree(case_dir)
+    os.makedirs(case_dir)
+
+    output_path = os.path.join(case_dir, 'results.csv')
+    cwd_before = os.getcwd()
+    os.chdir(case_dir)
+    try:
+        analysis = JunctionsAnalysis(con)
+        analysis.analyze_junctions(
+            junctions_csv=junctions_csv,
+            output_path=output_path,
+            hadas_format=hadas_format,
+            create_pdf=True,
+            num_workers=1,
+            use_longest_cds=use_longest_cds,
+            restrict_pdf_to_comparable=restrict_pdf_to_comparable,
+        )
+    finally:
+        os.chdir(cwd_before)
+    return output_path
+
+
+def _compare_csv_to_reference(generated_csv, reference_csv):
+    """Assert generated_csv has the same rows as reference_csv, ignoring row order."""
+    if not os.path.exists(reference_csv):
+        pytest.skip(f"No reference output committed to compare against at {reference_csv}")
+
+    df_generated = pd.read_csv(generated_csv).fillna('')
+    df_reference = pd.read_csv(reference_csv).fillna('')
+    sort_columns = list(df_reference.columns)
+    df_generated = df_generated.sort_values(sort_columns).reset_index(drop=True)
+    df_reference = df_reference.sort_values(sort_columns).reset_index(drop=True)
+    pd.testing.assert_frame_equal(df_generated, df_reference, check_dtype=False)
+
+
+@pytest.mark.parametrize('label,junctions_csv,hadas_format', INPUT_FILES)
+@pytest.mark.parametrize('use_longest_cds,restrict_pdf_to_comparable', FLAG_COMBINATIONS)
+def test_compare_against_reference_outputs(con, keep_test_output, label, junctions_csv, hadas_format,
+                                            use_longest_cds, restrict_pdf_to_comparable):
+    """Run analyze_junctions for this flag combination, writing its CSV/PDF output to
+    tests/generated_outputs/<case_name>/, then compare the resulting results.csv
+    against the golden reference under tests/reference_outputs/<case_name>/.
+
+    The generated output directory is deleted after a successful comparison by
+    default. Pass --keep-test-output on the pytest command line to keep it
+    (e.g. to inspect the PDFs by hand).
+    """
+    case_name = _case_name(label, use_longest_cds, restrict_pdf_to_comparable)
+    output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
+    reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
+
+    generated_csv = _run_case_to_dir(
+        con, output_dir, junctions_csv, hadas_format, use_longest_cds, restrict_pdf_to_comparable,
+    )
+
+    pdf_files = glob.glob(os.path.join(output_dir, '*_junction_comparison.pdf'))
+    assert len(pdf_files) > 0, f"Expected at least one PDF to be generated in {output_dir}"
+
+    _compare_csv_to_reference(generated_csv, reference_csv)
+
+    if not keep_test_output:
+        shutil.rmtree(output_dir)
 
 
 # ---------------------------------------------------------------------------
