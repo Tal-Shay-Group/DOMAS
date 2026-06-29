@@ -364,6 +364,15 @@ class GeneVisualization:
         """Return True when transcript protein has at least one domain row."""
         return len(transcript['domains']) > 0
 
+    def _transcript_matches_ids(self, transcript, transcript_ids):
+        """Return True when this transcript's ensembl or refseq id is in transcript_ids."""
+        ensembl_id = transcript['info'].get('transcript_ensembl_id')
+        refseq_id = transcript['info'].get('transcript_refseq_id')
+        return (
+            (pd.notna(ensembl_id) and ensembl_id in transcript_ids)
+            or (pd.notna(refseq_id) and refseq_id in transcript_ids)
+        )
+
     def _compute_domain_label_positions(self, label_items, axis_max, base_y, lane_step=0.08, lanes=4):
         """Assign below-domain label positions across lanes to reduce overlap."""
         if not label_items:
@@ -650,7 +659,8 @@ class GeneVisualization:
     
     def create_pdf(self, output_file='gene_visualization.pdf', transcripts_per_page=4,
                    protein_only=False, domains_only=False, df_junction=None,
-                   df_results=None, show_canonical_non_relevant_junctions=True):
+                   df_results=None, show_canonical_non_relevant_junctions=True,
+                   transcript_ids=None):
         """
         Create PDF visualization of the gene, one page per transcripts_per_page transcripts.
         Each page has its own axis scales at the top so they never overlap with transcript rows.
@@ -672,6 +682,12 @@ class GeneVisualization:
         show_canonical_non_relevant_junctions : bool
             If True, the canonical transcript shows all junctions with dashed lines
             for those that are not relevant to that transcript.
+        transcript_ids : set | list | None
+            If provided, only draw transcripts whose ensembl or refseq id is in
+            this collection - typically the canonical transcript plus the
+            transcripts that were actually compared to it. All other transcripts
+            of the gene are omitted entirely. If None (default), every transcript
+            of the gene is eligible (subject to protein_only/domains_only).
         """
         from matplotlib.backends.backend_pdf import PdfPages
 
@@ -688,6 +704,8 @@ class GeneVisualization:
         # Skip empty/invalid transcript entries, canonical transcript first
         valid_transcripts = [t for t in self.transcripts if len(t['exons']) > 0]
         valid_transcripts.sort(key=lambda t: 0 if t['info'].get('canonical') else 1)
+        if transcript_ids is not None:
+            valid_transcripts = [t for t in valid_transcripts if self._transcript_matches_ids(t, transcript_ids)]
         if protein_only:
             valid_transcripts = [t for t in valid_transcripts if self._transcript_produces_protein(t)]
         if domains_only:
@@ -702,6 +720,8 @@ class GeneVisualization:
                 print(f"No domain-containing transcripts found for gene {self.gene_name}")
             elif protein_only:
                 print(f"No protein-producing transcripts found for gene {self.gene_name}")
+            elif transcript_ids is not None:
+                print(f"None of the specified transcripts were found for gene {self.gene_name}")
             else:
                 print(f"No transcripts found for gene {self.gene_name}")
             return

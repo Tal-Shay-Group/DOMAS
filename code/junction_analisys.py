@@ -108,9 +108,27 @@ def get_aa_range(first_exon, last_exon, min_bp=None, max_bp=None):
     If min_bp/max_bp are given, the range is narrowed to the AA positions
     corresponding to those genomic bp coordinates (clamped within the
     first/last exon's CDS span) instead of the exons' full CDS span.
+
+    first_exon/last_exon are chosen by genomic position (the exon nearest the
+    window's lower/upper genomic bound, see find_boundary_exons). On a minus
+    strand transcript that does NOT mean first_exon precedes last_exon in CDS
+    order - the exon nearest the genomically-lower bound can be the LATER
+    exon in the transcript. When min_bp/max_bp aren't given we therefore
+    can't just use first_exon's start and last_exon's end (those could be two
+    CDS-adjacent values straddling a single codon instead of spanning the
+    full region); we take the min/max across all four boundary CDS values
+    instead, which is correct regardless of strand.
     """
-    start_cds = first_exon['abs_start_CDS'] if min_bp is None else _bp_to_cds(first_exon, min_bp)
-    end_cds = last_exon['abs_end_CDS'] if max_bp is None else _bp_to_cds(last_exon, max_bp)
+    if min_bp is None and max_bp is None:
+        cds_bounds = [
+            first_exon['abs_start_CDS'], first_exon['abs_end_CDS'],
+            last_exon['abs_start_CDS'], last_exon['abs_end_CDS'],
+        ]
+        start_cds = min(cds_bounds)
+        end_cds = max(cds_bounds)
+    else:
+        start_cds = first_exon['abs_start_CDS'] if min_bp is None else _bp_to_cds(first_exon, min_bp)
+        end_cds = last_exon['abs_end_CDS'] if max_bp is None else _bp_to_cds(last_exon, max_bp)
     min_aa = min(start_cds, end_cds) // 3
     max_aa = max(start_cds, end_cds) // 3
     return min_aa, max_aa
@@ -124,8 +142,8 @@ def _cds_to_bp(exon, cds_bp):
 
 def find_bp_range_for_domains(df_exons, domains_in_region):
     """
-    Genomic (start, end) bp positions corresponding to the start of the
-    nearest-starting domain and the end of the furthest-reaching domain in
+    Genomic (start, end) bp positions - start <= end - spanning the start of
+    the nearest-starting domain and the end of the furthest-reaching domain in
     `domains_in_region`, or (None, None) if there are no domains with a
     defined AA range.
     """
@@ -141,9 +159,15 @@ def find_bp_range_for_domains(df_exons, domains_in_region):
     if first_exon.empty or last_exon.empty:
         return None, None
 
-    min_bp = _cds_to_bp(first_exon.iloc[0], min_domain_bp)
-    max_bp = _cds_to_bp(last_exon.iloc[0], max_domain_bp)
-    return min_bp, max_bp
+    # On a minus strand transcript, the domain's lower CDS bound maps to a
+    # HIGHER genomic position (and vice versa), so these two values can come
+    # back genomically reversed. Callers pool this pair into a min/max across
+    # several transcripts, so it must be returned in genomic (low, high)
+    # order regardless of strand - otherwise the reversed pair is silently
+    # dropped from the pooled max() and the window never widens to cover it.
+    bp_a = _cds_to_bp(first_exon.iloc[0], min_domain_bp)
+    bp_b = _cds_to_bp(last_exon.iloc[0], max_domain_bp)
+    return min(bp_a, bp_b), max(bp_a, bp_b)
 
 
 def build_exon_lookup(df_exons):
@@ -484,7 +508,7 @@ class ClusterAnalysisResult:
         self.events.append((event, transcript_id, domain_name, canonical_domain_length,
                             transcript_domain_length, canonical_domains_number, transcript_domains_number))
 
-    def analyze_junction(self, df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup):
+    def analyze_junction(self, df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup, use_longest_cds=False):
         """
         Run the DOMAS algorithm for this cluster:
 
@@ -509,6 +533,16 @@ class ClusterAnalysisResult:
             )
             if tid is not None and not pd.isna(tid) and tid not in invalid_ids
         ]
+
+        # CDS length per transcript id (used by use_longest_cds below). Missing
+        # cds_start/cds_end yields NaN here, normalized to -1 so such transcripts
+        # are deprioritized rather than breaking the max() comparison.
+        combined_ids = df_gene_transcripts.transcript_ensembl_id.fillna(df_gene_transcripts.transcript_refseq_id)
+        cds_length_by_transcript = {
+            tid: (length if pd.notna(length) else -1)
+            for tid, length in zip(combined_ids, df_gene_transcripts.cds_end - df_gene_transcripts.cds_start)
+        }
+
         gene_canonical_ids = canonical_transcript_ids.intersection(gene_transcript_ids)
         if not gene_canonical_ids:
             self.add_event('no_canonical_transcript')
@@ -545,6 +579,7 @@ class ClusterAnalysisResult:
             logger.debug(f"No canonical junctions found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
             return
 
+        comparable_transcript_ids = []
         for transcript_id, junction_idxs in transcript_junctions.items():
             if transcript_id == self.canonical_transcript_id:
                 continue
@@ -562,6 +597,28 @@ class ClusterAnalysisResult:
                 self.add_event('no_unique_junctions', transcript_id=transcript_id)
                 continue
 
+            comparable_transcript_ids.append(transcript_id)
+
+        # If several transcripts could be compared to the canonical transcript,
+        # only keep the one with the longest CDS - the rest are recorded as
+        # skipped rather than compared.
+        if use_longest_cds and len(comparable_transcript_ids) > 1:
+            longest_transcript_id = max(
+                comparable_transcript_ids,
+                key=lambda tid: (cds_length_by_transcript.get(tid, -1), tid),
+            )
+            for transcript_id in comparable_transcript_ids:
+                if transcript_id != longest_transcript_id:
+                    logger.debug(
+                        f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} has unique junctions "
+                        f"but is not the longest-CDS transcript among {sorted(comparable_transcript_ids)}. "
+                        f"Skipping in favor of {longest_transcript_id}."
+                    )
+                    self.add_event('skipped_not_longest_cds', transcript_id=transcript_id)
+            comparable_transcript_ids = [longest_transcript_id]
+
+        for transcript_id in comparable_transcript_ids:
+            junction_idxs = transcript_junctions[transcript_id]
             events = list(compare_domains(
                 domain_lookup, transcript_exons, self.canonical_transcript_id, transcript_id,
                 canonical_junctions, junction_idxs, self.junctions,
@@ -594,7 +651,7 @@ class ClusterAnalysisResult:
         
 
 def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None, canonical_transcript_ids=None,
-                           gene_strand=None, transcripts_by_gene=None, empty_transcripts=None):
+                           gene_strand=None, transcripts_by_gene=None, empty_transcripts=None, use_longest_cds=False):
     """Analyze a single cluster."""
     _, cluster_df = cluster_tuple
 
@@ -611,7 +668,7 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
     cluster_result.junctions = list(zip(cluster_df['start_position'], cluster_df['end_position']))
 
     df_gene_transcripts = transcripts_by_gene.get(gene_ensembl_id, empty_transcripts)
-    cluster_result.analyze_junction(df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup)
+    cluster_result.analyze_junction(df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup, use_longest_cds=use_longest_cds)
 
     return cluster_result
 
@@ -698,7 +755,7 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
 
 
 def _process_cluster_chunk(chunk_info, df_exons=None, df_domains=None, canonical_transcript_ids=None,
-                          gene_strand=None, transcripts_by_gene=None, empty_transcripts=None):
+                          gene_strand=None, transcripts_by_gene=None, empty_transcripts=None, use_longest_cds=False):
     """Process a chunk of clusters sequentially (worker function for ProcessPoolExecutor).
 
     Builds lookups inside the worker to avoid pickling issues with closures.
@@ -727,7 +784,8 @@ def _process_cluster_chunk(chunk_info, df_exons=None, df_domains=None, canonical
                 canonical_transcript_ids=canonical_transcript_ids,
                 gene_strand=gene_strand,
                 transcripts_by_gene=transcripts_by_gene,
-                empty_transcripts=empty_transcripts
+                empty_transcripts=empty_transcripts,
+                use_longest_cds=use_longest_cds
             )
             chunk_results.append(result)
         except (KeyError, ValueError, AttributeError, TypeError) as e:
@@ -761,7 +819,7 @@ class JunctionsAnalysis:
             raise ValueError("Only one of df_junctions or junctions_csv should be provided.")
         elif junctions_csv is not None:
             if hadas_format:
-                df_junctions = domas.read_hadas_input_file(junctions_csv)
+                df_junctions = domas.hadas_read_input_file(self.con, junctions_csv)
             else:
                 df_junctions = pd.read_csv(junctions_csv)
         else:
@@ -788,7 +846,7 @@ class JunctionsAnalysis:
         genes_with_count = df_transcripts[df_transcripts['gene_count'] == filter_transcript_count].gene_GeneID_id.unique().tolist()
         return df_junctions[df_junctions['gene_ensembl_id'].isin(genes_with_count)]
 
-    def _load_database_data(self, gene_ids):
+    def _load_database_data(self, gene_ids, use_ensembl_only=False):
         """Load genes, transcripts, domains, and exons from database."""
         placeholders = ','.join('?' * len(gene_ids))
         df_genes = pd.read_sql_query(
@@ -798,6 +856,12 @@ class JunctionsAnalysis:
         gene_strand = dict(zip(df_genes['gene_ensembl_id'], df_genes['strand']))
 
         df_transcripts = domas.get_genes_df_transcripts(self.con, gene_ids)
+
+        if use_ensembl_only:
+            invalid_ids = {'', 'nan', 'None'}
+            has_ensembl_id = df_transcripts.transcript_ensembl_id.notna() & \
+                ~df_transcripts.transcript_ensembl_id.isin(invalid_ids)
+            df_transcripts = df_transcripts[has_ensembl_id]
 
         # Combine ensembl and refseq IDs, filtering out invalid entries
         invalid_ids = {'', 'nan', 'None'}
@@ -831,7 +895,8 @@ class JunctionsAnalysis:
         return cluster_groups
 
     def _run_parallel_analysis(self, cluster_groups, df_exons, df_domains, canonical_transcript_ids,
-                               gene_strand, transcripts_by_gene, empty_transcripts, num_workers, output_path):
+                               gene_strand, transcripts_by_gene, empty_transcripts, num_workers, output_path,
+                               use_longest_cds=False):
         """Execute cluster analysis in parallel with dedicated writer thread."""
         total = len(cluster_groups)
 
@@ -878,7 +943,8 @@ class JunctionsAnalysis:
             canonical_transcript_ids=canonical_transcript_ids,
             gene_strand=gene_strand,
             transcripts_by_gene=transcripts_by_gene,
-            empty_transcripts=empty_transcripts
+            empty_transcripts=empty_transcripts,
+            use_longest_cds=use_longest_cds
         )
 
         all_results = []  # Collect results for PDF generation
@@ -912,8 +978,32 @@ class JunctionsAnalysis:
         self.logger.info(f"[Main] Analysis complete: processed {processed_count}/{total} clusters")
         return all_results
 
-    def _generate_pdfs(self, results, print_genes):
-        """Generate PDF visualizations for clusters."""
+    # Events recorded for a transcript that was NOT actually compared to the
+    # canonical transcript (it was skipped for lacking junctions, lacking a
+    # unique junction, or losing the longest-CDS tie-break).
+    _SKIPPED_TRANSCRIPT_EVENTS = {
+        'transcript_doesnt_have_junctions', 'no_unique_junctions', 'skipped_not_longest_cds',
+    }
+
+    def _comparable_transcript_ids(self, cluster_result):
+        """Canonical transcript id plus every transcript id that was actually compared to it."""
+        comparable_ids = set()
+        if cluster_result.canonical_transcript_id:
+            comparable_ids.add(cluster_result.canonical_transcript_id)
+        df_cluster_results = cluster_result.get_results_df()
+        if len(df_cluster_results) > 0:
+            compared_mask = ~df_cluster_results['event'].isin(self._SKIPPED_TRANSCRIPT_EVENTS)
+            comparable_ids.update(df_cluster_results.loc[compared_mask, 'transcript_id'].dropna())
+        return comparable_ids
+
+    def _generate_pdfs(self, results, print_genes, restrict_to_comparable=False):
+        """Generate PDF visualizations for clusters.
+
+        restrict_to_comparable: if True, each PDF only draws the canonical
+        transcript and the transcripts that were actually compared to it -
+        transcripts skipped during analysis (no junctions, no unique junction,
+        or lost the longest-CDS tie-break) are omitted entirely.
+        """
         print_gene_set = {gene.upper() for gene in print_genes} if print_genes is not None else None
 
         def _gene_symbol_key(value):
@@ -951,19 +1041,22 @@ class JunctionsAnalysis:
                 if cluster_result.specie is not None:
                     file_name = f'{cluster_result.specie}_{file_name}'
 
+                transcript_ids = self._comparable_transcript_ids(cluster_result) if restrict_to_comparable else None
                 viz.create_pdf(
                     file_name,
                     protein_only=False,
                     domains_only=False,
                     df_junction=df_cluster_junctions,
                     df_results=cluster_result.get_results_df(),
+                    transcript_ids=transcript_ids,
                 )
             except ValueError as e:
                 self.logger.warning(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}, specie {cluster_result.specie}: {e}")
 
     def analyze_junctions(self, junctions_csv='as_events_junctions.csv', output_path='as_events_junctions_analysis.csv', df_junctions=None,
-                          hadas_format=False, filter_transcript_count=0, create_pdf=True, print_genes=None, 
-                          num_workers=4, use_longest_cds=False, use_ensembl_only=False):
+                          hadas_format=False, filter_transcript_count=0, create_pdf=True, print_genes=None,
+                          num_workers=4, use_longest_cds=False, use_ensembl_only=False,
+                          restrict_pdf_to_comparable=False):
         """
         Analyze junctions and detect domain changes across alternative transcripts.
 
@@ -976,6 +1069,19 @@ class JunctionsAnalysis:
             create_pdf: Whether to generate PDF visualizations
             print_genes: List of gene symbols to generate PDFs for (or all if None)
             num_workers: Number of parallel workers for analysis
+            use_ensembl_only: If True, only consider transcripts that have an
+                ensembl id - transcripts with no ensembl id (refseq-only) are
+                filtered out before any exon/domain lookups are built, so they
+                never participate in the analysis at all.
+            use_longest_cds: If True, and several transcripts could be compared
+                to the canonical transcript (each has at least one junction not
+                shared with the canonical), only the one with the longest CDS
+                is actually compared - the others are recorded with a
+                skipped_not_longest_cds event instead of being compared.
+            restrict_pdf_to_comparable: If True, each generated PDF only draws
+                the canonical transcript and the transcripts that were actually
+                compared to it - every other transcript of the gene is omitted
+                from the visualization entirely.
 
         Returns:
             List of ClusterAnalysisResult objects
@@ -988,7 +1094,9 @@ class JunctionsAnalysis:
         self.logger.info(f"Analyzing {len(gene_ids)} genes")
 
         # Load data from database
-        df_genes, df_transcripts, df_domains, df_exons, gene_strand = self._load_database_data(gene_ids)
+        df_genes, df_transcripts, df_domains, df_exons, gene_strand = self._load_database_data(
+            gene_ids, use_ensembl_only=use_ensembl_only
+        )
 
         # Prepare lookup structures
         canonical_transcript_ids, transcripts_by_gene, empty_transcripts = \
@@ -1001,11 +1109,11 @@ class JunctionsAnalysis:
         results = self._run_parallel_analysis(
             cluster_groups, df_exons, df_domains, canonical_transcript_ids,
             gene_strand, transcripts_by_gene, empty_transcripts, num_workers,
-            output_path
+            output_path, use_longest_cds=use_longest_cds
         )
 
         # Generate PDFs if requested
         if create_pdf:
-            self._generate_pdfs(results, print_genes)
+            self._generate_pdfs(results, print_genes, restrict_to_comparable=restrict_pdf_to_comparable)
 
         return results
