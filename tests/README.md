@@ -26,9 +26,16 @@ Drop `-v` for terse output, or run a subset by name:
 python3 -m pytest test_flags.py -v -k "ioe_csv and True"
 ```
 
-`test_flags.py` points at a hardcoded DB path
-(`/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite`).
-Update `DB_PATH` near the top of the file if the database moves.
+By default the tests run against
+`/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite`.
+Point them at a different database with `--db-path`:
+
+```bash
+python3 -m pytest test_flags.py -v --db-path /path/to/other/DB_merged.sqlite
+```
+
+For local runs against the usual database, just omit the flag - the default
+already points at it.
 
 ### What's covered
 
@@ -115,5 +122,5 @@ skips (rather than fails) any case whose reference isn't present.
 
 ## Other files
 
-- `conftest.py` - registers the `--keep-test-output` pytest option used by
-  `test_compare_against_reference_outputs`.
+- `conftest.py` - registers the `--keep-test-output` and `--db-path` pytest
+  options, and the `keep_test_output` / `db_path` fixtures built from them.

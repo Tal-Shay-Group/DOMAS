@@ -22,7 +22,6 @@ sys.path.insert(0, CODE_DIR)
 
 from junction_analisys import JunctionsAnalysis, ClusterAnalysisResult  # noqa: E402
 
-DB_PATH = '/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite'
 IOE_CSV = os.path.join(TESTS_DIR, 'ioe_example_junctions.csv')
 HADAS_XLSX = os.path.join(TESTS_DIR, 'short_H_vs_M_HN6.xlsx')
 
@@ -50,10 +49,10 @@ GENERATED_OUTPUTS_DIR = os.path.join(TESTS_DIR, 'generated_outputs')
 
 
 @pytest.fixture(scope='module')
-def con():
-    if not os.path.exists(DB_PATH):
-        pytest.skip(f"DoChaP database not found at {DB_PATH}")
-    connection = sqlite3.connect(DB_PATH)
+def con(db_path):
+    if not os.path.exists(db_path):
+        pytest.skip(f"DoChaP database not found at {db_path}")
+    connection = sqlite3.connect(db_path)
     yield connection
     connection.close()
 
