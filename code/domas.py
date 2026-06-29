@@ -294,6 +294,68 @@ def analyze_junctions_by_cluster(input_path, dochap_db_path, output_path='cluste
     df_results.to_csv(output_path, index=False)
     conn.close()
    
+def print_transcripts_by_cds_length(conn, gene_symbols, output_file=None, species=None):
+    """
+    For each gene symbol in gene_symbols, list its transcripts in descending
+    order of CDS length, printing each transcript's id, cds_start, cds_end
+    and cds_length.
+
+    Args:
+        conn: DoChaP database connection.
+        gene_symbols: list of gene symbols to look up (case-insensitive).
+        output_file: if given, write the listing to this path instead of
+            printing it to stdout.
+        species: if given (e.g. 'H_sapiens'), only consider genes from this
+            species - otherwise every species with a matching symbol is
+            included.
+    """
+    if not gene_symbols:
+        return
+
+    placeholders = ','.join(['?'] * len(gene_symbols))
+    query = f"SELECT gene_ensembl_id, gene_symbol FROM Genes WHERE gene_symbol COLLATE NOCASE IN ({placeholders})"
+    params = list(gene_symbols)
+    if species:
+        query += " AND specie = ?"
+        params.append(species)
+    df_genes = pd.read_sql_query(query, conn, params=params)
+
+    lines = []
+    found_symbols = set()
+    for _, gene in df_genes.iterrows():
+        gene_ensembl_id = gene['gene_ensembl_id']
+        gene_symbol = gene['gene_symbol']
+        found_symbols.add(gene_symbol.upper())
+
+        df_transcripts = pd.read_sql_query(
+            "SELECT transcript_ensembl_id, transcript_refseq_id, cds_start, cds_end "
+            "FROM Transcripts WHERE gene_ensembl_id = ?",
+            conn, params=[gene_ensembl_id],
+        )
+        df_transcripts = df_transcripts.dropna(subset=['cds_start', 'cds_end'])
+        df_transcripts['cds_length'] = df_transcripts['cds_end'] - df_transcripts['cds_start']
+        df_transcripts = df_transcripts.sort_values('cds_length', ascending=False)
+
+        lines.append(f"Gene: {gene_symbol} ({gene_ensembl_id})")
+        for _, t in df_transcripts.iterrows():
+            transcript_id = t['transcript_ensembl_id'] if pd.notna(t['transcript_ensembl_id']) else t['transcript_refseq_id']
+            lines.append(
+                f"\t{transcript_id}\tcds_start={int(t['cds_start'])}\t"
+                f"cds_end={int(t['cds_end'])}\tcds_length={int(t['cds_length'])}"
+            )
+
+    missing_symbols = [s for s in gene_symbols if s.upper() not in found_symbols]
+    for symbol in missing_symbols:
+        lines.append(f"Gene: {symbol} - NOT FOUND in database")
+
+    output_text = "\n".join(lines)
+    if output_file:
+        with open(output_file, 'w') as f:
+            f.write(output_text + "\n")
+    else:
+        print(output_text)
+
+
 def print_results(conn, df_junctions, gene_name):
     viz = GeneVisualization(conn, gene_name)
     viz.create_pdf(

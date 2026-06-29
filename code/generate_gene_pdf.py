@@ -73,17 +73,34 @@ def prepare_gene_data_bulk(conn, gene_ensembl_ids):
         conn, params=gene_ensembl_ids,
     )
 
-    transcript_ids = df_transcripts['transcript_ensembl_id'].tolist()
+    # Combine ensembl and refseq ids so RefSeq-only transcripts (no ensembl id)
+    # still get their exons/proteins matched, instead of being silently dropped.
+    df_transcripts['combined_id'] = df_transcripts['transcript_ensembl_id'].fillna(
+        df_transcripts['transcript_refseq_id']
+    )
+    transcript_ids = df_transcripts['combined_id'].dropna().tolist()
     if transcript_ids:
         tx_placeholders = ','.join(['?'] * len(transcript_ids))
         df_exons_all = pd.read_sql_query(
-            f"SELECT * FROM Transcript_exon WHERE transcript_ensembl_id IN ({tx_placeholders})",
-            conn, params=transcript_ids,
+            f"""SELECT * FROM Transcript_exon
+                WHERE transcript_ensembl_id IN ({tx_placeholders})
+                   OR transcript_refseq_id IN ({tx_placeholders})""",
+            conn, params=transcript_ids * 2,
         )
         df_proteins_all = pd.read_sql_query(
-            f"SELECT * FROM Proteins WHERE transcript_ensembl_id IN ({tx_placeholders})",
-            conn, params=transcript_ids,
+            f"""SELECT * FROM Proteins
+                WHERE transcript_ensembl_id IN ({tx_placeholders})
+                   OR transcript_refseq_id IN ({tx_placeholders})""",
+            conn, params=transcript_ids * 2,
         )
+        if len(df_exons_all):
+            df_exons_all['combined_id'] = df_exons_all['transcript_ensembl_id'].fillna(
+                df_exons_all['transcript_refseq_id']
+            )
+        if len(df_proteins_all):
+            df_proteins_all['combined_id'] = df_proteins_all['transcript_ensembl_id'].fillna(
+                df_proteins_all['transcript_refseq_id']
+            )
     else:
         df_exons_all = pd.DataFrame()
         df_proteins_all = pd.DataFrame()
@@ -102,8 +119,8 @@ def prepare_gene_data_bulk(conn, gene_ensembl_ids):
     else:
         df_domains_all = pd.DataFrame()
 
-    exons_by_transcript = {k: v for k, v in df_exons_all.groupby('transcript_ensembl_id')} if len(df_exons_all) else {}
-    proteins_by_transcript = {k: v for k, v in df_proteins_all.groupby('transcript_ensembl_id')} if len(df_proteins_all) else {}
+    exons_by_transcript = {k: v for k, v in df_exons_all.groupby('combined_id')} if len(df_exons_all) else {}
+    proteins_by_transcript = {k: v for k, v in df_proteins_all.groupby('combined_id')} if len(df_proteins_all) else {}
     domains_by_protein = {k: v for k, v in df_domains_all.groupby('protein_ensembl_id')} if len(df_domains_all) else {}
 
     def get_exons(transcript_id):
@@ -133,7 +150,7 @@ def prepare_gene_data_bulk(conn, gene_ensembl_ids):
     for _, gene_row in df_genes.iterrows():
         transcripts = []
         for _, transcript in transcript_groups.get(gene_row['gene_ensembl_id'], pd.DataFrame()).iterrows():
-            tid = transcript['transcript_ensembl_id']
+            tid = transcript['combined_id']
             transcripts.append({
                 'info': transcript,
                 'exons': get_exons(tid),
@@ -233,22 +250,23 @@ class GeneVisualization:
         for _, transcript in df_transcripts.iterrows():
             transcript_data = {
                 'info': transcript,
-                'exons': self._load_exons(transcript['transcript_ensembl_id']),
-                'domains': self._load_domains(transcript['transcript_ensembl_id'])
+                'exons': self._load_exons(transcript['transcript_ensembl_id'], transcript.get('transcript_refseq_id')),
+                'domains': self._load_domains(transcript['transcript_ensembl_id'], transcript.get('transcript_refseq_id'))
             }
             self.transcripts.append(transcript_data)
 
         # Assign colors to exons
         self._assign_exon_colors()
-        
-    def _load_exons(self, transcript_id):
-        """Load exons for a transcript."""
+
+    def _load_exons(self, transcript_ensembl_id, transcript_refseq_id=None):
+        """Load exons for a transcript, matched by either its ensembl or refseq id
+        (a RefSeq-only transcript has no ensembl id, so both are checked)."""
         exon_query = """
-            SELECT * FROM Transcript_exon 
-            WHERE transcript_ensembl_id = ?
+            SELECT * FROM Transcript_exon
+            WHERE transcript_ensembl_id = ? OR transcript_refseq_id = ?
             ORDER BY abs_start_CDS
         """
-        df_exons = pd.read_sql_query(exon_query, self.conn, params=[transcript_id])
+        df_exons = pd.read_sql_query(exon_query, self.conn, params=[transcript_ensembl_id, transcript_refseq_id])
         # If any exons have abs_start_CDS = 0 (non-coding), sort those by genomic position
         # and put them at the beginning
         if (df_exons['abs_start_CDS'] == 0).any():
@@ -256,15 +274,16 @@ class GeneVisualization:
             coding = df_exons[df_exons['abs_start_CDS'] > 0].sort_values('abs_start_CDS')
             df_exons = pd.concat([non_coding, coding], ignore_index=True)
         return df_exons
-    
-    def _load_domains(self, transcript_id):
-        """Load protein domains for a transcript."""
+
+    def _load_domains(self, transcript_ensembl_id, transcript_refseq_id=None):
+        """Load protein domains for a transcript, matched by either its ensembl or
+        refseq id (a RefSeq-only transcript has no ensembl id)."""
         # Get protein ID
         protein_query = """
-            SELECT protein_ensembl_id FROM Proteins 
-            WHERE transcript_ensembl_id = ?
+            SELECT protein_ensembl_id FROM Proteins
+            WHERE transcript_ensembl_id = ? OR transcript_refseq_id = ?
         """
-        df_protein = pd.read_sql_query(protein_query, self.conn, params=[transcript_id])
+        df_protein = pd.read_sql_query(protein_query, self.conn, params=[transcript_ensembl_id, transcript_refseq_id])
         
         if len(df_protein) == 0:
             return pd.DataFrame()
@@ -660,7 +679,7 @@ class GeneVisualization:
     def create_pdf(self, output_file='gene_visualization.pdf', transcripts_per_page=4,
                    protein_only=False, domains_only=False, df_junction=None,
                    df_results=None, show_canonical_non_relevant_junctions=True,
-                   transcript_ids=None):
+                   transcript_ids=None, no_comparison_note=None):
         """
         Create PDF visualization of the gene, one page per transcripts_per_page transcripts.
         Each page has its own axis scales at the top so they never overlap with transcript rows.
@@ -688,6 +707,11 @@ class GeneVisualization:
             transcripts that were actually compared to it. All other transcripts
             of the gene are omitted entirely. If None (default), every transcript
             of the gene is eligible (subject to protein_only/domains_only).
+        no_comparison_note : str | None
+            If given, this text is drawn as an extra line below the last
+            transcript on the last page - typically used together with
+            transcript_ids to explain that no other transcript qualified for
+            comparison against the canonical one.
         """
         from matplotlib.backends.backend_pdf import PdfPages
 
@@ -821,6 +845,12 @@ class GeneVisualization:
                     num_rows = len(rows) if rows is not None else 0
                     results_height = 0.18 if num_rows == 0 else 0.42 + 0.30 * num_rows
                     height_ratios += [results_height, 0.7, 1.2, 0.18]
+                show_no_comparison_note = (
+                    page_idx == num_pages - 1 and no_comparison_note
+                )
+                if show_no_comparison_note:
+                    note_row = len(height_ratios)
+                    height_ratios.append(0.30)
                 total_rows = len(height_ratios)
 
                 fig = plt.figure(figsize=(11, 8.5))
@@ -881,13 +911,25 @@ class GeneVisualization:
                     ax_label = fig.add_subplot(gs[row + 3, :])
                     ax_label.axis('off')
                     transcript_name = transcript['info']['transcript_ensembl_id']
+                    if transcript_name is None or pd.isna(transcript_name):
+                        transcript_name = transcript['info'].get('transcript_refseq_id')
                     protein_name = transcript['info'].get('protein_ensembl_id')
+                    if protein_name is None or pd.isna(protein_name) or str(protein_name).strip() == '':
+                        protein_name = transcript['info'].get('protein_refseq_id')
                     if protein_name is None or pd.isna(protein_name) or str(protein_name).strip() == '':
                         protein_name = 'N/A'
                     ax_label.text(
                         0.02, 0.98,
                         f"Transcript: {transcript_name}  |  Protein: {protein_name}",
                         fontsize=8, va='top', transform=ax_label.transAxes,
+                    )
+
+                if show_no_comparison_note:
+                    ax_note = fig.add_subplot(gs[note_row, :])
+                    ax_note.axis('off')
+                    ax_note.text(
+                        0.02, 0.5, no_comparison_note,
+                        fontsize=9, fontstyle='italic', va='center', transform=ax_note.transAxes,
                     )
 
                 pdf.savefig(fig, bbox_inches='tight', dpi=PDF_RASTER_DPI)

@@ -1042,6 +1042,9 @@ class JunctionsAnalysis:
                     file_name = f'{cluster_result.specie}_{file_name}'
 
                 transcript_ids = self._comparable_transcript_ids(cluster_result) if restrict_to_comparable else None
+                no_comparison_note = None
+                if restrict_to_comparable and transcript_ids - {cluster_result.canonical_transcript_id} == set():
+                    no_comparison_note = "No transcripts available for comparison to the canonical transcript."
                 viz.create_pdf(
                     file_name,
                     protein_only=False,
@@ -1049,6 +1052,7 @@ class JunctionsAnalysis:
                     df_junction=df_cluster_junctions,
                     df_results=cluster_result.get_results_df(),
                     transcript_ids=transcript_ids,
+                    no_comparison_note=no_comparison_note,
                 )
             except ValueError as e:
                 self.logger.warning(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}, specie {cluster_result.specie}: {e}")
