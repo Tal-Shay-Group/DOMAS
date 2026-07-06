@@ -5,6 +5,7 @@ ioe_example_junctions.csv (plain CSV format) and short_H_vs_M_HN6.xlsx
 (hadas format) against the local DoChaP database.
 """
 import glob
+import json
 import os
 import shutil
 import sqlite3
@@ -21,6 +22,9 @@ CODE_DIR = os.path.normpath(os.path.join(TESTS_DIR, '..', 'code'))
 sys.path.insert(0, CODE_DIR)
 
 from junction_analisys import JunctionsAnalysis, ClusterAnalysisResult  # noqa: E402
+from pdf_text_utils import (  # noqa: E402
+    PDF_TEXT_MANIFEST_FILENAME, build_pdf_text_manifest,
+)
 
 IOE_CSV = os.path.join(TESTS_DIR, 'ioe_example_junctions.csv')
 HADAS_XLSX = os.path.join(TESTS_DIR, 'short_H_vs_M_HN6.xlsx')
@@ -179,6 +183,32 @@ def _compare_csv_to_reference(generated_csv, reference_csv):
     pd.testing.assert_frame_equal(df_generated, df_reference, check_dtype=False)
 
 
+def _compare_pdf_text_to_reference(output_dir, reference_dir):
+    """Assert every PDF's extracted text in output_dir matches the golden manifest
+    in reference_dir, comparing text content rather than raw PDF bytes (which
+    differ run-to-run due to matplotlib's embedded CreationDate).
+    """
+    pytest.importorskip('PyPDF2')
+    reference_manifest_path = os.path.join(reference_dir, PDF_TEXT_MANIFEST_FILENAME)
+    if not os.path.exists(reference_manifest_path):
+        pytest.skip(f"No PDF text reference committed to compare against at {reference_manifest_path}")
+
+    with open(reference_manifest_path) as f:
+        reference_manifest = json.load(f)
+    generated_manifest = build_pdf_text_manifest(output_dir)
+
+    missing = sorted(set(reference_manifest) - set(generated_manifest))
+    extra = sorted(set(generated_manifest) - set(reference_manifest))
+    mismatched = sorted(
+        name for name in reference_manifest.keys() & generated_manifest.keys()
+        if reference_manifest[name] != generated_manifest[name]
+    )
+    assert not missing and not extra and not mismatched, (
+        f"PDF text mismatch vs {reference_manifest_path}: "
+        f"missing={missing}, extra={extra}, mismatched_content={mismatched}"
+    )
+
+
 @pytest.mark.parametrize('label,junctions_csv,hadas_format', INPUT_FILES)
 @pytest.mark.parametrize('use_longest_cds,restrict_pdf_to_comparable', FLAG_COMBINATIONS)
 def test_compare_against_reference_outputs(con, keep_test_output, label, junctions_csv, hadas_format,
@@ -193,7 +223,8 @@ def test_compare_against_reference_outputs(con, keep_test_output, label, junctio
     """
     case_name = _case_name(label, use_longest_cds, restrict_pdf_to_comparable)
     output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
-    reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
+    reference_dir = os.path.join(REFERENCE_OUTPUTS_DIR, case_name)
+    reference_csv = os.path.join(reference_dir, 'results.csv')
 
     generated_csv = _run_case_to_dir(
         con, output_dir, junctions_csv, hadas_format, use_longest_cds, restrict_pdf_to_comparable,
@@ -203,6 +234,7 @@ def test_compare_against_reference_outputs(con, keep_test_output, label, junctio
     assert len(pdf_files) > 0, f"Expected at least one PDF to be generated in {output_dir}"
 
     _compare_csv_to_reference(generated_csv, reference_csv)
+    _compare_pdf_text_to_reference(output_dir, reference_dir)
 
     if not keep_test_output:
         shutil.rmtree(output_dir)

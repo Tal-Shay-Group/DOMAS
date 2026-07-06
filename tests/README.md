@@ -51,7 +51,10 @@ already points at it.
   writes its CSV/PDF output to a persistent directory,
   `tests/generated_outputs/<case_name>/`, then compares the generated
   `results.csv` row-for-row against the golden reference at
-  `tests/reference_outputs/<case_name>/results.csv` (order-independent).
+  `tests/reference_outputs/<case_name>/results.csv` (order-independent), and
+  compares each generated PDF's extracted text against the golden manifest at
+  `tests/reference_outputs/<case_name>/pdf_text_reference.json` (see
+  "PDF text reference" below).
   Skips with a clear message if no reference exists yet for that case.
   The generated output directory is deleted **only after a successful
   comparison** - on failure it's left in place for inspection. Pass
@@ -115,12 +118,48 @@ committed golden case before re-committing
 (e.g. `diff <(sort old/results.csv) <(sort new/results.csv)`) - don't
 overwrite a golden reference without checking the diff first.
 
-Only `hadas_xlsx__longestcds_True__restrict_True/` is currently committed to
-git, as a golden reference point. The other 7 cases exist locally once
-generated but aren't tracked yet; `test_compare_against_reference_outputs`
-skips (rather than fails) any case whose reference isn't present.
+`results.csv` and `pdf_text_reference.json` are committed for all 8 cases.
+The full PDFs themselves are only committed for
+`hadas_xlsx__longestcds_True__restrict_True/`, as a reference point for
+manual/visual inspection - the other 7 cases' PDFs exist locally once
+generated but aren't tracked (regenerating writes them, but don't `git add`
+them). `test_compare_against_reference_outputs` skips (rather than fails) any
+case whose `results.csv` or `pdf_text_reference.json` isn't present.
+
+## PDF text reference
+
+Raw PDF bytes aren't diffable as a golden reference: matplotlib embeds a
+CreationDate (and similar metadata) in every PDF it writes, so re-running the
+exact same analysis produces a byte-different file even when the visible
+content is identical - confirmed by regenerating
+`hadas_xlsx__longestcds_True__restrict_True` and diffing old vs new: same
+file sizes, only a handful of differing bytes per PDF, no content change.
+
+Instead, `tests/pdf_text_utils.py` extracts each PDF page's text with
+PyPDF2 and stores it as `pdf_text_reference.json` (one file per case,
+mapping PDF filename to a list of per-page text) - gene/transcript/protein
+ids, event names, and domain labels are all real text elements, so this
+catches real content regressions (wrong transcript compared, dropped
+domain, mislabeled event, ...) without false-failing on timestamp noise.
+It won't catch a purely visual/layout bug that doesn't change the extracted
+text (e.g. a domain drawn at the wrong x-position but still listed in the
+per-page text) - an image-diff approach would be needed for that, at the
+cost of being flakier across machines (font hinting/anti-aliasing differ by
+OS).
+
+`generate_reference_outputs.py` writes `pdf_text_reference.json` alongside
+`results.csv` automatically. If you regenerate references by hand instead,
+rebuild the manifest with:
+
+```python
+from pdf_text_utils import write_pdf_text_manifest
+write_pdf_text_manifest('reference_outputs/<case_name>')
+```
 
 ## Other files
 
 - `conftest.py` - registers the `--keep-test-output` and `--db-path` pytest
   options, and the `keep_test_output` / `db_path` fixtures built from them.
+- `pdf_text_utils.py` - builds/writes the `pdf_text_reference.json` manifest
+  used by both `generate_reference_outputs.py` and
+  `test_compare_against_reference_outputs` (see "PDF text reference" above).
