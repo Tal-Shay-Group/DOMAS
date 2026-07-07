@@ -414,6 +414,117 @@ def get_transcript_domains_db(con, transcript_ids):
     print(f'df columns: {merged_df.columns}')
     return merged_df
 
+
+REPRESENTATIVE_DOMAINS_COLUMNS = [
+    'protein_ensembl_id_version', 'transcript_ensembl_id_version', 'protein_interpro_id',
+    'gene_ensembl_id', 'canonical', 'AA_start', 'AA_end', 'short_description',
+    'CDD_id', 'cdd', 'pfam', 'smart', 'tigr', 'interpro',
+]
+
+
+def _route_domain_id_to_column(domain_id):
+    """Map an InterPro match-XML accession (RepresentativeDomains.domain_id) to the
+    DomainType-style identifier column it belongs to. Only affects which bucket the id is
+    displayed under - domain matching in junction_analisys.py checks all buckets together."""
+    if domain_id.startswith('IPR'):
+        return 'interpro'
+    if domain_id.startswith('PF'):
+        return 'pfam'
+    if domain_id.startswith('SM'):
+        return 'smart'
+    if domain_id.startswith('TIGR'):
+        return 'tigr'
+    if domain_id.lower().startswith('cd'):
+        return 'CDD_id'
+    return 'interpro'
+
+
+def get_representative_domains_db(con, transcript_ids):
+    """
+    Domains sourced from the RepresentativeDomains table (populated by
+    DoChaP-db/InterProRepresentativeDomains.py) instead of DomainEvent/DomainType.
+
+    Returns a DataFrame with the same columns as get_transcript_domains_db() so it's a
+    drop-in replacement for build_domain_lookup(), but only contains rows for proteins
+    that actually have a RepresentativeDomains entry - see get_domains_db() for combining
+    it with the DomainEvent/DomainType fallback for proteins that don't.
+    """
+    print('Starting getting domains from RepresentativeDomains')
+    df_transcript = pd.read_sql_query('select * from Transcripts', con)
+    df_transcript = df_transcript[df_transcript.transcript_ensembl_id.isin(transcript_ids)]
+    df_protein = pd.read_sql_query('select * from Proteins', con)
+    df_protein = df_protein[df_protein.transcript_ensembl_id.isin(transcript_ids)]
+    # Drop rows with empty or NaN protein_ensembl_id
+    df_protein = df_protein.dropna(subset=['protein_ensembl_id'])
+    df_protein = df_protein[df_protein.protein_ensembl_id.str.strip() != '']
+
+    if 'protein_interpro_id' not in df_protein.columns:
+        print('Proteins table has no protein_interpro_id column '
+              '(InterProRepresentativeDomains.py has not been run against this DB).')
+        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
+
+    df_protein = df_protein.dropna(subset=['protein_interpro_id'])
+    df_protein = df_protein[df_protein.protein_interpro_id.str.strip() != '']
+    if df_protein.empty:
+        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
+
+    interpro_ids = np.unique(df_protein.protein_interpro_id.values).tolist()
+    try:
+        df_rep = pd.read_sql_query('select * from RepresentativeDomains', con)
+    except (sqlite3.OperationalError, pd.errors.DatabaseError):
+        print('RepresentativeDomains table not found in this DB.')
+        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
+
+    df_rep = df_rep[df_rep.protein_id.isin(interpro_ids)]
+    df_rep = df_rep.dropna(subset=['start', 'end'])
+    if df_rep.empty:
+        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
+
+    merged_df = pd.merge(df_protein, df_transcript, on=['protein_ensembl_id', 'transcript_ensembl_id'])
+    merged_df = pd.merge(merged_df, df_rep, left_on='protein_interpro_id', right_on='protein_id')
+
+    domain_column = merged_df['domain_id'].map(_route_domain_id_to_column)
+    for col in ('CDD_id', 'cdd', 'pfam', 'smart', 'tigr', 'interpro'):
+        merged_df[col] = merged_df['domain_id'].where(domain_column == col)
+
+    merged_df = merged_df.rename(columns={
+        'protein_ensembl_id': 'protein_ensembl_id_version',
+        'transcript_ensembl_id': 'transcript_ensembl_id_version',
+        'start': 'AA_start',
+        'end': 'AA_end',
+        'domain_name': 'short_description',
+    })
+    merged_df['AA_start'] = merged_df['AA_start'].astype(int)
+    merged_df['AA_end'] = merged_df['AA_end'].astype(int)
+
+    print('Done getting domains from RepresentativeDomains')
+    return merged_df[REPRESENTATIVE_DOMAINS_COLUMNS]
+
+
+def get_domains_db(con, transcript_ids, use_representative_domains=False):
+    """
+    Domain source used by JunctionsAnalysis.analyze_junctions().
+
+    use_representative_domains=False (default): unchanged - domains come from
+    DomainEvent/DomainType exactly as get_transcript_domains_db() always has, so the
+    existing algorithm runs without any change.
+
+    use_representative_domains=True: domains come from RepresentativeDomains where a
+    protein has an entry there; a protein with no RepresentativeDomains entry falls back
+    to its DomainEvent/DomainType domains, so no protein silently loses domain coverage.
+    """
+    df_event_domains = get_transcript_domains_db(con, transcript_ids)
+    if not use_representative_domains:
+        return df_event_domains
+
+    df_rep_domains = get_representative_domains_db(con, transcript_ids)
+    proteins_with_rep_domains = set(df_rep_domains['protein_ensembl_id_version'].unique())
+    df_fallback = df_event_domains[
+        ~df_event_domains['protein_ensembl_id_version'].isin(proteins_with_rep_domains)
+    ]
+    return pd.concat([df_rep_domains, df_fallback], ignore_index=True)
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="A script collecting  junction's domains.")
     parser.add_argument("-input", required=False, default="clusters_sum_table_H_vs_M_HN6.xlsx", type=str, help="Path to excel file containig junctions")

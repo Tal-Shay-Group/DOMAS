@@ -226,12 +226,22 @@ def _merge_domain_names(*values):
     return '; '.join(names) if names else None
 
 
-def collapse_contained_domains(df_domains, tolerance=2):
+def collapse_contained_domains(df_domains, tolerance=2, overlap_fraction=0.85):
     """
-    Collapse domains (of a single transcript) that contain each other within
-    `tolerance` AA on either side into a single row - the longer domain -
-    merging the redundant domains' identifier names into the kept row so
+    Collapse domains (of a single transcript) that are the same physical
+    domain instance into a single row - the longer domain - merging the
+    redundant domains' identifier names into the kept row so
     compare_domains() can match on any of them.
+
+    Two domains are treated as the same instance if EITHER:
+    - one contains the other within `tolerance` AA on either side (handles
+      near-identical hits whose boundaries differ by only a couple AA), OR
+    - their overlap covers at least `overlap_fraction` of the shorter
+      domain's length (handles cases like co-occurring cross-database calls,
+      e.g. a CDD hit and an InterPro hit for the same fold, whose boundaries
+      can differ by more than `tolerance` AA without being a different
+      domain - a fixed AA tolerance alone is brittle here since it flips
+      on a few AA of alignment drift regardless of domain size).
     """
     if len(df_domains) <= 1:
         return df_domains
@@ -252,7 +262,13 @@ def collapse_contained_domains(df_domains, tolerance=2):
         for oj in order:
             if oj == oi or oj in dropped:
                 continue
-            if starts[oi] - tolerance <= starts[oj] and ends[oj] <= ends[oi] + tolerance:
+            contained = starts[oi] - tolerance <= starts[oj] and ends[oj] <= ends[oi] + tolerance
+            if not contained:
+                overlap = min(ends[oi], ends[oj]) - max(starts[oi], starts[oj]) + 1
+                if overlap > 0:
+                    shorter_length = min(ends[oi] - starts[oi] + 1, ends[oj] - starts[oj] + 1)
+                    contained = (overlap / shorter_length) >= overlap_fraction
+            if contained:
                 merges.setdefault(oi, []).append(oj)
                 dropped.add(oj)
 
@@ -340,15 +356,23 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
 # ---------------------------------------------------------------------------
 
 def domain_name_set(row, name_cols=DOMAIN_NAME_COLUMNS):
-    """Return the set of non-empty/non-null identifier names for a domain row."""
+    """Return the set of non-empty/non-null identifier names for a domain row.
+
+    Cell values may be a single identifier or a ';'-joined list of identifiers
+    merged by collapse_contained_domains()/_merge_domain_names() - split them
+    back out here so a merged name (e.g. "G3DSA:2.80.10.50; IPR002209") still
+    matches a plain "IPR002209" cell elsewhere, as collapse_contained_domains'
+    docstring intends.
+    """
     names = set()
     for col in name_cols:
         val = row[col]
         if val is None or pd.isna(val):
             continue
-        text = str(val).strip()
-        if text and text not in ('None', 'nan'):
-            names.add(val)
+        for name in str(val).split(';'):
+            name = name.strip()
+            if name and name not in ('None', 'nan'):
+                names.add(name)
     return names
 
 
@@ -846,7 +870,7 @@ class JunctionsAnalysis:
         genes_with_count = df_transcripts[df_transcripts['gene_count'] == filter_transcript_count].gene_GeneID_id.unique().tolist()
         return df_junctions[df_junctions['gene_ensembl_id'].isin(genes_with_count)]
 
-    def _load_database_data(self, gene_ids, use_ensembl_only=False):
+    def _load_database_data(self, gene_ids, use_ensembl_only=False, use_representative_domains=False):
         """Load genes, transcripts, domains, and exons from database."""
         placeholders = ','.join('?' * len(gene_ids))
         df_genes = pd.read_sql_query(
@@ -869,7 +893,9 @@ class JunctionsAnalysis:
             df_transcripts.transcript_ensembl_id.fillna(df_transcripts.transcript_refseq_id)
         ) - {None} - invalid_ids
 
-        df_domains = domas.get_transcript_domains_db(self.con, transcript_ids)
+        df_domains = domas.get_domains_db(
+            self.con, transcript_ids, use_representative_domains=use_representative_domains
+        )
 
         from alternative_splicing import get_exons_for_transcripts
         df_exons = get_exons_for_transcripts(self.con, transcript_ids)
@@ -996,13 +1022,17 @@ class JunctionsAnalysis:
             comparable_ids.update(df_cluster_results.loc[compared_mask, 'transcript_id'].dropna())
         return comparable_ids
 
-    def _generate_pdfs(self, results, print_genes, restrict_to_comparable=False):
+    def _generate_pdfs(self, results, print_genes, restrict_to_comparable=False, use_representative_domains=False):
         """Generate PDF visualizations for clusters.
 
         restrict_to_comparable: if True, each PDF only draws the canonical
         transcript and the transcripts that were actually compared to it -
         transcripts skipped during analysis (no junctions, no unique junction,
         or lost the longest-CDS tie-break) are omitted entirely.
+        use_representative_domains: if True, domains drawn in the PDFs come from
+        the RepresentativeDomains table where available (matching the domain
+        source used for analysis when the same flag is passed to
+        analyze_junctions()), falling back to DomainEvent/DomainType per protein.
         """
         print_gene_set = {gene.upper() for gene in print_genes} if print_genes is not None else None
 
@@ -1017,7 +1047,8 @@ class JunctionsAnalysis:
             else results
         )
         preloaded_gene_data = prepare_gene_data_bulk(
-            self.con, [cluster_result.gene_ensembl_id for cluster_result in filtered_results if _gene_symbol_key(cluster_result.gene_symbol) is not None]
+            self.con, [cluster_result.gene_ensembl_id for cluster_result in filtered_results if _gene_symbol_key(cluster_result.gene_symbol) is not None],
+            use_representative_domains=use_representative_domains,
         )
 
         gene_visualizations = {}
@@ -1032,7 +1063,10 @@ class JunctionsAnalysis:
                     gene_symbol = cluster_result.gene_symbol
                     gene_ensembl_id = cluster_result.gene_ensembl_id
                     preloaded = preloaded_gene_data.get(gene_ensembl_id) if isinstance(gene_ensembl_id, str) else None
-                    viz = self.gene_visualization_cls(self.con, gene_symbol, preloaded=preloaded)
+                    viz = self.gene_visualization_cls(
+                        self.con, gene_symbol, preloaded=preloaded,
+                        use_representative_domains=use_representative_domains,
+                    )
                     gene_visualizations[gene_ensembl_id] = viz
 
                 file_name = f'{cluster_result.gene_symbol}_{count}_junction_comparison.pdf'
@@ -1060,7 +1094,7 @@ class JunctionsAnalysis:
     def analyze_junctions(self, junctions_csv='as_events_junctions.csv', output_path='as_events_junctions_analysis.csv', df_junctions=None,
                           hadas_format=False, filter_transcript_count=0, create_pdf=True, print_genes=None,
                           num_workers=4, use_longest_cds=False, use_ensembl_only=False,
-                          restrict_pdf_to_comparable=False):
+                          restrict_pdf_to_comparable=False, use_representative_domains=False):
         """
         Analyze junctions and detect domain changes across alternative transcripts.
 
@@ -1086,6 +1120,12 @@ class JunctionsAnalysis:
                 the canonical transcript and the transcripts that were actually
                 compared to it - every other transcript of the gene is omitted
                 from the visualization entirely.
+            use_representative_domains: If True, domains come from the
+                RepresentativeDomains table instead of DomainEvent/DomainType.
+                A protein with no RepresentativeDomains entry falls back to its
+                DomainEvent/DomainType domains. If False (default), the
+                algorithm is unchanged - domains come from DomainEvent/DomainType
+                only, exactly as before.
 
         Returns:
             List of ClusterAnalysisResult objects
@@ -1099,7 +1139,7 @@ class JunctionsAnalysis:
 
         # Load data from database
         df_genes, df_transcripts, df_domains, df_exons, gene_strand = self._load_database_data(
-            gene_ids, use_ensembl_only=use_ensembl_only
+            gene_ids, use_ensembl_only=use_ensembl_only, use_representative_domains=use_representative_domains
         )
 
         # Prepare lookup structures
@@ -1118,6 +1158,9 @@ class JunctionsAnalysis:
 
         # Generate PDFs if requested
         if create_pdf:
-            self._generate_pdfs(results, print_genes, restrict_to_comparable=restrict_pdf_to_comparable)
+            self._generate_pdfs(
+                results, print_genes, restrict_to_comparable=restrict_pdf_to_comparable,
+                use_representative_domains=use_representative_domains,
+            )
 
         return results

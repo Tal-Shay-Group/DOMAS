@@ -41,9 +41,56 @@ SPECIES_ALIASES = {
 }
 
 
-def prepare_gene_data_bulk(conn, gene_ensembl_ids):
+def _route_representative_domain_id_to_column(domain_id):
+    """Map an InterPro match-XML accession (RepresentativeDomains.domain_id) to the
+    DomainType-style identifier column _format_domain_label() looks for. Only affects
+    which bucket the id is displayed under, not whether a domain is drawn."""
+    if domain_id.startswith('IPR'):
+        return 'interpro'
+    if domain_id.startswith('PF'):
+        return 'pfam'
+    if domain_id.startswith('SM'):
+        return 'smart'
+    if domain_id.startswith('TIGR'):
+        return 'tigr'
+    if domain_id.lower().startswith('cd'):
+        return 'CDD_id'
+    return 'interpro'
+
+
+_REPRESENTATIVE_DOMAIN_ID_COLUMNS = ('CDD_id', 'cdd', 'pfam', 'smart', 'tigr', 'interpro')
+
+
+def _representative_domains_to_domain_columns(df_rep):
+    """Reshape raw RepresentativeDomains rows (protein_id, domain_id, domain_name,
+    start, end, score) into the AA_start/AA_end + identifier-column shape that
+    _format_domain_label()/the protein view expect from DomainEvent/DomainType rows."""
+    if df_rep.empty:
+        return pd.DataFrame()
+
+    df_rep = df_rep.dropna(subset=['start', 'end']).copy()
+    if df_rep.empty:
+        return df_rep
+
+    domain_column = df_rep['domain_id'].map(_route_representative_domain_id_to_column)
+    for col in _REPRESENTATIVE_DOMAIN_ID_COLUMNS:
+        df_rep[col] = df_rep['domain_id'].where(domain_column == col)
+
+    df_rep = df_rep.rename(columns={'start': 'AA_start', 'end': 'AA_end'})
+    df_rep['AA_start'] = df_rep['AA_start'].astype(int)
+    df_rep['AA_end'] = df_rep['AA_end'].astype(int)
+    return df_rep
+
+
+def prepare_gene_data_bulk(conn, gene_ensembl_ids, use_representative_domains=False):
     """
     Bulk-load gene/transcript/exon/protein/domain data for many genes at once.
+
+    use_representative_domains=False (default): unchanged - domains come from
+    DomainEvent/DomainType exactly as before.
+    use_representative_domains=True: a protein's domains come from the
+    RepresentativeDomains table when it has an entry there; proteins with no
+    RepresentativeDomains entry fall back to their DomainEvent/DomainType domains.
 
     Returns a dict keyed by lowercased gene ensembl id, where each value is a dict
     with 'gene_data' (a Series, as `df_gene.iloc[0]`) and 'transcripts' (a list
@@ -123,6 +170,25 @@ def prepare_gene_data_bulk(conn, gene_ensembl_ids):
     proteins_by_transcript = {k: v for k, v in df_proteins_all.groupby('combined_id')} if len(df_proteins_all) else {}
     domains_by_protein = {k: v for k, v in df_domains_all.groupby('protein_ensembl_id')} if len(df_domains_all) else {}
 
+    if use_representative_domains and protein_ids and 'protein_interpro_id' in df_proteins_all.columns:
+        df_protein_interpro = df_proteins_all[['protein_ensembl_id', 'protein_interpro_id']].dropna(subset=['protein_interpro_id'])
+        df_protein_interpro = df_protein_interpro[df_protein_interpro.protein_interpro_id.str.strip() != '']
+        interpro_ids = df_protein_interpro['protein_interpro_id'].unique().tolist()
+        if interpro_ids:
+            ip_placeholders = ','.join(['?'] * len(interpro_ids))
+            try:
+                df_rep_all = pd.read_sql_query(
+                    f"SELECT * FROM RepresentativeDomains WHERE protein_id IN ({ip_placeholders})",
+                    conn, params=interpro_ids,
+                )
+            except (sqlite3.OperationalError, pd.errors.DatabaseError):
+                df_rep_all = pd.DataFrame()
+            if len(df_rep_all):
+                df_rep_all = df_rep_all.merge(df_protein_interpro, left_on='protein_id', right_on='protein_interpro_id')
+                df_rep_all = _representative_domains_to_domain_columns(df_rep_all)
+                for protein_id, df_rep_protein in df_rep_all.groupby('protein_ensembl_id'):
+                    domains_by_protein[protein_id] = df_rep_protein.reset_index(drop=True)
+
     def get_exons(transcript_id):
         df_exons = exons_by_transcript.get(transcript_id, pd.DataFrame(columns=df_exons_all.columns)).reset_index(drop=True)
         if len(df_exons) == 0:
@@ -164,7 +230,7 @@ def prepare_gene_data_bulk(conn, gene_ensembl_ids):
 class GeneVisualization:
     """Class to create gene visualization similar to DoChap-web."""
     
-    def __init__(self, conn, gene_name, preloaded=None):
+    def __init__(self, conn, gene_name, preloaded=None, use_representative_domains=False):
         """
         Initialize gene visualization.
 
@@ -177,13 +243,21 @@ class GeneVisualization:
         preloaded : dict | None
             Optional pre-fetched data for this gene, as returned per-gene by
             `prepare_gene_data_bulk()`. When provided, `load_gene_data()` uses
-            it instead of querying the database.
+            it instead of querying the database, and use_representative_domains
+            has no effect here (it only affects the DB path in `_load_domains` -
+            pass it to `prepare_gene_data_bulk()` instead to affect preloaded data).
+        use_representative_domains : bool
+            If True, a protein's domains are loaded from the RepresentativeDomains
+            table when it has an entry there, falling back to DomainEvent/DomainType
+            otherwise. If False (default), domains come from DomainEvent/DomainType
+            only, exactly as before.
         """
         self.conn = conn
         self.gene_name = gene_name
         self.gene_data = None
         self.transcripts = []
         self.colors = {}
+        self.use_representative_domains = use_representative_domains
         self.color_index = 0
         self._preloaded = preloaded
         self.species_hint = None
@@ -277,19 +351,37 @@ class GeneVisualization:
 
     def _load_domains(self, transcript_ensembl_id, transcript_refseq_id=None):
         """Load protein domains for a transcript, matched by either its ensembl or
-        refseq id (a RefSeq-only transcript has no ensembl id)."""
+        refseq id (a RefSeq-only transcript has no ensembl id).
+
+        If self.use_representative_domains is True, domains come from the
+        RepresentativeDomains table when the protein has an entry there, falling back
+        to DomainEvent/DomainType otherwise. If False (default), domains come from
+        DomainEvent/DomainType only, exactly as before.
+        """
         # Get protein ID
         protein_query = """
-            SELECT protein_ensembl_id FROM Proteins
+            SELECT protein_ensembl_id, protein_interpro_id FROM Proteins
             WHERE transcript_ensembl_id = ? OR transcript_refseq_id = ?
         """
         df_protein = pd.read_sql_query(protein_query, self.conn, params=[transcript_ensembl_id, transcript_refseq_id])
-        
+
         if len(df_protein) == 0:
             return pd.DataFrame()
-        
+
         protein_id = df_protein.iloc[0]['protein_ensembl_id']
-        
+
+        if self.use_representative_domains:
+            protein_interpro_id = df_protein.iloc[0].get('protein_interpro_id')
+            if pd.notna(protein_interpro_id) and str(protein_interpro_id).strip():
+                rep_query = "SELECT * FROM RepresentativeDomains WHERE protein_id = ?"
+                try:
+                    df_rep = pd.read_sql_query(rep_query, self.conn, params=[protein_interpro_id])
+                except (sqlite3.OperationalError, pd.errors.DatabaseError):
+                    df_rep = pd.DataFrame()
+                df_rep = _representative_domains_to_domain_columns(df_rep)
+                if len(df_rep):
+                    return df_rep.reset_index(drop=True)
+
         # Get domain events
         domain_query = """
             SELECT de.*, dt.*
@@ -1414,10 +1506,11 @@ class GeneVisualization:
 
 
 def generate_gene_pdf(gene_name, conn, output_file=None,
-                      protein_only=False, domains_only=False):
+                      protein_only=False, domains_only=False,
+                      use_representative_domains=False):
     """
     Generate a PDF visualization for a gene similar to DoChap-web.
-    
+
     Parameters:
     -----------
     gene_name : str
@@ -1430,12 +1523,17 @@ def generate_gene_pdf(gene_name, conn, output_file=None,
         If True, include only transcripts that produce protein.
     domains_only : bool, optional
         If True, include only transcripts whose protein has at least one domain.
-    
+    use_representative_domains : bool, optional
+        If True, a protein's domains come from the RepresentativeDomains table
+        when it has an entry there, falling back to DomainEvent/DomainType
+        otherwise. If False (default), domains come from DomainEvent/DomainType
+        only, exactly as before.
+
     Returns:
     --------
     str
         Path to the generated PDF file
-    
+
     Example:
     --------
     >>> conn = sqlite3.connect('../DoChaP-web/DB_merged.sqlite')
@@ -1446,7 +1544,7 @@ def generate_gene_pdf(gene_name, conn, output_file=None,
         output_file = f"{gene_name}_visualization.pdf"
 
     # Create visualization using provided DB connection
-    viz = GeneVisualization(conn, gene_name)
+    viz = GeneVisualization(conn, gene_name, use_representative_domains=use_representative_domains)
     viz.create_pdf(
         output_file,
         protein_only=protein_only,
@@ -1458,7 +1556,7 @@ def generate_gene_pdf(gene_name, conn, output_file=None,
 if __name__ == "__main__":
     # Example usage
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="Generate gene visualization PDF")
     parser.add_argument("gene_name", type=str, help="Gene symbol (e.g., PUF60)")
     parser.add_argument("-db", "--database", type=str, required=True,
@@ -1469,9 +1567,12 @@ if __name__ == "__main__":
                        help="Include only transcripts that produce protein")
     parser.add_argument("--domains-only", action="store_true",
                        help="Include only transcripts whose protein has domains")
-    
+    parser.add_argument("--use-representative-domains", action="store_true",
+                       help="Load domains from the RepresentativeDomains table where "
+                            "available, falling back to DomainEvent/DomainType per protein")
+
     args = parser.parse_args()
-    
+
     conn = sqlite3.connect(args.database)
     try:
         output = generate_gene_pdf(
@@ -1480,6 +1581,7 @@ if __name__ == "__main__":
             args.output,
             protein_only=args.protein_only,
             domains_only=args.domains_only,
+            use_representative_domains=args.use_representative_domains,
         )
     finally:
         conn.close()
