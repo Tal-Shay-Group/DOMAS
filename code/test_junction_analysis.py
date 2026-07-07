@@ -9,7 +9,7 @@ from junction_analisys import (
     _process_cluster_chunk, ClusterAnalysisResult, JunctionsAnalysis,
     find_matching_junction_indices, get_aa_range, find_bp_range_for_domains,
     classify_domain_change, collapse_contained_domains, group_by_shared_names,
-    DOMAIN_NAME_COLUMNS,
+    select_most_like_canonical, DOMAIN_NAME_COLUMNS,
 )
 
 # Setup logging to capture messages
@@ -386,6 +386,88 @@ def test_load_junctions_data_renames_cluster_to_cluster_name():
     result = analysis._load_junctions_data(df)
     assert 'cluster_name' in result.columns
     assert result['cluster_name'].iloc[0] == 'c1'
+
+
+# ---------------------------------------------------------------------------
+# select_most_like_canonical - use_most_like_canonical tie-break rule
+# ---------------------------------------------------------------------------
+
+def _exon_df(*exons):
+    """Build a DataFrame with only the columns select_most_like_canonical() needs.
+    Each exon is a (start, end) pair."""
+    starts, ends = zip(*exons)
+    return pd.DataFrame({'genomic_start_tx': starts, 'genomic_end_tx': ends})
+
+
+def test_select_most_like_canonical_prefers_more_exact_matching_exons():
+    """Both candidates have exons outside the junction range [150, 350] that exactly
+    match canonical's - so both qualify. Candidate B also happens to match canonical's
+    exon inside the range, giving it a higher exact-match score, so it wins even though
+    it isn't the longest-CDS transcript."""
+    transcript_exons = {
+        'CANON': _exon_df((1, 100), (200, 300), (400, 500)),
+        'A': _exon_df((1, 100), (220, 280), (400, 500)),  # inside exon differs from canonical
+        'B': _exon_df((1, 100), (200, 300), (400, 500)),  # inside exon also matches canonical
+    }
+    cds_length_by_transcript = {'A': 1000, 'B': 10}  # A is longer, but B should still win
+
+    chosen = select_most_like_canonical(
+        ['A', 'B'], 'CANON', transcript_exons, junctions=[(150, 350)],
+        cds_length_by_transcript=cds_length_by_transcript,
+    )
+    assert chosen == 'B'
+
+
+def test_select_most_like_canonical_excludes_candidate_with_different_outside_exons():
+    """A candidate whose exons outside the junction range don't exactly match
+    canonical's doesn't qualify, even if it matches everything inside the range."""
+    transcript_exons = {
+        'CANON': _exon_df((1, 100), (200, 300), (400, 500)),
+        'DISQUALIFIED': _exon_df((1, 90), (200, 300), (400, 500)),  # outside exon (1,90) != (1,100)
+        'QUALIFIES': _exon_df((1, 100), (220, 280), (400, 500)),  # outside exons match exactly
+    }
+    cds_length_by_transcript = {'DISQUALIFIED': 10, 'QUALIFIES': 10}
+
+    chosen = select_most_like_canonical(
+        ['DISQUALIFIED', 'QUALIFIES'], 'CANON', transcript_exons, junctions=[(150, 350)],
+        cds_length_by_transcript=cds_length_by_transcript,
+    )
+    assert chosen == 'QUALIFIES'
+
+
+def test_select_most_like_canonical_falls_back_to_longest_cds_when_none_qualify():
+    """If no candidate's outside-range exons exactly match canonical's, fall back to
+    the longest-CDS candidate (same rule as use_longest_cds)."""
+    transcript_exons = {
+        'CANON': _exon_df((1, 100), (200, 300), (400, 500)),
+        'SHORT': _exon_df((1, 90), (200, 300), (400, 500)),
+        'LONG': _exon_df((1, 80), (200, 300), (400, 500)),
+    }
+    cds_length_by_transcript = {'SHORT': 10, 'LONG': 1000}
+
+    chosen = select_most_like_canonical(
+        ['SHORT', 'LONG'], 'CANON', transcript_exons, junctions=[(150, 350)],
+        cds_length_by_transcript=cds_length_by_transcript,
+    )
+    assert chosen == 'LONG'
+
+
+def test_select_most_like_canonical_tiebreak_is_deterministic():
+    """Two qualifying candidates with an equal exact-match score must resolve
+    deterministically (not depend on dict/set iteration order)."""
+    transcript_exons = {
+        'CANON': _exon_df((1, 100), (200, 300), (400, 500)),
+        'ENST_BBB': _exon_df((1, 100), (220, 280), (400, 500)),
+        'ENST_AAA': _exon_df((1, 100), (230, 270), (400, 500)),
+    }
+    cds_length_by_transcript = {'ENST_BBB': 10, 'ENST_AAA': 10}
+
+    chosen = select_most_like_canonical(
+        ['ENST_BBB', 'ENST_AAA'], 'CANON', transcript_exons, junctions=[(150, 350)],
+        cds_length_by_transcript=cds_length_by_transcript,
+    )
+    # Tied on score (2 outside matches each) -> sorted(...)[0] picks the lexicographically first id.
+    assert chosen == 'ENST_AAA'
 
 
 # ---------------------------------------------------------------------------

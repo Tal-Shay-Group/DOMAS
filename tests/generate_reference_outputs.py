@@ -1,8 +1,9 @@
 """
 Run JunctionsAnalysis.analyze_junctions() for every combination of
-use_longest_cds / restrict_pdf_to_comparable, against both fixture files,
-and save the resulting CSV + PDFs into persistent, descriptively-named
-subdirectories under tests/reference_outputs/ for manual inspection.
+use_longest_cds / use_most_like_canonical / restrict_pdf_to_comparable,
+against both fixture files, and save the resulting CSV + PDFs into
+persistent, descriptively-named subdirectories under
+tests/reference_outputs/ for manual inspection.
 
 These outputs are meant to be reviewed by hand once, then used as a
 reference point for test_flags.py going forward.
@@ -28,11 +29,15 @@ IOE_CSV = os.path.join(TESTS_DIR, 'ioe_example_junctions.csv')
 HADAS_XLSX = os.path.join(TESTS_DIR, 'short_H_vs_M_HN6.xlsx')
 OUTPUT_ROOT = os.path.join(TESTS_DIR, 'reference_outputs')
 
+# (use_longest_cds, use_most_like_canonical, restrict_pdf_to_comparable) - mirrors
+# tests/test_flags.py's FLAG_COMBINATIONS/_case_name exactly, so the case names line up.
 FLAG_COMBINATIONS = [
-    (False, False),
-    (False, True),
-    (True, False),
-    (True, True),
+    (False, False, False),
+    (False, False, True),
+    (True, False, False),
+    (True, False, True),
+    (False, True, False),
+    (False, True, True),
 ]
 
 INPUT_FILES = [
@@ -41,8 +46,14 @@ INPUT_FILES = [
 ]
 
 
-def run_one(con, label, junctions_csv, hadas_format, use_longest_cds, restrict_pdf_to_comparable):
-    case_name = f"{label}__longestcds_{use_longest_cds}__restrict_{restrict_pdf_to_comparable}"
+def _case_name(label, use_longest_cds, use_most_like_canonical, restrict_pdf_to_comparable):
+    selection = 'mostlikecanonical_True' if use_most_like_canonical else f'longestcds_{use_longest_cds}'
+    return f"{label}__{selection}__restrict_{restrict_pdf_to_comparable}"
+
+
+def run_one(con, label, junctions_csv, hadas_format, use_longest_cds, use_most_like_canonical,
+            restrict_pdf_to_comparable):
+    case_name = _case_name(label, use_longest_cds, use_most_like_canonical, restrict_pdf_to_comparable)
     case_dir = os.path.join(OUTPUT_ROOT, case_name)
     if os.path.exists(case_dir):
         shutil.rmtree(case_dir)
@@ -60,6 +71,7 @@ def run_one(con, label, junctions_csv, hadas_format, use_longest_cds, restrict_p
             create_pdf=True,
             num_workers=1,
             use_longest_cds=use_longest_cds,
+            use_most_like_canonical=use_most_like_canonical,
             restrict_pdf_to_comparable=restrict_pdf_to_comparable,
         )
     finally:
@@ -84,8 +96,9 @@ def main():
     try:
         for label, junctions_csv, hadas_format in INPUT_FILES:
             print(f"\n=== {label} ({os.path.basename(junctions_csv)}) ===")
-            for use_longest_cds, restrict_pdf_to_comparable in FLAG_COMBINATIONS:
-                run_one(con, label, junctions_csv, hadas_format, use_longest_cds, restrict_pdf_to_comparable)
+            for use_longest_cds, use_most_like_canonical, restrict_pdf_to_comparable in FLAG_COMBINATIONS:
+                run_one(con, label, junctions_csv, hadas_format, use_longest_cds, use_most_like_canonical,
+                        restrict_pdf_to_comparable)
     finally:
         con.close()
 

@@ -41,15 +41,19 @@ already points at it.
 
 ### What's covered
 
-- **`test_*_all_flag_combinations`** (8 tests): runs
+- **`test_*_all_flag_combinations`** (12 tests): runs
   `analyze_junctions()` end-to-end against both fixture files, for every
-  combination of `use_longest_cds` and `restrict_pdf_to_comparable`.
-  Verifies the run completes without error, produces a results CSV and at
-  least one PDF, and - when `use_longest_cds=True` - that no cluster ever
-  compares more than one non-canonical transcript to the canonical one.
+  combination in `FLAG_COMBINATIONS` - `(use_longest_cds, use_most_like_canonical,
+  restrict_pdf_to_comparable)`, six combinations (the two tie-break flags are
+  mutually exclusive, so it's not a full 2x2x2 cross product): no tie-break,
+  `use_longest_cds=True`, and `use_most_like_canonical=True`, each x
+  `restrict_pdf_to_comparable`. Verifies the run completes without error,
+  produces a results CSV and at least one PDF, and - whenever either
+  tie-break flag is set - that no cluster ever compares more than one
+  non-canonical transcript to the canonical one.
   Output goes to a pytest-managed temp dir (`tmp_path`) and is not kept.
-- **`test_compare_against_reference_outputs`** (8 tests, automatic golden
-  comparison): for each of the same 8 cases, runs `analyze_junctions()` and
+- **`test_compare_against_reference_outputs`** (12 tests, automatic golden
+  comparison): for each of the same 6 cases x 2 fixtures, runs `analyze_junctions()` and
   writes its CSV/PDF output to a persistent directory,
   `tests/generated_outputs/<case_name>/`, then compares the generated
   `results.csv` row-for-row against the golden reference at
@@ -91,7 +95,7 @@ already points at it.
 ## Reference outputs (golden, manual inspection / regression reference)
 
 `generate_reference_outputs.py` is **not** part of the pytest run - it's a
-standalone script that runs all 8 flag combinations against both fixture
+standalone script that runs all 6 flag combinations against both fixture
 files and writes the full, persistent output (results.csv + every generated
 PDF) into `reference_outputs/<case_name>/`, e.g.:
 
@@ -101,10 +105,14 @@ reference_outputs/
 ├── ioe_csv__longestcds_False__restrict_True/
 ├── ioe_csv__longestcds_True__restrict_False/
 ├── ioe_csv__longestcds_True__restrict_True/
+├── ioe_csv__mostlikecanonical_True__restrict_False/
+├── ioe_csv__mostlikecanonical_True__restrict_True/
 ├── hadas_xlsx__longestcds_False__restrict_False/
 ├── hadas_xlsx__longestcds_False__restrict_True/
 ├── hadas_xlsx__longestcds_True__restrict_False/
-└── hadas_xlsx__longestcds_True__restrict_True/
+├── hadas_xlsx__longestcds_True__restrict_True/
+├── hadas_xlsx__mostlikecanonical_True__restrict_False/
+└── hadas_xlsx__mostlikecanonical_True__restrict_True/
 ```
 
 Regenerate them with:
@@ -120,10 +128,10 @@ committed golden case before re-committing
 (e.g. `diff <(sort old/results.csv) <(sort new/results.csv)`) - don't
 overwrite a golden reference without checking the diff first.
 
-`results.csv` and `pdf_text_reference.json` are committed for all 8 cases.
+`results.csv` and `pdf_text_reference.json` are committed for all 12 cases.
 The full PDFs themselves are only committed for
 `hadas_xlsx__longestcds_True__restrict_True/`, as a reference point for
-manual/visual inspection - the other 7 cases' PDFs exist locally once
+manual/visual inspection - the other 11 cases' PDFs exist locally once
 generated but aren't tracked (regenerating writes them, but don't `git add`
 them). `test_compare_against_reference_outputs` skips (rather than fails) any
 case whose `results.csv` or `pdf_text_reference.json` isn't present.
