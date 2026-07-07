@@ -360,6 +360,10 @@ def test_group_by_shared_names_no_overlap_keeps_singletons():
 
 # ---------------------------------------------------------------------------
 # _load_junctions_data - input validation
+#
+# _load_junctions_data() only ever takes an already-loaded DataFrame now -
+# reading junctions from a file (plain CSV, hadas-format Excel, IOE, ...) is
+# alternative_splicing.py's job, not junction_analisys.py's.
 # ---------------------------------------------------------------------------
 
 def _bare_analysis():
@@ -368,32 +372,18 @@ def _bare_analysis():
     return JunctionsAnalysis.__new__(JunctionsAnalysis)
 
 
-def test_load_junctions_data_raises_when_neither_source_given():
-    analysis = _bare_analysis()
-    with pytest.raises(ValueError, match="must be provided"):
-        analysis._load_junctions_data(None, None, hadas_format=False)
-
-
-def test_load_junctions_data_raises_when_both_sources_given():
-    analysis = _bare_analysis()
-    df = pd.DataFrame({'gene_ensembl_id': ['G1'], 'start_position': [1],
-                        'end_position': [2], 'cluster_name': ['c1']})
-    with pytest.raises(ValueError, match="Only one of"):
-        analysis._load_junctions_data('some.csv', df, hadas_format=False)
-
-
 def test_load_junctions_data_raises_on_missing_required_column():
     analysis = _bare_analysis()
     df = pd.DataFrame({'gene_ensembl_id': ['G1'], 'start_position': [1]})  # missing end_position, cluster_name
     with pytest.raises(ValueError, match="is required"):
-        analysis._load_junctions_data(None, df, hadas_format=False)
+        analysis._load_junctions_data(df)
 
 
 def test_load_junctions_data_renames_cluster_to_cluster_name():
     analysis = _bare_analysis()
     df = pd.DataFrame({'gene_ensembl_id': ['G1'], 'start_position': [1],
                         'end_position': [2], 'cluster': ['c1']})
-    result = analysis._load_junctions_data(None, df, hadas_format=False)
+    result = analysis._load_junctions_data(df)
     assert 'cluster_name' in result.columns
     assert result['cluster_name'].iloc[0] == 'c1'
 

@@ -11,7 +11,6 @@ import pandas as pd
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from generate_gene_pdf import GeneVisualization, prepare_gene_data_bulk
-import domas
 
 # Suppress FutureWarning about DataFrame concatenation behavior
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*DataFrame concatenation.*')
@@ -835,19 +834,11 @@ class JunctionsAnalysis:
         self.logger = logger_instance or logger
         self.gene_visualization_cls = gene_visualization_cls
 
-    def _load_junctions_data(self, junctions_csv, df_junctions, hadas_format):
-        """Load and validate junctions from CSV or DataFrame."""
-        if df_junctions is None and junctions_csv is None:
-            raise ValueError("Either df_junctions or junctions_csv must be provided.")
-        elif df_junctions is not None and junctions_csv is not None:
-            raise ValueError("Only one of df_junctions or junctions_csv should be provided.")
-        elif junctions_csv is not None:
-            if hadas_format:
-                df_junctions = domas.hadas_read_input_file(self.con, junctions_csv)
-            else:
-                df_junctions = pd.read_csv(junctions_csv)
-        else:
-            df_junctions = df_junctions.copy()
+    def _load_junctions_data(self, df_junctions):
+        """Validate the junctions DataFrame. Reading junctions from a file (plain CSV,
+        hadas-format Excel, IOE, ...) is alternative_splicing.py's responsibility -
+        callers pass an already-loaded DataFrame here."""
+        df_junctions = df_junctions.copy()
 
         if 'cluster_name' not in df_junctions.columns and 'cluster' in df_junctions.columns:
             df_junctions = df_junctions.rename(columns={'cluster': 'cluster_name'})
@@ -879,7 +870,8 @@ class JunctionsAnalysis:
         )
         gene_strand = dict(zip(df_genes['gene_ensembl_id'], df_genes['strand']))
 
-        df_transcripts = domas.get_genes_df_transcripts(self.con, gene_ids)
+        from alternative_splicing import get_genes_df_transcripts, get_domains_db, get_exons_for_transcripts
+        df_transcripts = get_genes_df_transcripts(self.con, gene_ids)
 
         if use_ensembl_only:
             invalid_ids = {'', 'nan', 'None'}
@@ -893,11 +885,10 @@ class JunctionsAnalysis:
             df_transcripts.transcript_ensembl_id.fillna(df_transcripts.transcript_refseq_id)
         ) - {None} - invalid_ids
 
-        df_domains = domas.get_domains_db(
+        df_domains = get_domains_db(
             self.con, transcript_ids, use_representative_domains=use_representative_domains
         )
 
-        from alternative_splicing import get_exons_for_transcripts
         df_exons = get_exons_for_transcripts(self.con, transcript_ids)
 
         return df_genes, df_transcripts, df_domains, df_exons, gene_strand
@@ -1091,18 +1082,18 @@ class JunctionsAnalysis:
             except ValueError as e:
                 self.logger.warning(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}, specie {cluster_result.specie}: {e}")
 
-    def analyze_junctions(self, junctions_csv='as_events_junctions.csv', output_path='as_events_junctions_analysis.csv', df_junctions=None,
-                          hadas_format=False, filter_transcript_count=0, create_pdf=True, print_genes=None,
+    def analyze_junctions(self, df_junctions, output_path='as_events_junctions_analysis.csv',
+                          filter_transcript_count=0, create_pdf=True, print_genes=None,
                           num_workers=4, use_longest_cds=False, use_ensembl_only=False,
                           restrict_pdf_to_comparable=False, use_representative_domains=False):
         """
         Analyze junctions and detect domain changes across alternative transcripts.
 
         Args:
-            junctions_csv: Path to junction CSV file (if df_junctions not provided)
+            df_junctions: DataFrame of junctions. Reading junctions from a file
+                (plain CSV, hadas-format Excel, IOE, ...) is alternative_splicing.py's
+                responsibility - pass the already-loaded DataFrame here.
             output_path: Path for output CSV file
-            df_junctions: DataFrame of junctions (if not reading from CSV)
-            hadas_format: Whether to read CSV in HADAS format
             filter_transcript_count: If > 0, only analyze genes with exactly this many transcripts
             create_pdf: Whether to generate PDF visualizations
             print_genes: List of gene symbols to generate PDFs for (or all if None)
@@ -1130,8 +1121,8 @@ class JunctionsAnalysis:
         Returns:
             List of ClusterAnalysisResult objects
         """
-        # Load and validate input
-        df_junctions = self._load_junctions_data(junctions_csv, df_junctions, hadas_format)
+        # Validate input
+        df_junctions = self._load_junctions_data(df_junctions)
         df_junctions = self._filter_junctions_by_transcript_count(df_junctions, filter_transcript_count)
 
         gene_ids = df_junctions.gene_ensembl_id.unique().tolist()

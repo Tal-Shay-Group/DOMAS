@@ -6,12 +6,14 @@ Tests for the junction/domain comparison pipeline (`junction_analisys.py`,
 ## Fixtures
 
 - `ioe_example_junctions.csv` - plain CSV junctions file (human genes,
-  `ENSG*` ids), read with `hadas_format=False`.
+  `ENSG*` ids), read with `alternative_splicing.read_junctions_csv()`.
 - `short_H_vs_M_HN6.xlsx` - human-vs-mouse comparative splicing table, read
-  with `hadas_format=True` (parsed via `domas.hadas_read_input_file`, which
-  needs a DB connection to resolve mouse gene symbols to ensembl ids).
+  with `alternative_splicing.hadas_read_input_file()` (needs a DB connection
+  to resolve mouse gene symbols to ensembl ids).
 
-Both are passed as `junctions_csv` to `JunctionsAnalysis.analyze_junctions()`.
+Both are read into a DataFrame first, then passed as `df_junctions` to
+`JunctionsAnalysis.analyze_junctions()` - reading junctions from a file is
+alternative_splicing.py's job, not junction_analisys.py's.
 
 ## Running the tests
 

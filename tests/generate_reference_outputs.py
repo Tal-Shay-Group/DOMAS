@@ -20,6 +20,7 @@ CODE_DIR = os.path.normpath(os.path.join(TESTS_DIR, '..', 'code'))
 sys.path.insert(0, CODE_DIR)
 
 from junction_analisys import JunctionsAnalysis  # noqa: E402
+from alternative_splicing import hadas_read_input_file, read_junctions_csv  # noqa: E402
 from pdf_text_utils import write_pdf_text_manifest  # noqa: E402
 
 DB_PATH = '/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite'
@@ -47,15 +48,15 @@ def run_one(con, label, junctions_csv, hadas_format, use_longest_cds, restrict_p
         shutil.rmtree(case_dir)
     os.makedirs(case_dir)
 
+    df_junctions = hadas_read_input_file(con, junctions_csv) if hadas_format else read_junctions_csv(junctions_csv)
     output_path = os.path.join(case_dir, 'results.csv')
     cwd_before = os.getcwd()
     os.chdir(case_dir)
     try:
         analysis = JunctionsAnalysis(con)
         results = analysis.analyze_junctions(
-            junctions_csv=junctions_csv,
+            df_junctions=df_junctions,
             output_path=output_path,
-            hadas_format=hadas_format,
             create_pdf=True,
             num_workers=1,
             use_longest_cds=use_longest_cds,

@@ -22,6 +22,7 @@ CODE_DIR = os.path.normpath(os.path.join(TESTS_DIR, '..', 'code'))
 sys.path.insert(0, CODE_DIR)
 
 from junction_analisys import JunctionsAnalysis, ClusterAnalysisResult  # noqa: E402
+from alternative_splicing import hadas_read_input_file, read_junctions_csv  # noqa: E402
 from pdf_text_utils import (  # noqa: E402
     PDF_TEXT_MANIFEST_FILENAME, build_pdf_text_manifest,
 )
@@ -82,17 +83,24 @@ def _assert_longest_cds_invariant(results, use_longest_cds):
         )
 
 
+def _load_junctions(con, junctions_csv, hadas_format):
+    """Read a fixture file into a junctions DataFrame (file-reading is
+    alternative_splicing.py's job; JunctionsAnalysis.analyze_junctions() only takes
+    an already-loaded DataFrame)."""
+    return hadas_read_input_file(con, junctions_csv) if hadas_format else read_junctions_csv(junctions_csv)
+
+
 def _run_analysis(con, tmp_path, junctions_csv, hadas_format, use_longest_cds, restrict_pdf_to_comparable):
     """Run analyze_junctions with cwd set to tmp_path (PDFs are written relative to cwd)."""
     analysis = JunctionsAnalysis(con)
+    df_junctions = _load_junctions(con, junctions_csv, hadas_format)
     output_path = str(tmp_path / 'results.csv')
     cwd_before = os.getcwd()
     os.chdir(tmp_path)
     try:
         results = analysis.analyze_junctions(
-            junctions_csv=junctions_csv,
+            df_junctions=df_junctions,
             output_path=output_path,
-            hadas_format=hadas_format,
             create_pdf=True,
             num_workers=1,
             use_longest_cds=use_longest_cds,
@@ -151,15 +159,15 @@ def _run_case_to_dir(con, case_dir, junctions_csv, hadas_format, use_longest_cds
         shutil.rmtree(case_dir)
     os.makedirs(case_dir)
 
+    df_junctions = _load_junctions(con, junctions_csv, hadas_format)
     output_path = os.path.join(case_dir, 'results.csv')
     cwd_before = os.getcwd()
     os.chdir(case_dir)
     try:
         analysis = JunctionsAnalysis(con)
         analysis.analyze_junctions(
-            junctions_csv=junctions_csv,
+            df_junctions=df_junctions,
             output_path=output_path,
-            hadas_format=hadas_format,
             create_pdf=True,
             num_workers=1,
             use_longest_cds=use_longest_cds,
