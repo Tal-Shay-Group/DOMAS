@@ -466,8 +466,10 @@ def get_genes_df_transcripts(con, gene_ids):
     return pd.concat(dfs, ignore_index=True)
 
 
-def get_transcript_domains_db(con, transcript_ids):
-    print('Starting getting domains from dochap')
+def _read_transcripts_and_proteins(con, transcript_ids):
+    """Transcripts/Proteins rows for transcript_ids, filtered to a non-empty
+    protein_ensembl_id. Shared by get_transcript_domains_db() and
+    get_representative_domains_db() so get_domains_db() reads these tables once."""
     df_transcript = pd.read_sql_query('select * from Transcripts', con)
     df_transcript = df_transcript[df_transcript.transcript_ensembl_id.isin(transcript_ids)]
     df_protein = pd.read_sql_query('select * from Proteins', con)
@@ -475,6 +477,13 @@ def get_transcript_domains_db(con, transcript_ids):
     # Drop rows with empty or NaN protein_ensembl_id
     df_protein = df_protein.dropna(subset=['protein_ensembl_id'])
     df_protein = df_protein[df_protein.protein_ensembl_id.str.strip() != '']
+    return df_transcript, df_protein
+
+
+def get_transcript_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
+    print('Starting getting domains from dochap')
+    if df_transcript is None or df_protein is None:
+        df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
     proteins_ids = np.unique(df_protein.protein_ensembl_id.values).tolist()
     df_domain_event = pd.read_sql_query('select * from DomainEvent', con)
 
@@ -535,7 +544,7 @@ def _route_domain_id_to_column(domain_id):
     return 'interpro'
 
 
-def get_representative_domains_db(con, transcript_ids):
+def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
     """
     Domains sourced from the RepresentativeDomains table (populated by
     DoChaP-db/InterProRepresentativeDomains.py) instead of DomainEvent/DomainType.
@@ -546,13 +555,8 @@ def get_representative_domains_db(con, transcript_ids):
     it with the DomainEvent/DomainType fallback for proteins that don't.
     """
     print('Starting getting domains from RepresentativeDomains')
-    df_transcript = pd.read_sql_query('select * from Transcripts', con)
-    df_transcript = df_transcript[df_transcript.transcript_ensembl_id.isin(transcript_ids)]
-    df_protein = pd.read_sql_query('select * from Proteins', con)
-    df_protein = df_protein[df_protein.transcript_ensembl_id.isin(transcript_ids)]
-    # Drop rows with empty or NaN protein_ensembl_id
-    df_protein = df_protein.dropna(subset=['protein_ensembl_id'])
-    df_protein = df_protein[df_protein.protein_ensembl_id.str.strip() != '']
+    if df_transcript is None or df_protein is None:
+        df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
 
     if 'protein_interpro_id' not in df_protein.columns:
         print('Proteins table has no protein_interpro_id column '
@@ -609,11 +613,12 @@ def get_domains_db(con, transcript_ids, use_representative_domains=False):
     protein has an entry there; a protein with no RepresentativeDomains entry falls back
     to its DomainEvent/DomainType domains, so no protein silently loses domain coverage.
     """
-    df_event_domains = get_transcript_domains_db(con, transcript_ids)
+    df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
+    df_event_domains = get_transcript_domains_db(con, transcript_ids, df_transcript=df_transcript, df_protein=df_protein)
     if not use_representative_domains:
         return df_event_domains
 
-    df_rep_domains = get_representative_domains_db(con, transcript_ids)
+    df_rep_domains = get_representative_domains_db(con, transcript_ids, df_transcript=df_transcript, df_protein=df_protein)
     proteins_with_rep_domains = set(df_rep_domains['protein_ensembl_id_version'].unique())
     df_fallback = df_event_domains[
         ~df_event_domains['protein_ensembl_id_version'].isin(proteins_with_rep_domains)
@@ -925,7 +930,8 @@ def read_junctions_csv(junctions_csv):
 
 def analyze_junctions2(con, df_junctions=None, junctions_csv=None, hadas_format=False,
                         output_path='as_events_junctions_analysis.csv',
-                        n=0, create_pdf=True, print_genes=None, num_workers=5):
+                        n=0, create_pdf=True, print_genes=None, num_workers=5,
+                        use_representative_domains=False):
     """Read junctions (from a DataFrame, a plain CSV, or a hadas-format Excel file - exactly
     one of df_junctions/junctions_csv must be given) and run JunctionsAnalysis.analyze_junctions()."""
     if df_junctions is None and junctions_csv is None:
@@ -937,14 +943,16 @@ def analyze_junctions2(con, df_junctions=None, junctions_csv=None, hadas_format=
 
     analyzer = JunctionsAnalysis(con, logger_instance=logger)
     return analyzer.analyze_junctions(df_junctions=df_junctions, output_path=output_path,
-                                      filter_transcript_count=n, create_pdf=create_pdf, print_genes=print_genes, num_workers=num_workers)
+                                      filter_transcript_count=n, create_pdf=create_pdf, print_genes=print_genes, num_workers=num_workers,
+                                      use_representative_domains=use_representative_domains)
 
-def analyze_ioe_file(con, ioe_file, output_csv):
+def analyze_ioe_file(con, ioe_file, output_csv, num_workers=5, use_representative_domains=False):
     df_junctions = utils.ioe2junctions(ioe_file)
     gene_symbols_dict = utils.get_gene_symbols(con, df_junctions.gene_ensembl_id.unique().tolist())
     # add gene symbols to df_junctions
     df_junctions['gene_symbol'] = df_junctions['gene_ensembl_id'].map(gene_symbols_dict)
-    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False)
+    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False, num_workers=num_workers,
+                        use_representative_domains=use_representative_domains)
 
 
 def keep_min_transcript_clusters(df, examples_per_event=2):
@@ -972,7 +980,8 @@ def keep_min_transcript_clusters(df, examples_per_event=2):
 
     return filtered_df
 
-def analyze_ioe_files(con, input_path, pattern, output_csv, examples_per_event=5):
+def analyze_ioe_files(con, input_path, pattern, output_csv, examples_per_event=5, num_workers=5,
+                       use_representative_domains=False):
     dfs = []
     for file in os.listdir(input_path):
         if re.match(pattern, file):
@@ -996,14 +1005,18 @@ def analyze_ioe_files(con, input_path, pattern, output_csv, examples_per_event=5
         # per event type, keep only examples_per_event unique cluster_name with minimum number of transcripts for the gene
         df_examples = keep_min_transcript_clusters(df_all_junctions, examples_per_event=examples_per_event)
         df_examples.to_csv('ioe_example_junctions.csv', index=False)
-        analyze_junctions2(con, df_junctions=df_examples, output_path=output_csv, create_pdf=False)
+        analyze_junctions2(con, df_junctions=df_examples, output_path=output_csv, create_pdf=False, num_workers=num_workers,
+                            use_representative_domains=use_representative_domains)
     else:
         df_all_junctions.to_csv('ioe_all_junctions.csv', index=False)
-        analyze_junctions2(con, df_junctions=df_all_junctions, output_path=output_csv, create_pdf=False)
+        analyze_junctions2(con, df_junctions=df_all_junctions, output_path=output_csv, create_pdf=False, num_workers=num_workers,
+                            use_representative_domains=use_representative_domains)
 
-def analyze_hadas_input(con, input_file, output_csv, print_genes=None):
+def analyze_hadas_input(con, input_file, output_csv, print_genes=None, num_workers=5,
+                         use_representative_domains=False):
     df_junctions = hadas_read_input_file(con, input_file)
-    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=True, print_genes=print_genes)
+    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=True, print_genes=print_genes,
+                        num_workers=num_workers, use_representative_domains=use_representative_domains)
     return
     gene_ids = df_junctions['gene_ensembl_id'].unique().tolist()
     gene_transcript_counts = utils.get_genes_number_of_transcripts(con, gene_ids)

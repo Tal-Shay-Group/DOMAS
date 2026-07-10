@@ -1,7 +1,8 @@
 """
-Tests for the use_longest_cds, use_most_like_canonical and
-restrict_pdf_to_comparable flags on JunctionsAnalysis.analyze_junctions(),
-using the real fixture files ioe_example_junctions.csv (plain CSV format) and
+Tests for the restrict_pdf_to_comparable flag on
+JunctionsAnalysis.analyze_junctions(), and for the is_longest_cds /
+is_most_like_canonical tag columns it always produces, using the real
+fixture files ioe_example_junctions.csv (plain CSV format) and
 short_H_vs_M_HN6.xlsx (hadas format) against the local DoChaP database.
 """
 import glob
@@ -34,20 +35,16 @@ HADAS_XLSX = os.path.join(TESTS_DIR, 'short_H_vs_M_HN6.xlsx')
 # events that carry no real transcript id.
 _SKIPPED_EVENTS = {
     'transcript_doesnt_have_junctions', 'no_unique_junctions',
-    'skipped_not_longest_cds', 'skipped_not_most_like_canonical',
     'no_canonical_transcript', 'only_one_transcript', 'no_canonical_junctions', 'junction_not_mapped',
 }
 
-# (use_longest_cds, use_most_like_canonical, restrict_pdf_to_comparable). The first
-# four preserve the original (use_longest_cds, restrict_pdf_to_comparable) matrix and
-# its case names unchanged; the last two add use_most_like_canonical coverage.
+# (restrict_pdf_to_comparable, use_representative_domains). The tie-break rules
+# (is_longest_cds/is_most_like_canonical) are tag columns now, not a separate axis.
 FLAG_COMBINATIONS = [
-    (False, False, False),
-    (False, False, True),
-    (True, False, False),
-    (True, False, True),
-    (False, True, False),
-    (False, True, True),
+    (False, False),
+    (True, False),
+    (False, True),
+    (True, True),
 ]
 
 INPUT_FILES = [
@@ -77,19 +74,18 @@ def _compared_transcript_ids(cluster_result):
     return set(df.loc[mask, 'transcript_id'].dropna())
 
 
-def _assert_single_transcript_invariant(results, use_longest_cds, use_most_like_canonical):
-    """When use_longest_cds or use_most_like_canonical is True, no cluster should
-    compare more than one transcript - both are tie-break rules that narrow a
-    cluster's comparable transcripts down to exactly one."""
-    if not (use_longest_cds or use_most_like_canonical):
-        return
+def _assert_tie_break_tags_are_consistent(results):
+    """Each tie-break rule tags at most one compared transcript per cluster."""
     for cluster_result in results:
-        compared = _compared_transcript_ids(cluster_result)
-        assert len(compared) <= 1, (
-            f"Cluster {cluster_result.cluster_name} compared {len(compared)} transcripts "
-            f"({compared}) although a single-transcript tie-break flag was set "
-            f"(use_longest_cds={use_longest_cds}, use_most_like_canonical={use_most_like_canonical})"
-        )
+        df = cluster_result.get_results_df()
+        if len(df) == 0:
+            continue
+        for col in ('is_longest_cds', 'is_most_like_canonical'):
+            tagged_transcripts = set(df.loc[df[col] == True, 'transcript_id'].dropna())
+            assert len(tagged_transcripts) <= 1, (
+                f"Cluster {cluster_result.cluster_name} has {len(tagged_transcripts)} transcripts "
+                f"tagged {col}=True ({tagged_transcripts}) - expected at most one."
+            )
 
 
 def _load_junctions(con, junctions_csv, hadas_format):
@@ -99,8 +95,7 @@ def _load_junctions(con, junctions_csv, hadas_format):
     return hadas_read_input_file(con, junctions_csv) if hadas_format else read_junctions_csv(junctions_csv)
 
 
-def _run_analysis(con, tmp_path, junctions_csv, hadas_format, use_longest_cds, use_most_like_canonical,
-                   restrict_pdf_to_comparable):
+def _run_analysis(con, tmp_path, junctions_csv, hadas_format, restrict_pdf_to_comparable, use_representative_domains):
     """Run analyze_junctions with cwd set to tmp_path (PDFs are written relative to cwd)."""
     analysis = JunctionsAnalysis(con)
     df_junctions = _load_junctions(con, junctions_csv, hadas_format)
@@ -113,22 +108,21 @@ def _run_analysis(con, tmp_path, junctions_csv, hadas_format, use_longest_cds, u
             output_path=output_path,
             create_pdf=True,
             num_workers=1,
-            use_longest_cds=use_longest_cds,
-            use_most_like_canonical=use_most_like_canonical,
             restrict_pdf_to_comparable=restrict_pdf_to_comparable,
+            use_representative_domains=use_representative_domains,
         )
     finally:
         os.chdir(cwd_before)
     return results, output_path
 
 
-@pytest.mark.parametrize('use_longest_cds,use_most_like_canonical,restrict_pdf_to_comparable', FLAG_COMBINATIONS)
-def test_ioe_csv_all_flag_combinations(con, tmp_path, use_longest_cds, use_most_like_canonical, restrict_pdf_to_comparable):
+@pytest.mark.parametrize('restrict_pdf_to_comparable,use_representative_domains', FLAG_COMBINATIONS)
+def test_ioe_csv_all_flag_combinations(con, tmp_path, restrict_pdf_to_comparable, use_representative_domains):
     """analyze_junctions runs end-to-end on ioe_example_junctions.csv for every combination of the flags."""
     results, output_path = _run_analysis(
         con, tmp_path, IOE_CSV, hadas_format=False,
-        use_longest_cds=use_longest_cds, use_most_like_canonical=use_most_like_canonical,
         restrict_pdf_to_comparable=restrict_pdf_to_comparable,
+        use_representative_domains=use_representative_domains,
     )
 
     assert len(results) > 0, "Expected at least one cluster to be analyzed"
@@ -137,16 +131,16 @@ def test_ioe_csv_all_flag_combinations(con, tmp_path, use_longest_cds, use_most_
     pdf_files = glob.glob(str(tmp_path / '*_junction_comparison.pdf'))
     assert len(pdf_files) > 0, "Expected at least one PDF to be generated"
 
-    _assert_single_transcript_invariant(results, use_longest_cds, use_most_like_canonical)
+    _assert_tie_break_tags_are_consistent(results)
 
 
-@pytest.mark.parametrize('use_longest_cds,use_most_like_canonical,restrict_pdf_to_comparable', FLAG_COMBINATIONS)
-def test_hadas_xlsx_all_flag_combinations(con, tmp_path, use_longest_cds, use_most_like_canonical, restrict_pdf_to_comparable):
+@pytest.mark.parametrize('restrict_pdf_to_comparable,use_representative_domains', FLAG_COMBINATIONS)
+def test_hadas_xlsx_all_flag_combinations(con, tmp_path, restrict_pdf_to_comparable, use_representative_domains):
     """analyze_junctions runs end-to-end on short_H_vs_M_HN6.xlsx for every combination of the flags."""
     results, output_path = _run_analysis(
         con, tmp_path, HADAS_XLSX, hadas_format=True,
-        use_longest_cds=use_longest_cds, use_most_like_canonical=use_most_like_canonical,
         restrict_pdf_to_comparable=restrict_pdf_to_comparable,
+        use_representative_domains=use_representative_domains,
     )
 
     assert len(results) > 0, "Expected at least one cluster to be analyzed"
@@ -155,23 +149,18 @@ def test_hadas_xlsx_all_flag_combinations(con, tmp_path, use_longest_cds, use_mo
     pdf_files = glob.glob(str(tmp_path / '*_junction_comparison.pdf'))
     assert len(pdf_files) > 0, "Expected at least one PDF to be generated"
 
-    _assert_single_transcript_invariant(results, use_longest_cds, use_most_like_canonical)
+    _assert_tie_break_tags_are_consistent(results)
 
 
 # ---------------------------------------------------------------------------
 # Automatic comparison against the committed golden reference outputs
 # ---------------------------------------------------------------------------
 
-def _case_name(label, use_longest_cds, use_most_like_canonical, restrict_pdf_to_comparable):
-    # Preserves the original longestcds_{bool} naming (and existing golden reference
-    # directories) for the two flags' False/False and True/False combinations; only the
-    # new use_most_like_canonical=True case gets a new "mostlikecanonical_True" name.
-    selection = 'mostlikecanonical_True' if use_most_like_canonical else f'longestcds_{use_longest_cds}'
-    return f"{label}__{selection}__restrict_{restrict_pdf_to_comparable}"
+def _case_name(label, restrict_pdf_to_comparable, use_representative_domains):
+    return f"{label}__restrict_{restrict_pdf_to_comparable}__representative_{use_representative_domains}"
 
 
-def _run_case_to_dir(con, case_dir, junctions_csv, hadas_format, use_longest_cds, use_most_like_canonical,
-                      restrict_pdf_to_comparable):
+def _run_case_to_dir(con, case_dir, junctions_csv, hadas_format, restrict_pdf_to_comparable, use_representative_domains):
     """Run analyze_junctions, writing results.csv + PDFs into a freshly-created case_dir."""
     if os.path.exists(case_dir):
         shutil.rmtree(case_dir)
@@ -188,9 +177,8 @@ def _run_case_to_dir(con, case_dir, junctions_csv, hadas_format, use_longest_cds
             output_path=output_path,
             create_pdf=True,
             num_workers=1,
-            use_longest_cds=use_longest_cds,
-            use_most_like_canonical=use_most_like_canonical,
             restrict_pdf_to_comparable=restrict_pdf_to_comparable,
+            use_representative_domains=use_representative_domains,
         )
     finally:
         os.chdir(cwd_before)
@@ -237,9 +225,9 @@ def _compare_pdf_text_to_reference(output_dir, reference_dir):
 
 
 @pytest.mark.parametrize('label,junctions_csv,hadas_format', INPUT_FILES)
-@pytest.mark.parametrize('use_longest_cds,use_most_like_canonical,restrict_pdf_to_comparable', FLAG_COMBINATIONS)
+@pytest.mark.parametrize('restrict_pdf_to_comparable,use_representative_domains', FLAG_COMBINATIONS)
 def test_compare_against_reference_outputs(con, keep_test_output, label, junctions_csv, hadas_format,
-                                            use_longest_cds, use_most_like_canonical, restrict_pdf_to_comparable):
+                                            restrict_pdf_to_comparable, use_representative_domains):
     """Run analyze_junctions for this flag combination, writing its CSV/PDF output to
     tests/generated_outputs/<case_name>/, then compare the resulting results.csv
     against the golden reference under tests/reference_outputs/<case_name>/.
@@ -248,14 +236,13 @@ def test_compare_against_reference_outputs(con, keep_test_output, label, junctio
     default. Pass --keep-test-output on the pytest command line to keep it
     (e.g. to inspect the PDFs by hand).
     """
-    case_name = _case_name(label, use_longest_cds, use_most_like_canonical, restrict_pdf_to_comparable)
+    case_name = _case_name(label, restrict_pdf_to_comparable, use_representative_domains)
     output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
     reference_dir = os.path.join(REFERENCE_OUTPUTS_DIR, case_name)
     reference_csv = os.path.join(reference_dir, 'results.csv')
 
     generated_csv = _run_case_to_dir(
-        con, output_dir, junctions_csv, hadas_format, use_longest_cds, use_most_like_canonical,
-        restrict_pdf_to_comparable,
+        con, output_dir, junctions_csv, hadas_format, restrict_pdf_to_comparable, use_representative_domains,
     )
 
     pdf_files = glob.glob(os.path.join(output_dir, '*_junction_comparison.pdf'))
@@ -283,7 +270,6 @@ def test_comparable_transcript_ids_excludes_skipped_events():
     cluster_result.add_event('no_domains_in_region', transcript_id='ENST_COMPARED_2')
     cluster_result.add_event('transcript_doesnt_have_junctions', transcript_id='ENST_NO_JUNCTIONS')
     cluster_result.add_event('no_unique_junctions', transcript_id='ENST_NOT_UNIQUE')
-    cluster_result.add_event('skipped_not_longest_cds', transcript_id='ENST_SHORTER_CDS')
 
     comparable_ids = analysis._comparable_transcript_ids(cluster_result)
 

@@ -1,7 +1,9 @@
 # Tests
 
 Tests for the junction/domain comparison pipeline (`junction_analisys.py`,
-`generate_gene_pdf.py`), run against the real DoChaP database.
+`generate_gene_pdf.py`). `test_flags.py` runs against the real DoChaP
+database; `test_junction_analysis.py` is DB-free unit tests for
+`junction_analisys.py`'s pure functions.
 
 ## Fixtures
 
@@ -19,10 +21,11 @@ alternative_splicing.py's job, not junction_analisys.py's.
 
 ```bash
 cd tests
-python3 -m pytest test_flags.py -v
+python3 -m pytest -v
 ```
 
-Drop `-v` for terse output, or run a subset by name:
+Runs both `test_flags.py` and `test_junction_analysis.py`. Drop `-v` for
+terse output, or run a subset by name:
 
 ```bash
 python3 -m pytest test_flags.py -v -k "ioe_csv and True"
@@ -41,19 +44,19 @@ already points at it.
 
 ### What's covered
 
-- **`test_*_all_flag_combinations`** (12 tests): runs
+Every comparable transcript is always compared to canonical now - there's no
+tie-break flag that narrows a cluster down to one transcript. Each row is
+tagged `is_longest_cds`/`is_most_like_canonical` instead. `FLAG_COMBINATIONS`
+varies `(restrict_pdf_to_comparable, use_representative_domains)`.
+
+- **`test_*_all_flag_combinations`** (8 tests): runs
   `analyze_junctions()` end-to-end against both fixture files, for every
-  combination in `FLAG_COMBINATIONS` - `(use_longest_cds, use_most_like_canonical,
-  restrict_pdf_to_comparable)`, six combinations (the two tie-break flags are
-  mutually exclusive, so it's not a full 2x2x2 cross product): no tie-break,
-  `use_longest_cds=True`, and `use_most_like_canonical=True`, each x
-  `restrict_pdf_to_comparable`. Verifies the run completes without error,
-  produces a results CSV and at least one PDF, and - whenever either
-  tie-break flag is set - that no cluster ever compares more than one
-  non-canonical transcript to the canonical one.
-  Output goes to a pytest-managed temp dir (`tmp_path`) and is not kept.
-- **`test_compare_against_reference_outputs`** (12 tests, automatic golden
-  comparison): for each of the same 6 cases x 2 fixtures, runs `analyze_junctions()` and
+  combination of `restrict_pdf_to_comparable` and `use_representative_domains`.
+  Verifies the run completes without error, produces a results CSV and at
+  least one PDF, and that each tie-break rule tags at most one transcript per
+  cluster. Output goes to a pytest-managed temp dir (`tmp_path`) and is not kept.
+- **`test_compare_against_reference_outputs`** (8 tests, automatic golden
+  comparison): for each of the same 4 cases x 2 fixtures, runs `analyze_junctions()` and
   writes its CSV/PDF output to a persistent directory,
   `tests/generated_outputs/<case_name>/`, then compares the generated
   `results.csv` row-for-row against the golden reference at
@@ -95,24 +98,21 @@ already points at it.
 ## Reference outputs (golden, manual inspection / regression reference)
 
 `generate_reference_outputs.py` is **not** part of the pytest run - it's a
-standalone script that runs all 6 flag combinations against both fixture
-files and writes the full, persistent output (results.csv + every generated
-PDF) into `reference_outputs/<case_name>/`, e.g.:
+standalone script that runs every `(restrict_pdf_to_comparable,
+use_representative_domains)` combination against both fixture files and
+writes the full, persistent output (results.csv + every generated PDF) into
+`reference_outputs/<case_name>/`, e.g.:
 
 ```
 reference_outputs/
-├── ioe_csv__longestcds_False__restrict_False/
-├── ioe_csv__longestcds_False__restrict_True/
-├── ioe_csv__longestcds_True__restrict_False/
-├── ioe_csv__longestcds_True__restrict_True/
-├── ioe_csv__mostlikecanonical_True__restrict_False/
-├── ioe_csv__mostlikecanonical_True__restrict_True/
-├── hadas_xlsx__longestcds_False__restrict_False/
-├── hadas_xlsx__longestcds_False__restrict_True/
-├── hadas_xlsx__longestcds_True__restrict_False/
-├── hadas_xlsx__longestcds_True__restrict_True/
-├── hadas_xlsx__mostlikecanonical_True__restrict_False/
-└── hadas_xlsx__mostlikecanonical_True__restrict_True/
+├── ioe_csv__restrict_False__representative_False/
+├── ioe_csv__restrict_True__representative_False/
+├── ioe_csv__restrict_False__representative_True/
+├── ioe_csv__restrict_True__representative_True/
+├── hadas_xlsx__restrict_False__representative_False/
+├── hadas_xlsx__restrict_True__representative_False/
+├── hadas_xlsx__restrict_False__representative_True/
+└── hadas_xlsx__restrict_True__representative_True/
 ```
 
 Regenerate them with:
@@ -128,22 +128,22 @@ committed golden case before re-committing
 (e.g. `diff <(sort old/results.csv) <(sort new/results.csv)`) - don't
 overwrite a golden reference without checking the diff first.
 
-`results.csv` and `pdf_text_reference.json` are committed for all 12 cases.
+`results.csv` and `pdf_text_reference.json` are committed for all 8 cases.
 The full PDFs themselves are only committed for
-`hadas_xlsx__longestcds_True__restrict_True/`, as a reference point for
-manual/visual inspection - the other 11 cases' PDFs exist locally once
+`hadas_xlsx__restrict_True__representative_False/`, as a reference point for
+manual/visual inspection - the other 7 cases' PDFs exist locally once
 generated but aren't tracked (regenerating writes them, but don't `git add`
-them). `test_compare_against_reference_outputs` skips (rather than fails) any
-case whose `results.csv` or `pdf_text_reference.json` isn't present.
+them). `test_compare_against_reference_outputs` skips (rather than fails)
+any case whose `results.csv` or `pdf_text_reference.json` isn't present.
 
 ## PDF text reference
 
 Raw PDF bytes aren't diffable as a golden reference: matplotlib embeds a
 CreationDate (and similar metadata) in every PDF it writes, so re-running the
 exact same analysis produces a byte-different file even when the visible
-content is identical - confirmed by regenerating
-`hadas_xlsx__longestcds_True__restrict_True` and diffing old vs new: same
-file sizes, only a handful of differing bytes per PDF, no content change.
+content is identical - confirmed by regenerating a case and diffing old vs
+new: same file sizes, only a handful of differing bytes per PDF, no content
+change.
 
 Instead, `tests/pdf_text_utils.py` extracts each PDF page's text with
 PyPDF2 and stores it as `pdf_text_reference.json` (one file per case,

@@ -1,6 +1,7 @@
 import logging
 import os
 import queue
+import random
 import shutil
 import tempfile
 import threading
@@ -78,8 +79,8 @@ def find_matching_junction_indices(df_transcript_exons, junctions, strand='+'):
 
 
 # ---------------------------------------------------------------------------
-# Phase 1.5: "most like canonical" transcript selection (alternative to
-# use_longest_cds when several transcripts have unique junctions vs canonical)
+# Phase 1.5: "most like canonical" transcript selection, an alternative to
+# picking the longest-CDS transcript
 # ---------------------------------------------------------------------------
 
 def _exon_coord_set(df_exons):
@@ -107,8 +108,8 @@ def select_most_like_canonical(comparable_transcript_ids, canonical_transcript_i
     exons inside the junction range - that exactly match a canonical exon. Ties are
     broken by transcript id for determinism.
 
-    Falls back to the longest-CDS candidate (see JunctionsAnalysis.analyze_junctions'
-    use_longest_cds) if no candidate has an exact outside-range match to canonical.
+    Falls back to the longest-CDS candidate if no candidate has an exact outside-range
+    match to canonical.
     """
     min_bp = min(start for start, end in junctions)
     max_bp = max(end for start, end in junctions)
@@ -584,12 +585,12 @@ class ClusterAnalysisResult:
         self.events = []
 
     def add_event(self, event, transcript_id=None, domain_name=None, canonical_domain_length=None, transcript_domain_length=None,
-                  canonical_domains_number=None, transcript_domains_number=None):
+                  canonical_domains_number=None, transcript_domains_number=None, is_longest_cds=None, is_most_like_canonical=None):
         self.events.append((event, transcript_id, domain_name, canonical_domain_length,
-                            transcript_domain_length, canonical_domains_number, transcript_domains_number))
+                            transcript_domain_length, canonical_domains_number, transcript_domains_number,
+                            is_longest_cds, is_most_like_canonical))
 
-    def analyze_junction(self, df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup,
-                          use_longest_cds=False, use_most_like_canonical=False):
+    def analyze_junction(self, df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup):
         """
         Run the DOMAS algorithm for this cluster:
 
@@ -597,17 +598,14 @@ class ClusterAnalysisResult:
         of the gene, the junctions (if any) that match its exon structure and
         the subset of those that are unique compared to the canonical transcript.
 
-        Phase 1.5 - if use_longest_cds or use_most_like_canonical, and several
-        transcripts could be compared to canonical, narrow down to just one (see
-        select_most_like_canonical() for that rule; use_longest_cds keeps the one
-        with the longest CDS, as before). At most one of the two may be set.
+        Phase 1.5 - tag each comparable transcript with whether it's the one the
+        longest-CDS rule and/or the most-like-canonical rule (see
+        select_most_like_canonical()) would pick - none are skipped.
 
         Phase 2/3 - for each transcript with a unique junction, determine the
         relevant genomic window and compare its domains against the canonical
         transcript's, recording one event per domain group.
         """
-        if use_longest_cds and use_most_like_canonical:
-            raise ValueError("use_longest_cds and use_most_like_canonical are mutually exclusive.")
         # Use an order-preserving dedup (not `set`) so the order in which
         # transcripts are processed - and therefore the order of the output
         # rows - doesn't depend on Python's per-process string hash seed.
@@ -622,7 +620,7 @@ class ClusterAnalysisResult:
             if tid is not None and not pd.isna(tid) and tid not in invalid_ids
         ]
 
-        # CDS length per transcript id (used by use_longest_cds below). Missing
+        # CDS length per transcript id, for the longest-CDS tag below. Missing
         # cds_start/cds_end yields NaN here, normalized to -1 so such transcripts
         # are deprioritized rather than breaking the max() comparison.
         combined_ids = df_gene_transcripts.transcript_ensembl_id.fillna(df_gene_transcripts.transcript_refseq_id)
@@ -687,48 +685,33 @@ class ClusterAnalysisResult:
 
             comparable_transcript_ids.append(transcript_id)
 
-        # If several transcripts could be compared to the canonical transcript,
-        # only keep one - the rest are recorded as skipped rather than compared.
-        if use_longest_cds and len(comparable_transcript_ids) > 1:
-            longest_transcript_id = max(
+        # For tagging only - every comparable transcript is compared below regardless.
+        longest_cds_transcript_id = None
+        most_like_canonical_transcript_id = None
+        if comparable_transcript_ids:
+            longest_cds_transcript_id = max(
                 comparable_transcript_ids,
                 key=lambda tid: (cds_length_by_transcript.get(tid, -1), tid),
             )
-            for transcript_id in comparable_transcript_ids:
-                if transcript_id != longest_transcript_id:
-                    logger.debug(
-                        f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} has unique junctions "
-                        f"but is not the longest-CDS transcript among {sorted(comparable_transcript_ids)}. "
-                        f"Skipping in favor of {longest_transcript_id}."
-                    )
-                    self.add_event('skipped_not_longest_cds', transcript_id=transcript_id)
-            comparable_transcript_ids = [longest_transcript_id]
-        elif use_most_like_canonical and len(comparable_transcript_ids) > 1:
-            chosen_transcript_id = select_most_like_canonical(
+            most_like_canonical_transcript_id = select_most_like_canonical(
                 comparable_transcript_ids, self.canonical_transcript_id, transcript_exons,
                 self.junctions, cds_length_by_transcript,
             )
-            for transcript_id in comparable_transcript_ids:
-                if transcript_id != chosen_transcript_id:
-                    logger.debug(
-                        f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} has unique junctions "
-                        f"but is not the most-like-canonical transcript among {sorted(comparable_transcript_ids)}. "
-                        f"Skipping in favor of {chosen_transcript_id}."
-                    )
-                    self.add_event('skipped_not_most_like_canonical', transcript_id=transcript_id)
-            comparable_transcript_ids = [chosen_transcript_id]
 
         for transcript_id in comparable_transcript_ids:
             junction_idxs = transcript_junctions[transcript_id]
+            is_longest_cds = transcript_id == longest_cds_transcript_id
+            is_most_like_canonical = transcript_id == most_like_canonical_transcript_id
             events = list(compare_domains(
                 domain_lookup, transcript_exons, self.canonical_transcript_id, transcript_id,
                 canonical_junctions, junction_idxs, self.junctions,
             ))
             if events:
                 for event in events:
-                    self.add_event(**event)
+                    self.add_event(**event, is_longest_cds=is_longest_cds, is_most_like_canonical=is_most_like_canonical)
             else:
-                self.add_event('no_domains_in_region', transcript_id=transcript_id)
+                self.add_event('no_domains_in_region', transcript_id=transcript_id,
+                                is_longest_cds=is_longest_cds, is_most_like_canonical=is_most_like_canonical)
 
     def print_results(self, file_name='analysis_results.txt'):
         with open(file_name, 'a') as f:
@@ -747,13 +730,12 @@ class ClusterAnalysisResult:
         return pd.DataFrame(
             self.events,
             columns=['event', 'transcript_id', 'domain_name', 'c_domain_length', 't_domain_length',
-                        'c_domains_number', 't_domains_number']
+                        'c_domains_number', 't_domains_number', 'is_longest_cds', 'is_most_like_canonical']
         )
         
 
 def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None, canonical_transcript_ids=None,
-                           gene_strand=None, transcripts_by_gene=None, empty_transcripts=None, use_longest_cds=False,
-                           use_most_like_canonical=False):
+                           gene_strand=None, transcripts_by_gene=None, empty_transcripts=None):
     """Analyze a single cluster."""
     _, cluster_df = cluster_tuple
 
@@ -770,10 +752,7 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
     cluster_result.junctions = list(zip(cluster_df['start_position'], cluster_df['end_position']))
 
     df_gene_transcripts = transcripts_by_gene.get(gene_ensembl_id, empty_transcripts)
-    cluster_result.analyze_junction(
-        df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup,
-        use_longest_cds=use_longest_cds, use_most_like_canonical=use_most_like_canonical,
-    )
+    cluster_result.analyze_junction(df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup)
 
     return cluster_result
 
@@ -859,12 +838,26 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
         shutil.rmtree(output_dir, ignore_errors=True)
 
 
-def _process_cluster_chunk(chunk_info, df_exons=None, df_domains=None, canonical_transcript_ids=None,
-                          gene_strand=None, transcripts_by_gene=None, empty_transcripts=None, use_longest_cds=False,
-                          use_most_like_canonical=False):
+# Per-worker-process state, populated once by _init_worker() rather than
+# per chunk - df_exons/df_domains can be large, so re-pickling them for every
+# chunk via submit() args would be wasted work.
+_worker_state = {}
+
+
+def _init_worker(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene, empty_transcripts):
+    """ProcessPoolExecutor initializer - runs once when each worker process starts."""
+    _worker_state['exon_lookup'] = build_exon_lookup(df_exons)
+    _worker_state['domain_lookup'] = build_domain_lookup(df_domains)
+    _worker_state['canonical_transcript_ids'] = canonical_transcript_ids
+    _worker_state['gene_strand'] = gene_strand
+    _worker_state['transcripts_by_gene'] = transcripts_by_gene
+    _worker_state['empty_transcripts'] = empty_transcripts
+
+
+def _process_cluster_chunk(chunk_info):
     """Process a chunk of clusters sequentially (worker function for ProcessPoolExecutor).
 
-    Builds lookups inside the worker to avoid pickling issues with closures.
+    Reads shared, read-only state populated once per worker by _init_worker().
 
     Args:
         chunk_info: tuple of (worker_id, chunk_index, total_chunks, chunk)
@@ -872,11 +865,12 @@ def _process_cluster_chunk(chunk_info, df_exons=None, df_domains=None, canonical
     worker_id, chunk_index, total_chunks, chunk = chunk_info
     chunk_size = len(chunk)
 
-    # Build lookups once per worker process
-    exon_lookup = build_exon_lookup(df_exons)
-    domain_lookup = build_domain_lookup(df_domains)
-
-    logger.info(f"[Worker {worker_id}] Processing chunk {chunk_index + 1}/{total_chunks} ({chunk_size} clusters)")
+    exon_lookup = _worker_state['exon_lookup']
+    domain_lookup = _worker_state['domain_lookup']
+    canonical_transcript_ids = _worker_state['canonical_transcript_ids']
+    gene_strand = _worker_state['gene_strand']
+    transcripts_by_gene = _worker_state['transcripts_by_gene']
+    empty_transcripts = _worker_state['empty_transcripts']
 
     chunk_results = []
     processed_in_chunk = 0
@@ -891,8 +885,6 @@ def _process_cluster_chunk(chunk_info, df_exons=None, df_domains=None, canonical
                 gene_strand=gene_strand,
                 transcripts_by_gene=transcripts_by_gene,
                 empty_transcripts=empty_transcripts,
-                use_longest_cds=use_longest_cds,
-                use_most_like_canonical=use_most_like_canonical,
             )
             chunk_results.append(result)
         except (KeyError, ValueError, AttributeError, TypeError) as e:
@@ -908,7 +900,6 @@ def _process_cluster_chunk(chunk_info, df_exons=None, df_domains=None, canonical
         if processed_in_chunk % 10000 == 0:
             logger.info(f"[Worker {worker_id}] Chunk {chunk_index + 1}/{total_chunks}: processed {processed_in_chunk}/{chunk_size}")
 
-    logger.info(f"[Worker {worker_id}] Completed chunk {chunk_index + 1}/{total_chunks} ({chunk_size} clusters)")
     return chunk_results
 
 
@@ -996,21 +987,33 @@ class JunctionsAnalysis:
         return cluster_groups
 
     def _run_parallel_analysis(self, cluster_groups, df_exons, df_domains, canonical_transcript_ids,
-                               gene_strand, transcripts_by_gene, empty_transcripts, num_workers, output_path,
-                               use_longest_cds=False, use_most_like_canonical=False):
+                               gene_strand, transcripts_by_gene, empty_transcripts, num_workers, output_path):
         """Execute cluster analysis in parallel with dedicated writer thread."""
         total = len(cluster_groups)
-
-        # Divide clusters into chunks (one per worker, as many as needed)
         actual_workers = min(num_workers, total)
-        chunk_size = max(1, (total + actual_workers - 1) // actual_workers)
 
-        # Create chunks with only as many as needed (no empty chunks)
-        chunks = []
-        for i in range(0, total, chunk_size):
-            chunks.append(cluster_groups[i:i+chunk_size])
+        # Cluster cost varies a lot and is source-correlated (grouped by .ioe file), so a
+        # few big contiguous chunks can leave some workers idle for hours. Deterministic
+        # shuffling plus many small chunks lets idle workers pick up more work instead.
+        shuffled_groups = cluster_groups.copy()
+        random.Random(42).shuffle(shuffled_groups)
+        chunk_size = max(1, min(200, -(-total // (actual_workers * 20))))  # ceil division
 
+        chunks = [shuffled_groups[i:i + chunk_size] for i in range(0, total, chunk_size)]
         total_chunks = len(chunks)
+
+        # as_completed() returns chunks in whatever order they finish, unrelated to
+        # cluster_groups' original order. PDF file names embed a sequential count (see
+        # _generate_pdfs), so results are restored to that original order below.
+        has_specie_column = 'specie' in cluster_groups[0][1].columns if cluster_groups else False
+
+        def _group_identity(cluster_name, specie):
+            return (specie, cluster_name) if has_specie_column else (cluster_name,)
+
+        original_order = {
+            _group_identity(group_df['cluster_name'].iat[0], group_df['specie'].iat[0] if has_specie_column else None): idx
+            for idx, (_, group_df) in enumerate(cluster_groups)
+        }
 
         self.logger.info(f"Starting analysis with {actual_workers} workers + 1 writer thread")
         self.logger.info(f"Total clusters: {total}")
@@ -1018,7 +1021,8 @@ class JunctionsAnalysis:
 
         # Prepare column definitions for CSV
         df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
-                              'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
+                              'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number',
+                              'is_longest_cds', 'is_most_like_canonical']
 
         # Create queue for results (backpressure if writer lags)
         result_queue = queue.Queue(maxsize=actual_workers * 2)
@@ -1032,29 +1036,23 @@ class JunctionsAnalysis:
         writer_thread.start()
 
         chunks_with_info = [
-            (chunk_idx % total_chunks, chunk_idx, total_chunks, chunk)
+            (chunk_idx % actual_workers, chunk_idx, total_chunks, chunk)
             for chunk_idx, chunk in enumerate(chunks)
         ]
 
-        from functools import partial
-        chunk_worker = partial(
-            _process_cluster_chunk,
-            df_exons=df_exons,
-            df_domains=df_domains,
-            canonical_transcript_ids=canonical_transcript_ids,
-            gene_strand=gene_strand,
-            transcripts_by_gene=transcripts_by_gene,
-            empty_transcripts=empty_transcripts,
-            use_longest_cds=use_longest_cds,
-            use_most_like_canonical=use_most_like_canonical,
-        )
+        chunk_worker = _process_cluster_chunk
 
         all_results = []  # Collect results for PDF generation
         processed_count = 0
         last_time = time.perf_counter()
 
-        with ProcessPoolExecutor(max_workers=actual_workers) as executor:
-            # Submit all tasks
+        with ProcessPoolExecutor(
+            max_workers=actual_workers,
+            initializer=_init_worker,
+            initargs=(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene, empty_transcripts),
+        ) as executor:
+            # Submit all tasks - df_exons/df_domains are sent once per worker via
+            # initargs above, not re-pickled per chunk here.
             futures = [executor.submit(chunk_worker, chunk_info) for chunk_info in chunks_with_info]
 
             # Process results as they complete: send to writer AND collect for PDFs
@@ -1077,15 +1075,18 @@ class JunctionsAnalysis:
         result_queue.put(None)
         writer_thread.join()  # Wait for writer to finish
 
+        all_results.sort(
+            key=lambda r: original_order.get(_group_identity(r.cluster_name, r.specie if has_specie_column else None), total)
+        )
+
         self.logger.info(f"[Main] Analysis complete: processed {processed_count}/{total} clusters")
         return all_results
 
     # Events recorded for a transcript that was NOT actually compared to the
-    # canonical transcript (it was skipped for lacking junctions, lacking a
-    # unique junction, or losing the longest-CDS/most-like-canonical tie-break).
+    # canonical transcript (it was skipped for lacking junctions or lacking a
+    # unique junction).
     _SKIPPED_TRANSCRIPT_EVENTS = {
         'transcript_doesnt_have_junctions', 'no_unique_junctions',
-        'skipped_not_longest_cds', 'skipped_not_most_like_canonical',
     }
 
     def _comparable_transcript_ids(self, cluster_result):
@@ -1170,11 +1171,14 @@ class JunctionsAnalysis:
 
     def analyze_junctions(self, df_junctions, output_path='as_events_junctions_analysis.csv',
                           filter_transcript_count=0, create_pdf=True, print_genes=None,
-                          num_workers=4, use_longest_cds=False, use_most_like_canonical=False,
-                          use_ensembl_only=False, restrict_pdf_to_comparable=False,
+                          num_workers=4, use_ensembl_only=False, restrict_pdf_to_comparable=False,
                           use_representative_domains=False):
         """
         Analyze junctions and detect domain changes across alternative transcripts.
+
+        Every comparable transcript is compared to canonical (none are skipped); each
+        result row is tagged is_longest_cds/is_most_like_canonical for post-hoc filtering
+        (see get_results_df()).
 
         Args:
             df_junctions: DataFrame of junctions. Reading junctions from a file
@@ -1189,19 +1193,6 @@ class JunctionsAnalysis:
                 ensembl id - transcripts with no ensembl id (refseq-only) are
                 filtered out before any exon/domain lookups are built, so they
                 never participate in the analysis at all.
-            use_longest_cds: If True, and several transcripts could be compared
-                to the canonical transcript (each has at least one junction not
-                shared with the canonical), only the one with the longest CDS
-                is actually compared - the others are recorded with a
-                skipped_not_longest_cds event instead of being compared.
-                Mutually exclusive with use_most_like_canonical.
-            use_most_like_canonical: If True, and several transcripts could be
-                compared to the canonical transcript, only the one "most like
-                canonical" is actually compared - see
-                select_most_like_canonical() for the exact rule (falls back to
-                the longest-CDS candidate if none qualifies) - the others are
-                recorded with a skipped_not_most_like_canonical event instead
-                of being compared. Mutually exclusive with use_longest_cds.
             restrict_pdf_to_comparable: If True, each generated PDF only draws
                 the canonical transcript and the transcripts that were actually
                 compared to it - every other transcript of the gene is omitted
@@ -1216,9 +1207,6 @@ class JunctionsAnalysis:
         Returns:
             List of ClusterAnalysisResult objects
         """
-        if use_longest_cds and use_most_like_canonical:
-            raise ValueError("use_longest_cds and use_most_like_canonical are mutually exclusive.")
-
         # Validate input
         df_junctions = self._load_junctions_data(df_junctions)
         df_junctions = self._filter_junctions_by_transcript_count(df_junctions, filter_transcript_count)
@@ -1242,7 +1230,7 @@ class JunctionsAnalysis:
         results = self._run_parallel_analysis(
             cluster_groups, df_exons, df_domains, canonical_transcript_ids,
             gene_strand, transcripts_by_gene, empty_transcripts, num_workers,
-            output_path, use_longest_cds=use_longest_cds, use_most_like_canonical=use_most_like_canonical,
+            output_path,
         )
 
         # Generate PDFs if requested

@@ -985,7 +985,12 @@ class GeneVisualization:
                     row = transcript_start_row + i * 4
 
                     ax_results = fig.add_subplot(gs[row, :])
-                    self._draw_results_table(ax_results, transcript_results[i])
+                    # is_longest_cds/is_most_like_canonical are shown as a tag on the
+                    # label below instead of as redundant True/False table columns.
+                    table_rows = transcript_results[i]
+                    if table_rows is not None:
+                        table_rows = table_rows.drop(columns=['is_longest_cds', 'is_most_like_canonical'], errors='ignore')
+                    self._draw_results_table(ax_results, table_rows)
 
                     ax_genomic = fig.add_subplot(gs[row + 1:row + 3, 0])
                     self._draw_genomic_view(
@@ -1010,9 +1015,17 @@ class GeneVisualization:
                         protein_name = transcript['info'].get('protein_refseq_id')
                     if protein_name is None or pd.isna(protein_name) or str(protein_name).strip() == '':
                         protein_name = 'N/A'
+                    rows_for_transcript = transcript_results[i]
+                    tie_break_tags = []
+                    if rows_for_transcript is not None and len(rows_for_transcript) > 0:
+                        if 'is_longest_cds' in rows_for_transcript.columns and rows_for_transcript['is_longest_cds'].any():
+                            tie_break_tags.append('longest CDS')
+                        if 'is_most_like_canonical' in rows_for_transcript.columns and rows_for_transcript['is_most_like_canonical'].any():
+                            tie_break_tags.append('most like canonical')
+                    tag_suffix = f"  [{', '.join(tie_break_tags)}]" if tie_break_tags else ""
                     ax_label.text(
                         0.02, 0.98,
-                        f"Transcript: {transcript_name}  |  Protein: {protein_name}",
+                        f"Transcript: {transcript_name}  |  Protein: {protein_name}{tag_suffix}",
                         fontsize=8, va='top', transform=ax_label.transAxes,
                     )
 

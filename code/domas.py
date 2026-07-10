@@ -13,6 +13,8 @@ import sqlite3
 
 import alternative_splicing
 
+_DEFAULT_NUM_WORKERS = os.cpu_count() or 5
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Analyze junctions and detect domain changes across alternative transcripts.")
@@ -35,6 +37,13 @@ def parse_args():
                          help="Per event type, keep only this many example clusters with "
                               "the fewest transcripts (0 keeps every cluster); only used "
                               "when -input is a directory with -format ioe")
+    parser.add_argument("-num_workers", type=int, default=_DEFAULT_NUM_WORKERS,
+                         help=f"Number of parallel worker processes (default: this machine's "
+                              f"CPU count, {_DEFAULT_NUM_WORKERS})")
+    parser.add_argument("-use_representative_domains", action="store_true",
+                         help="Pull domains from the RepresentativeDomains table where "
+                              "available, falling back to DomainEvent/DomainType per "
+                              "protein (default: DomainEvent/DomainType only)")
     args = parser.parse_args()
 
     if not os.path.exists(args.dochap):
@@ -51,14 +60,21 @@ def main():
     try:
         if args.format == "hadas":
             print_genes = [g.strip() for g in args.gene_ids.split(',')] if args.gene_ids else None
-            alternative_splicing.analyze_hadas_input(con, args.input, args.output_csv, print_genes=print_genes)
+            alternative_splicing.analyze_hadas_input(
+                con, args.input, args.output_csv, print_genes=print_genes, num_workers=args.num_workers,
+                use_representative_domains=args.use_representative_domains,
+            )
         elif os.path.isdir(args.input):
             alternative_splicing.analyze_ioe_files(
                 con, args.input, args.ioe_pattern, args.output_csv,
-                examples_per_event=args.examples_per_event,
+                examples_per_event=args.examples_per_event, num_workers=args.num_workers,
+                use_representative_domains=args.use_representative_domains,
             )
         else:
-            alternative_splicing.analyze_ioe_file(con, args.input, args.output_csv)
+            alternative_splicing.analyze_ioe_file(
+                con, args.input, args.output_csv, num_workers=args.num_workers,
+                use_representative_domains=args.use_representative_domains,
+            )
     finally:
         con.close()
 
