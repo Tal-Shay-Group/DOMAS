@@ -8,6 +8,7 @@ This module owns no analysis logic itself and nothing else should import
 from it.
 """
 import argparse
+import logging
 import os
 import sqlite3
 
@@ -44,6 +45,18 @@ def parse_args():
                          help="Pull domains from the RepresentativeDomains table where "
                               "available, falling back to DomainEvent/DomainType per "
                               "protein (default: DomainEvent/DomainType only)")
+    parser.add_argument("-no_pdf", action="store_true",
+                         help="Skip PDF generation (only honored with -format hadas; the "
+                              "ioe path never generates PDFs regardless of this flag). "
+                              "Useful for a full-scale hadas run where a PDF per gene "
+                              "would otherwise always be produced.")
+    parser.add_argument("-run_stats", action="store_true",
+                         help="After the run, generate the results_stats.py report "
+                              "(event distribution, domain frequency, etc.) for the "
+                              "produced -output_csv.")
+    parser.add_argument("-stats_out_dir", type=str, default=None,
+                         help="Directory for the -run_stats report (default: same "
+                              "directory as -output_csv)")
     args = parser.parse_args()
 
     if not os.path.exists(args.dochap):
@@ -55,6 +68,17 @@ def parse_args():
 
 
 def main():
+    # junction_analisys.py's JunctionsAnalysis already logs progress every
+    # 10,000 clusters (with an ETA) via self.logger.info(...) - but nothing
+    # in the actual call chain from this CLI ever configured a logging
+    # handler (alternative_splicing.py only does that inside its own
+    # __main__ guard, which doesn't run when it's imported as a module, as
+    # it is here), so every one of those log records was silently dropped:
+    # logging with no handler configured produces no output at all below
+    # WARNING. This is what actually enables that existing progress logging
+    # for a real domas.py run, not new logging of its own.
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
     args = parse_args()
     con = sqlite3.connect(args.dochap)
     try:
@@ -62,7 +86,7 @@ def main():
             print_genes = [g.strip() for g in args.gene_ids.split(',')] if args.gene_ids else None
             alternative_splicing.analyze_hadas_input(
                 con, args.input, args.output_csv, print_genes=print_genes, num_workers=args.num_workers,
-                use_representative_domains=args.use_representative_domains,
+                use_representative_domains=args.use_representative_domains, create_pdf=not args.no_pdf,
             )
         elif os.path.isdir(args.input):
             alternative_splicing.analyze_ioe_files(
@@ -77,6 +101,14 @@ def main():
             )
     finally:
         con.close()
+
+    if args.run_stats:
+        import results_stats
+        stats_out_dir = args.stats_out_dir or os.path.dirname(os.path.abspath(args.output_csv))
+        if args.format == "hadas":
+            results_stats.generate_report(hadas_file=args.output_csv, out_dir=stats_out_dir)
+        else:
+            results_stats.generate_report(ioe_file=args.output_csv, out_dir=stats_out_dir)
 
 
 if __name__ == "__main__":

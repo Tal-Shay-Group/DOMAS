@@ -1013,9 +1013,9 @@ def analyze_ioe_files(con, input_path, pattern, output_csv, examples_per_event=5
                             use_representative_domains=use_representative_domains)
 
 def analyze_hadas_input(con, input_file, output_csv, print_genes=None, num_workers=5,
-                         use_representative_domains=False):
+                         use_representative_domains=False, create_pdf=True):
     df_junctions = hadas_read_input_file(con, input_file)
-    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=True, print_genes=print_genes,
+    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=create_pdf, print_genes=print_genes,
                         num_workers=num_workers, use_representative_domains=use_representative_domains)
     return
     gene_ids = df_junctions['gene_ensembl_id'].unique().tolist()

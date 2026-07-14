@@ -144,11 +144,29 @@ def find_boundary_exons(df_exons, min_bp, max_bp):
     Return (first_exon, last_exon): the exon whose genomic end is closest to
     (but not before) min_bp, and the exon whose genomic start is closest to
     (but not after) max_bp, allowing a 1bp tolerance on both ends.
+
+    This is called several times per compared transcript (Phase 2 window
+    refinement), on the small per-transcript exon slice - implemented with
+    numpy array ops + a single positional .iloc[] instead of pandas boolean
+    filtering + idxmin/idxmax + .loc[], since pandas' per-call overhead
+    dominates at this scale and this runs millions of times over a large
+    junctions file.
     """
-    first_candidates = df_exons[df_exons['genomic_end_tx'] >= min_bp - 1]
-    last_candidates = df_exons[df_exons['genomic_start_tx'] <= max_bp + 1]
-    first_exon = first_candidates.loc[first_candidates['genomic_end_tx'].idxmin()]
-    last_exon = last_candidates.loc[last_candidates['genomic_start_tx'].idxmax()]
+    ends = df_exons['genomic_end_tx'].to_numpy()
+    starts = df_exons['genomic_start_tx'].to_numpy()
+
+    first_mask = ends >= min_bp - 1
+    if not first_mask.any():
+        raise ValueError("attempt to get argmin of an empty sequence")
+    first_pos = np.where(first_mask, ends, np.inf).argmin()
+
+    last_mask = starts <= max_bp + 1
+    if not last_mask.any():
+        raise ValueError("attempt to get argmax of an empty sequence")
+    last_pos = np.where(last_mask, starts, -np.inf).argmax()
+
+    first_exon = df_exons.iloc[first_pos]
+    last_exon = df_exons.iloc[last_pos]
     return first_exon, last_exon
 
 
@@ -204,17 +222,30 @@ def find_bp_range_for_domains(df_exons, domains_in_region):
     `domains_in_region`, or (None, None) if there are no domains with a
     defined AA range.
     """
-    domains = domains_in_region[domains_in_region['AA_start'] != 0]
-    if domains.empty:
+    # numpy-array filtering instead of pandas boolean-mask DataFrames - this
+    # runs (conditionally, in Phase 2's window-refinement round) for every
+    # compared transcript, and df_exons/domains_in_region are always tiny
+    # per-transcript slices, so pandas' per-call overhead otherwise dominates.
+    aa_start = domains_in_region['AA_start'].to_numpy()
+    valid = aa_start != 0
+    if not valid.any():
+        return None, None
+    aa_end = domains_in_region['AA_end'].to_numpy()
+    min_domain_bp = aa_start[valid].min() * 3
+    max_domain_bp = aa_end[valid].max() * 3
+
+    starts = df_exons['abs_start_CDS'].to_numpy()
+    ends = df_exons['abs_end_CDS'].to_numpy()
+    first_mask = (starts <= min_domain_bp) & (ends >= min_domain_bp)
+    last_mask = (starts <= max_domain_bp) & (ends >= max_domain_bp)
+    if not first_mask.any() or not last_mask.any():
         return None, None
 
-    min_domain_bp = domains['AA_start'].min() * 3
-    max_domain_bp = domains['AA_end'].max() * 3
-
-    first_exon = df_exons[(df_exons['abs_start_CDS'] <= min_domain_bp) & (df_exons['abs_end_CDS'] >= min_domain_bp)]
-    last_exon = df_exons[(df_exons['abs_start_CDS'] <= max_domain_bp) & (df_exons['abs_end_CDS'] >= max_domain_bp)]
-    if first_exon.empty or last_exon.empty:
-        return None, None
+    # argmax on a bool array returns the position of the first True value,
+    # matching the original's `.iloc[0]` of the filtered rows (first match
+    # in df_exons' original order).
+    first_exon = df_exons.iloc[np.argmax(first_mask)]
+    last_exon = df_exons.iloc[np.argmax(last_mask)]
 
     # On a minus strand transcript, the domain's lower CDS bound maps to a
     # HIGHER genomic position (and vice versa), so these two values can come
@@ -222,8 +253,8 @@ def find_bp_range_for_domains(df_exons, domains_in_region):
     # several transcripts, so it must be returned in genomic (low, high)
     # order regardless of strand - otherwise the reversed pair is silently
     # dropped from the pooled max() and the window never widens to cover it.
-    bp_a = _cds_to_bp(first_exon.iloc[0], min_domain_bp)
-    bp_b = _cds_to_bp(last_exon.iloc[0], max_domain_bp)
+    bp_a = _cds_to_bp(first_exon, min_domain_bp)
+    bp_b = _cds_to_bp(last_exon, max_domain_bp)
     return min(bp_a, bp_b), max(bp_a, bp_b)
 
 
@@ -237,12 +268,22 @@ def build_exon_lookup(df_exons):
     by_ensembl = {tid: g for tid, g in df_exons.groupby('transcript_ensembl_id')}
     by_refseq = {tid: g for tid, g in df_exons.groupby('transcript_refseq_id')}
     empty = df_exons.iloc[0:0]
+    # A transcript id that's ambiguous between the ensembl/refseq groupings is
+    # looked up once per cluster it appears in - across a gene with many
+    # clusters that's the same pd.concat + drop_duplicates() re-run
+    # identically every time. Memoize the merged result per transcript id
+    # instead of recomputing it on every lookup() call.
+    merged_cache = {}
 
     def lookup(transcript_id):
         a = by_ensembl.get(transcript_id)
         b = by_refseq.get(transcript_id)
         if a is not None and b is not None:
-            return pd.concat([a, b]).drop_duplicates()
+            merged = merged_cache.get(transcript_id)
+            if merged is None:
+                merged = pd.concat([a, b]).drop_duplicates()
+                merged_cache[transcript_id] = merged
+            return merged
         return a if a is not None else (b if b is not None else empty)
 
     return lookup
@@ -267,7 +308,10 @@ def build_domain_lookup(df_domains):
 
 
 def _domains_in_aa_range(df_domains, min_aa, max_aa):
-    return df_domains[(df_domains['AA_end'] >= min_aa) & (df_domains['AA_start'] <= max_aa)].copy()
+    # Boolean-mask indexing already returns a new, independent DataFrame (not
+    # a view), so the extra .copy() here was a redundant allocation on a
+    # function called 4x per compared transcript.
+    return df_domains[(df_domains['AA_end'] >= min_aa) & (df_domains['AA_start'] <= max_aa)]
 
 
 def _merge_domain_names(*values):
@@ -403,6 +447,18 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
             t_domains_round2 = _domains_in_aa_range(df_t_domains, t_min_aa2, t_max_aa2)
             c_domains_round2 = _domains_in_aa_range(df_c_domains, c_min_aa2, c_max_aa2)
 
+    # _domains_in_aa_range() no longer defensively .copy()s its result
+    # (removed as a redundant allocation on a function called up to 4x per
+    # compared transcript - boolean-mask indexing already returns a new,
+    # independent DataFrame). Its return value still carries pandas'
+    # internal "copy of a slice" provenance marker though, which trips
+    # SettingWithCopyWarning on the ['length'] assignment below regardless
+    # of .loc[] usage (the warning is provenance-based, not a real aliasing
+    # check). Since only the round2 frames actually get mutated - not every
+    # _domains_in_aa_range() call - .copy() them here, once, right before
+    # the mutation, instead of inside the 4x-per-pair helper.
+    t_domains_round2 = t_domains_round2.copy()
+    c_domains_round2 = c_domains_round2.copy()
     t_domains_round2['length'] = t_domains_round2['AA_end'] - t_domains_round2['AA_start'] + 1
     c_domains_round2['length'] = c_domains_round2['AA_end'] - c_domains_round2['AA_start'] + 1
     return t_domains_round2, c_domains_round2
@@ -431,6 +487,33 @@ def domain_name_set(row, name_cols=DOMAIN_NAME_COLUMNS):
             if name and name not in ('None', 'nan'):
                 names.add(name)
     return names
+
+
+def _domain_name_sets(df_domains, name_cols=DOMAIN_NAME_COLUMNS):
+    """
+    Vectorized replacement for {idx: domain_name_set(row) for idx, row in
+    df_domains.iterrows()}. .iterrows() builds a full (mixed-dtype) Series
+    per row - one of the most expensive ways to iterate a DataFrame. Pulling
+    each column to a numpy array once and indexing by position instead
+    avoids that Series construction; called for every compared transcript in
+    Phase 3, so this matters at scale.
+    """
+    if df_domains.empty:
+        return {}
+    columns = [df_domains[col].to_numpy(dtype=object) for col in name_cols]
+    result = {}
+    for pos, idx in enumerate(df_domains.index):
+        names = set()
+        for col_values in columns:
+            val = col_values[pos]
+            if val is None or pd.isna(val):
+                continue
+            for name in str(val).split(';'):
+                name = name.strip()
+                if name and name not in ('None', 'nan'):
+                    names.add(name)
+        result[idx] = names
+    return result
 
 
 def group_by_shared_names(items_with_names):
@@ -462,7 +545,10 @@ def total_covered_length(df, idxs, start_col='AA_start', end_col='AA_end'):
     """
     if not idxs:
         return None
-    intervals = sorted((df.loc[i, start_col], df.loc[i, end_col]) for i in idxs)
+    # .at[] is a much cheaper scalar accessor than .loc[] (skips the general
+    # multi-axis alignment machinery) - this runs once per matched domain
+    # group in Phase 3, so the per-call savings add up over a large file.
+    intervals = sorted((df.at[i, start_col], df.at[i, end_col]) for i in idxs)
     total = 0
     cur_start, cur_end = intervals[0]
     for start, end in intervals[1:]:
@@ -538,8 +624,8 @@ def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, tr
         canonical_junctions, transcript_junctions, junctions,
     )
 
-    canonical_names = {idx: domain_name_set(row) for idx, row in c_domains.iterrows()}
-    transcript_names = {idx: domain_name_set(row) for idx, row in t_domains.iterrows()}
+    canonical_names = _domain_name_sets(c_domains)
+    transcript_names = _domain_name_sets(t_domains)
 
     tagged_items = (
         [(('C', idx), names) for idx, names in canonical_names.items()]
@@ -628,6 +714,12 @@ class ClusterAnalysisResult:
             tid: (length if pd.notna(length) else -1)
             for tid, length in zip(combined_ids, df_gene_transcripts.cds_end - df_gene_transcripts.cds_start)
         }
+
+        # Check if gene exists in the database at all
+        if df_gene_transcripts.empty:
+            self.add_event('gene_not_in_db')
+            logger.debug(f"Gene {self.gene_ensembl_id} ({self.gene_symbol}) not found in database for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
+            return
 
         gene_canonical_ids = canonical_transcript_ids.intersection(gene_transcript_ids)
         if not gene_canonical_ids:
@@ -820,14 +912,24 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
 
                         chunk_num += 1
 
-        # Combine all chunks into final CSV
+        # Combine all chunks into final CSV. Each chunk was already written by
+        # pandas with the same header/column order, so this is a plain
+        # file-level concatenation (header from the first chunk, data-only
+        # from the rest) rather than reading every chunk back into pandas
+        # with read_csv, concatenating in memory, and re-serializing with
+        # to_csv - which doubles the I/O and peak memory for no benefit on a
+        # large results file.
         chunk_files = sorted([os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.csv')])
 
         if chunk_files:
             log.info(f"[Writer] Combining {len(chunk_files)} chunks...")
-            df_all_results = pd.concat([pd.read_csv(f) for f in chunk_files], ignore_index=True)
-            df_all_results.to_csv(output_path, index=False)
-            log.info(f"[Writer] Final CSV written: {output_path} ({len(df_all_results)} rows)")
+            with open(output_path, 'w', newline='') as out_f:
+                for i, chunk_path in enumerate(chunk_files):
+                    with open(chunk_path, 'r', newline='') as in_f:
+                        if i > 0:
+                            next(in_f)  # skip this chunk's header line
+                        shutil.copyfileobj(in_f, out_f)
+            log.info(f"[Writer] Final CSV written: {output_path} ({total_rows} rows)")
         else:
             df_all_results = pd.DataFrame(columns=df_results_columns)
             df_all_results.to_csv(output_path, index=False)
@@ -930,10 +1032,16 @@ class JunctionsAnalysis:
         if filter_transcript_count <= 0:
             return df_junctions.copy()
 
-        df_transcripts = pd.read_sql_query('select * from transcripts', self.con)
-        gene_count = df_transcripts.value_counts('gene_GeneID_id')
-        df_transcripts['gene_count'] = df_transcripts['gene_GeneID_id'].map(gene_count)
-        genes_with_count = df_transcripts[df_transcripts['gene_count'] == filter_transcript_count].gene_GeneID_id.unique().tolist()
+        # Push the per-gene transcript count into SQL instead of pulling the
+        # entire transcripts table (`select *`) into pandas just to compute a
+        # value_counts() over one column.
+        df_gene_counts = pd.read_sql_query(
+            'select gene_GeneID_id, count(*) as gene_count from transcripts group by gene_GeneID_id',
+            self.con,
+        )
+        genes_with_count = df_gene_counts.loc[
+            df_gene_counts['gene_count'] == filter_transcript_count, 'gene_GeneID_id'
+        ].tolist()
         return df_junctions[df_junctions['gene_ensembl_id'].isin(genes_with_count)]
 
     def _load_database_data(self, gene_ids, use_ensembl_only=False, use_representative_domains=False):

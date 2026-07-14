@@ -34,7 +34,7 @@ HADAS_XLSX = os.path.join(TESTS_DIR, 'short_H_vs_M_HN6.xlsx')
 # Mirrors JunctionsAnalysis._SKIPPED_TRANSCRIPT_EVENTS plus the cluster-level
 # events that carry no real transcript id.
 _SKIPPED_EVENTS = {
-    'transcript_doesnt_have_junctions', 'no_unique_junctions',
+    'gene_not_in_db', 'transcript_doesnt_have_junctions', 'no_unique_junctions',
     'no_canonical_transcript', 'only_one_transcript', 'no_canonical_junctions', 'junction_not_mapped',
 }
 
@@ -258,6 +258,48 @@ def test_compare_against_reference_outputs(con, keep_test_output, label, junctio
 # ---------------------------------------------------------------------------
 # Focused, DB-independent unit tests for the two new pieces of logic
 # ---------------------------------------------------------------------------
+
+def test_gene_not_in_database():
+    """When a gene is not in the database (empty df_gene_transcripts), the 'gene_not_in_db'
+    event is added and analysis is skipped."""
+    cluster_result = ClusterAnalysisResult('TEST_1', 'ENSG99999999', 'FAKEGENE', specie='H_sapiens')
+    empty_df = pd.DataFrame(columns=['transcript_ensembl_id', 'transcript_refseq_id', 'cds_start', 'cds_end'])
+
+    cluster_result.analyze_junction(
+        df_gene_transcripts=empty_df,
+        canonical_transcript_ids=set(),
+        exon_lookup=lambda x: pd.DataFrame(),
+        domain_lookup=lambda x: pd.DataFrame(),
+    )
+
+    # Should have exactly one event: gene_not_in_db
+    assert len(cluster_result.events) == 1
+    assert cluster_result.events[0][0] == 'gene_not_in_db'
+
+
+def test_no_canonical_transcript_when_gene_in_db():
+    """When a gene IS in the database but has no canonical transcripts,
+    the 'no_canonical_transcript' event is added (not 'gene_not_in_db')."""
+    cluster_result = ClusterAnalysisResult('TEST_1', 'ENSG12345678', 'KNOWNGENE', specie='H_sapiens')
+    # DataFrame with transcripts but no canonical ones (empty canonical_transcript_ids)
+    df_with_transcripts = pd.DataFrame({
+        'transcript_ensembl_id': ['ENST00000001', 'ENST00000002'],
+        'transcript_refseq_id': [None, None],
+        'cds_start': [100, 200],
+        'cds_end': [500, 600]
+    })
+
+    cluster_result.analyze_junction(
+        df_gene_transcripts=df_with_transcripts,
+        canonical_transcript_ids=set(),  # Empty - no canonical transcripts available
+        exon_lookup=lambda x: pd.DataFrame(),
+        domain_lookup=lambda x: pd.DataFrame(),
+    )
+
+    # Should have exactly one event: no_canonical_transcript (not gene_not_in_db)
+    assert len(cluster_result.events) == 1
+    assert cluster_result.events[0][0] == 'no_canonical_transcript'
+
 
 def test_comparable_transcript_ids_excludes_skipped_events():
     """JunctionsAnalysis._comparable_transcript_ids keeps the canonical id plus only the
