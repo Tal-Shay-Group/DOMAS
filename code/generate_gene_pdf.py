@@ -62,7 +62,7 @@ _REPRESENTATIVE_DOMAIN_ID_COLUMNS = ('CDD_id', 'cdd', 'pfam', 'smart', 'tigr', '
 
 
 def _representative_domains_to_domain_columns(df_rep):
-    """Reshape raw RepresentativeDomains rows (protein_id, domain_id, domain_name,
+    """Reshape raw RepresentativeDomains rows (protein_interpro_id, domain_id, domain_name,
     start, end, score) into the AA_start/AA_end + identifier-column shape that
     _format_domain_label()/the protein view expect from DomainEvent/DomainType rows."""
     if df_rep.empty:
@@ -178,13 +178,13 @@ def prepare_gene_data_bulk(conn, gene_ensembl_ids, use_representative_domains=Fa
             ip_placeholders = ','.join(['?'] * len(interpro_ids))
             try:
                 df_rep_all = pd.read_sql_query(
-                    f"SELECT * FROM RepresentativeDomains WHERE protein_id IN ({ip_placeholders})",
+                    f"SELECT * FROM RepresentativeDomains WHERE protein_interpro_id IN ({ip_placeholders})",
                     conn, params=interpro_ids,
                 )
             except (sqlite3.OperationalError, pd.errors.DatabaseError):
                 df_rep_all = pd.DataFrame()
             if len(df_rep_all):
-                df_rep_all = df_rep_all.merge(df_protein_interpro, left_on='protein_id', right_on='protein_interpro_id')
+                df_rep_all = df_rep_all.merge(df_protein_interpro, on='protein_interpro_id')
                 df_rep_all = _representative_domains_to_domain_columns(df_rep_all)
                 for protein_id, df_rep_protein in df_rep_all.groupby('protein_ensembl_id'):
                     domains_by_protein[protein_id] = df_rep_protein.reset_index(drop=True)
@@ -373,7 +373,7 @@ class GeneVisualization:
         if self.use_representative_domains:
             protein_interpro_id = df_protein.iloc[0].get('protein_interpro_id')
             if pd.notna(protein_interpro_id) and str(protein_interpro_id).strip():
-                rep_query = "SELECT * FROM RepresentativeDomains WHERE protein_id = ?"
+                rep_query = "SELECT * FROM RepresentativeDomains WHERE protein_interpro_id = ?"
                 try:
                     df_rep = pd.read_sql_query(rep_query, self.conn, params=[protein_interpro_id])
                 except (sqlite3.OperationalError, pd.errors.DatabaseError):

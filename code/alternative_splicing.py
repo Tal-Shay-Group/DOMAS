@@ -575,13 +575,13 @@ def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_pr
         print('RepresentativeDomains table not found in this DB.')
         return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
 
-    df_rep = df_rep[df_rep.protein_id.isin(interpro_ids)]
+    df_rep = df_rep[df_rep.protein_interpro_id.isin(interpro_ids)]
     df_rep = df_rep.dropna(subset=['start', 'end'])
     if df_rep.empty:
         return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
 
     merged_df = pd.merge(df_protein, df_transcript, on=['protein_ensembl_id', 'transcript_ensembl_id'])
-    merged_df = pd.merge(merged_df, df_rep, left_on='protein_interpro_id', right_on='protein_id')
+    merged_df = pd.merge(merged_df, df_rep, on='protein_interpro_id')
 
     domain_column = merged_df['domain_id'].map(_route_domain_id_to_column)
     for col in ('CDD_id', 'cdd', 'pfam', 'smart', 'tigr', 'interpro'):
