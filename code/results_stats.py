@@ -11,20 +11,25 @@ Per-file analyses (analyze_file()):
                                          added_domain+dropped domain case specifically
   2. Mixed combinations               — which exact reason-sets make up "mixed", and how often
   3. Most frequent domains            — overall and per event type
-  4. Length change — shorter          — absolute Δaa and relative Δ%
-  5. Length change — longer           — absolute Δaa and relative Δ%
-  6. Species comparison               — human vs mouse, overall and per gene
+  4. Domain frequency scatter         — per-domain rank and raw occurrence count,
+                                         one species vs the other; both across every
+                                         shared domain and restricted to #3's top-N
+                                         (skipped with a warning if there isn't
+                                         exactly one 'specie' pair present)
+  5. Length change — shorter          — absolute Δaa and relative Δ%
+  6. Length change — longer           — absolute Δaa and relative Δ%
+  7. Species comparison               — human vs mouse, overall and per gene
                                          (skipped with a warning if there's no
                                          'specie' column)
-  7. AS splice type vs outcome        — cluster prefix encodes A3/A5/SE/RI/…
+  8. AS splice type vs outcome        — cluster prefix encodes A3/A5/SE/RI/…
                                          (skipped with a warning if no cluster
                                          carries an AS-type prefix)
-  8. Domain count change              — copies gained/lost vs canonical
-  9. Domain severity spectrum         — continuous % of canonical domain retained
+  9. Domain count change              — copies gained/lost vs canonical
+ 10. Domain severity spectrum         — continuous % of canonical domain retained
 
 Cross-file analysis (compare_files()):
- 10. Event-type distribution comparison — side by side across files
- 11. Severity spectrum comparison        — overlaid histograms across files
+ 11. Event-type distribution comparison — side by side across files
+ 12. Severity spectrum comparison        — overlaid histograms across files
 
 A column that's expected but absent from a given file (e.g. IOE files have no
 'specie' column) triggers a warning at load time, and analyses that depend on
@@ -42,6 +47,8 @@ standalone file in OUT_DIR, prefixed with its label:
   event_distribution_<label>.png
   mixed_combinations_<label>.csv
   domain_frequency_<label>.png
+  domain_rank_scatter_<label>.png / domain_rank_scatter_top20_<label>.png
+  domain_count_scatter_<label>.png / domain_count_scatter_top20_<label>.png
   domain_descriptions_<label>.csv (only with fetch_domain_descriptions=True)
   length_change_shorter_<label>.png
   length_change_longer_<label>.png
@@ -60,6 +67,7 @@ import io
 import math
 import os
 import re
+import sqlite3
 import textwrap
 
 import matplotlib
@@ -79,6 +87,10 @@ OUT_DIR      = PROJECT_ROOT
 
 IOE_FILE   = os.path.join(PROJECT_ROOT, "ioe_full_results.csv")
 HADAS_FILE = os.path.join(PROJECT_ROOT, "hadas_results.csv")
+
+# DoChaP merged DB - source of the RepresentativeDomains.description text used
+# for the top-domains description table (matches alternative_splicing.py).
+DEFAULT_DOCHAP_DB_PATH = "/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite"
 
 # ── Event-type taxonomy ────────────────────────────────────────────────────────
 # Mirrors the full set of event_type values ClusterAnalysisResult.add_event()
@@ -868,52 +880,126 @@ def _interpro_lookup(domain_name):
     return None
 
 
-def _clean_interpro_text(html):
-    """Strip InterPro's description HTML tags and [[cite:...]] reference markers down to plain text."""
-    text = re.sub(r"\[\[cite:.*?\]\]", "", html)
-    text = re.sub(r"<[^>]+>", "", text)
+def _clean_interpro_text(text):
+    """Normalize an InterPro description to plain text.
+
+    Handles both the raw REST payload (HTML tags + inline [[cite:...]] markers)
+    and the DoChaP RepresentativeDomains.description text, which has already had
+    its citations removed but left behind empty reference brackets like
+    "[ , , ]". Strips all of those, tidies the space a removed citation leaves
+    before punctuation (e.g. "RNAs ." -> "RNAs."), and collapses whitespace.
+    """
+    text = re.sub(r"\[\[cite:.*?\]\]", "", text)      # inline citation markers
+    text = re.sub(r"<[^>]+>", "", text)                # HTML tags
+    text = re.sub(r"\[\s*(?:,\s*)*\]", "", text)       # empty "[ , , ]" citation remnants
+    text = re.sub(r"\s+([.,;:])", r"\1", text)          # space left before punctuation
     return re.sub(r"\s+", " ", text).strip()
 
 
-def fetch_domain_descriptions(domain_names, out_csv=None, min_interval=0.4):
+def _web_description_fallback(missing_domains, result_map, min_interval=0.4):
+    """Fill descriptions for `missing_domains` from the InterPro REST API, in place.
+
+    Best-effort and fully guarded: on a server where outbound web access is
+    blocked (the production case), this must never raise or hang. A quick
+    reachability probe short-circuits a firewalled host in one short timeout
+    instead of retrying per domain, and the whole thing is wrapped in try/except
+    so any network failure just leaves those domains without a description.
+
+    Returns the number of domains it managed to fill.
     """
-    Look up each domain accession (InterPro, or a member-database signature -
-    Pfam, SMART, CDD, PANTHER, SUPERFAMILY, PROSITE profile, NCBIFAM/TIGRFAM,
-    Gene3D/CATH) on the InterPro REST API and return a DataFrame with its
-    name and description. This hits the network, so it's opt-in rather than
-    part of analyze_file()'s default flow - call it directly, or pass
-    fetch_domain_descriptions=True to analyze_file()/generate_report() (which
-    calls it on domain_frequency()'s top_n domains).
+    import urllib.error
+    import urllib.request
 
-    Rate-limited via the same RateLimitedSession helper check_db.py uses for
-    the Ensembl/NCBI comparison, so this stays polite to InterPro's public
-    API. A domain whose ID format isn't recognized, or whose lookup 404s,
-    gets an empty description rather than raising - the table still gets
-    written for everything that did resolve.
-    """
-    from check_db import RateLimitedSession
+    n_web = 0
+    try:
+        # Probe once: an HTTPError means the host answered (reachable); a bare
+        # URLError means it's unreachable/blocked -> skip the whole fallback.
+        try:
+            urllib.request.urlopen("https://www.ebi.ac.uk/interpro/api/", timeout=5)
+        except urllib.error.HTTPError:
+            pass
 
-    domain_names = pd.unique(pd.Series(list(domain_names)).dropna())
-    session = RateLimitedSession(min_interval=min_interval)
-
-    rows = []
-    n_resolved = 0
-    for domain_name in domain_names:
-        name = description = None
-        lookup = _interpro_lookup(domain_name)
-        if lookup is not None:
+        from check_db import RateLimitedSession
+        # max_retries=0 so a blocked host costs one short timeout per call, not a
+        # retry storm; timeout kept modest for the same reason.
+        session = RateLimitedSession(min_interval=min_interval, max_retries=0, timeout=10)
+        for domain_name in missing_domains:
+            lookup = _interpro_lookup(domain_name)
+            if lookup is None:
+                continue
             member_db, accession = lookup
             url = f"https://www.ebi.ac.uk/interpro/api/entry/{member_db}/{accession}"
             metadata = (session.get_json(url) or {}).get("metadata")
-            if metadata is not None:
-                name = (metadata.get("name") or {}).get("name")
-                description_blocks = metadata.get("description") or []
-                description = _clean_interpro_text(description_blocks[0]["text"]) if description_blocks else None
-                n_resolved += 1
-        rows.append({"domain_name": domain_name, "name": name, "description": description})
+            if metadata is None:
+                continue
+            blocks = metadata.get("description") or []
+            web_desc = _clean_interpro_text(blocks[0]["text"]) if blocks else None
+            if web_desc:
+                result_map[domain_name][0] = result_map[domain_name][0] or (metadata.get("name") or {}).get("name")
+                result_map[domain_name][1] = web_desc
+                n_web += 1
+    except Exception as exc:  # noqa: BLE001 - network access is best-effort
+        print(f"  web fallback unavailable ({type(exc).__name__}: {exc}); "
+              f"{len(missing_domains)} domain(s) left without a description.")
+    return n_web
 
-    result = pd.DataFrame(rows)
-    print(f"  InterPro descriptions: {n_resolved}/{len(result)} resolved.")
+
+def fetch_domain_descriptions(domain_names, out_csv=None, con=None, db_path=None, web_fallback=True):
+    """
+    Look up each top domain's name + description from the DoChaP
+    RepresentativeDomains table (its `domain_name` and `description` columns),
+    keyed by `domain_id` - the accession that results.csv stores in its own
+    `domain_name` column. Returns a DataFrame [domain_name, name, description],
+    one row per unique input domain.
+
+    This replaces the previous InterPro REST lookup as the *primary* source: the
+    descriptions now come from the local DB instead of the network. For the ~26%
+    of domains whose RepresentativeDomains.description is empty (and any domain
+    not in that table at all), an optional InterPro web fallback (web_fallback,
+    default on) tries to fill the gap - but it is fully guarded so it never
+    raises or hangs where outbound access is blocked (see
+    _web_description_fallback). Domains still unresolved get an empty
+    description rather than raising.
+
+    Pass an already-open sqlite3 connection as `con`, or a `db_path` to open
+    (defaults to DEFAULT_DOCHAP_DB_PATH).
+    """
+    domain_names = pd.unique(pd.Series(list(domain_names)).dropna())
+
+    own_con = con is None
+    if own_con:
+        con = sqlite3.connect(db_path or DEFAULT_DOCHAP_DB_PATH)
+    try:
+        lookup = {}
+        if len(domain_names):
+            placeholders = ",".join("?" * len(domain_names))
+            # domain_name/description are constant per domain_id, so GROUP BY
+            # collapses the many per-protein rows down to one per accession.
+            query = (
+                "SELECT domain_id, domain_name, description "
+                "FROM RepresentativeDomains "
+                f"WHERE domain_id IN ({placeholders}) GROUP BY domain_id"
+            )
+            for domain_id, name, description in con.execute(query, list(domain_names)):
+                cleaned = _clean_interpro_text(description) if description else None
+                lookup[domain_id] = (name, cleaned or None)
+    finally:
+        if own_con:
+            con.close()
+
+    # result_map: domain_name -> [name, description]; mutated in place by the fallback.
+    result_map = {d: list(lookup.get(d, (None, None))) for d in domain_names}
+    n_db = sum(1 for d in domain_names if result_map[d][1])
+
+    missing = [d for d in domain_names if not result_map[d][1]]
+    n_web = _web_description_fallback(missing, result_map) if (web_fallback and missing) else 0
+
+    result = pd.DataFrame(
+        [{"domain_name": d, "name": result_map[d][0], "description": result_map[d][1]} for d in domain_names]
+    )
+    print(f"  descriptions: {n_db} from RepresentativeDomains"
+          f"{f', {n_web} via InterPro web fallback' if web_fallback else ''} "
+          f"({len(result)} domains total).")
     if out_csv:
         result.to_csv(out_csv, index=False)
         print(f"  → {out_csv}")
@@ -1019,6 +1105,125 @@ def domain_frequency(df, label, top_n=20):
 
     save(fig, f"domain_frequency_{label.lower().replace(' ', '_')}.png")
     return top_domains
+
+
+def _species_domain_counts(domain_df, specie):
+    """domain_name -> occurrence count for one specie's rows, domains with 0 occurrences excluded.
+
+    value_counts() on a categorical column includes every category at count
+    0 (even ones absent from this specie's rows entirely, since domain_name
+    carries every category seen across the whole df) - drop those so index
+    membership below means "actually occurs for this specie", not "exists as
+    a category somewhere in the file".
+    """
+    counts = domain_df[domain_df["specie"] == specie]["domain_name"].value_counts()
+    return counts[counts > 0]
+
+
+def domain_species_rank_scatter(df, label, top_domains=None):
+    """
+    Two scatter plots comparing per-domain frequency between species: rank
+    (1 = most frequent) and occurrence count, one species vs the other. The
+    count axes are normalized to % of that species' total domain
+    occurrences rather than raw counts, since the two species' domain row
+    counts are rarely comparable (Hadas human routinely has several times
+    more domain rows than mouse) - plotting raw counts would put nearly
+    every point below the y=x line purely from that volume difference, not
+    because the domain is actually more common in one species biologically.
+
+    Only meaningful with exactly one species *pair* present (same
+    precondition as domain_frequency()'s per-domain rank columns) - skipped
+    with a warning for IOE (no 'specie' column), an already species-filtered
+    df (e.g. "Hadas Human", from analyze_file(specie_filter=...), which by
+    definition only has one species), or more than 2 species.
+
+    Rendered twice: once across every domain the two species share, and once
+    restricted to top_domains (domain_frequency()'s own top-N Series, if
+    given) - so the report also has a version lined up with the bar chart
+    directly above it.
+    """
+    domain_df = df[df["domain_name"].notna() & (df["domain_name"] != "")]
+    if domain_df.empty:
+        return
+    if "specie" not in domain_df.columns:
+        _warn(f"domain_species_rank_scatter: {label} has no 'specie' column - skipping.")
+        return
+
+    species_present = sorted(s for s in domain_df["specie"].dropna().unique() if s)
+    if len(species_present) != 2:
+        _warn(f"domain_species_rank_scatter: {label} has {len(species_present)} specie(s) "
+              f"({species_present}), need exactly 2 - skipping.")
+        return
+    sp1, sp2 = species_present
+
+    counts1 = _species_domain_counts(domain_df, sp1)
+    counts2 = _species_domain_counts(domain_df, sp2)
+    if counts1.empty or counts2.empty:
+        return
+    rank1 = {d: i + 1 for i, d in enumerate(counts1.index)}
+    rank2 = {d: i + 1 for i, d in enumerate(counts2.index)}
+    # Denominators for the count axes: total domain occurrences for that
+    # species (not just the domains shared with the other species), so a
+    # domain's normalized value reads as "% of every domain occurrence in
+    # this species", comparable across species regardless of how much more
+    # domain data one species has overall.
+    total1 = int(counts1.sum())
+    total2 = int(counts2.sum())
+    shared_keys = set(counts1.index) & set(counts2.index)
+    color = COLORS.get(label, "#4472C4")
+    label_slug = label.lower().replace(' ', '_')
+
+    def _render(domains, suffix, scope_label):
+        keys = shared_keys if domains is None else shared_keys & set(domains)
+        common = sorted(keys)
+        if len(common) < 2:
+            print(f"  Skipping domain {sp1}/{sp2} scatter ({scope_label}): "
+                  f"only {len(common)} domain(s) present in both species.")
+            return
+
+        x_rank = np.array([rank1[d] for d in common])
+        y_rank = np.array([rank2[d] for d in common])
+        x_pct = np.array([counts1[d] for d in common]) / total1 * 100
+        y_pct = np.array([counts2[d] for d in common]) / total2 * 100
+        corr_rank = np.corrcoef(x_rank, y_rank)[0, 1]
+        # Pearson r is scale-invariant, so this is identical whether computed
+        # on the normalized % or the raw counts - only the axes/y=x meaning change.
+        corr_count = np.corrcoef(x_pct, y_pct)[0, 1]
+
+        fig, ax = plt.subplots(figsize=(7, 7))
+        ax.scatter(x_rank, y_rank, s=18, alpha=0.55, color=color, edgecolor="white", linewidth=0.3)
+        max_rank = max(x_rank.max(), y_rank.max())
+        ax.plot([1, max_rank], [1, max_rank], linestyle="--", color="#999999", linewidth=1, label="y = x (equal rank)")
+        ax.set_xlabel(f"Domain rank in {sp1} (1 = most frequent)")
+        ax.set_ylabel(f"Domain rank in {sp2} (1 = most frequent)")
+        ax.set_title(f"Domain frequency rank: {sp1} vs {sp2} — {label}\n"
+                     f"({scope_label}, {len(common)} domains, Pearson r = {corr_rank:.2f})",
+                     fontsize=11, fontweight="bold")
+        ax.legend(loc="upper left", fontsize=8)
+        ax.set_xlim(0, max_rank * 1.02)
+        ax.set_ylim(0, max_rank * 1.02)
+        fig.tight_layout()
+        save(fig, f"domain_rank_scatter{suffix}_{label_slug}.png")
+
+        fig, ax = plt.subplots(figsize=(7, 7))
+        ax.scatter(x_pct, y_pct, s=18, alpha=0.55, color=color, edgecolor="white", linewidth=0.3)
+        max_pct = max(x_pct.max(), y_pct.max(), 1e-9)
+        ax.plot([0, max_pct], [0, max_pct], linestyle="--", color="#999999", linewidth=1,
+                label="y = x (equal relative frequency)")
+        ax.set_xlabel(f"% of all domain occurrences in {sp1}  (n={total1:,})")
+        ax.set_ylabel(f"% of all domain occurrences in {sp2}  (n={total2:,})")
+        ax.set_title(f"Domain occurrence frequency: {sp1} vs {sp2} — {label}\n"
+                     f"({scope_label}, {len(common)} domains, Pearson r = {corr_count:.2f})",
+                     fontsize=11, fontweight="bold")
+        ax.legend(loc="upper left", fontsize=8)
+        ax.set_xlim(0, max_pct * 1.05)
+        ax.set_ylim(0, max_pct * 1.05)
+        fig.tight_layout()
+        save(fig, f"domain_count_scatter{suffix}_{label_slug}.png")
+
+    _render(None, "", "all shared domains")
+    if top_domains is not None and len(top_domains):
+        _render(set(top_domains.index), "_top20", f"top {len(top_domains)} domains")
 
 
 def domain_cluster_species_counts(df, top_domains, label):
@@ -1133,6 +1338,15 @@ def _draw_length_change_hist(ax, vals, color, xlabel, title):
     vals = vals[vals > 0]
     if vals.empty:
         ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+        return
+    if vals.min() == vals.max():
+        # A single unique value (often just one data point) can't seed a
+        # log-spaced bin range - geomspace(x, x, n) is constant, not
+        # monotonically increasing, which np.histogram/ax.hist rejects outright.
+        ax.text(0.5, 0.5, f"All {len(vals)} value(s) = {vals.iloc[0]:.1f}",
+                ha="center", va="center", transform=ax.transAxes)
+        ax.set_xlabel(xlabel)
+        ax.set_title(title)
         return
     bins = np.geomspace(vals.min(), vals.max(), 30)
     ax.hist(vals.values, bins=bins, alpha=0.85, color=color, edgecolor="white")
@@ -1658,6 +1872,7 @@ def _run_analyses(df, label, fetch_domain_descriptions=False, skip_sections=None
         event_distribution(df, label)
     mixed_combinations(df, label)  # unanalyzable clusters, then analyzable clusters
     top_domains = domain_frequency(representative_df, label)  # top-20-domains graph
+    domain_species_rank_scatter(representative_df, label, top_domains)  # rank/count scatter, all + top-20
     if top_domains is not None:
         domain_cluster_species_counts(representative_df, top_domains, label)  # ...cluster count by species
     if "length_change_longer" not in skip_sections:

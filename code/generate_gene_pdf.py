@@ -54,7 +54,11 @@ def _route_representative_domain_id_to_column(domain_id):
     if domain_id.startswith('TIGR'):
         return 'tigr'
     if domain_id.lower().startswith('cd'):
-        return 'CDD_id'
+        # A 'cd*' accession (e.g. cd21801) is a CDD *domain* accession, so it
+        # belongs in the 'cdd' bucket that _format_domain_label() displays -
+        # not the numeric-PSSM 'CDD_id' bucket, which the label never reads
+        # (that would drop the domain's id from the figure entirely).
+        return 'cdd'
     return 'interpro'
 
 
@@ -80,6 +84,26 @@ def _representative_domains_to_domain_columns(df_rep):
     df_rep['AA_start'] = df_rep['AA_start'].astype(int)
     df_rep['AA_end'] = df_rep['AA_end'].astype(int)
     return df_rep
+
+
+def _drop_undrawable_domains(df_domains):
+    """Drop domains whose AA_start/AA_end aren't finite numbers.
+
+    Such a domain can't be placed on the protein axis: a NaN AA_start yields a
+    NaN-geometry ellipse whose empty path crashes matplotlib's tight-bbox when
+    the PDF is saved (np.concatenate([])). ~1% of DoChaP's DomainEvent rows have
+    a NULL coordinate, so this keeps one bad row from breaking a gene's figure.
+    """
+    if df_domains is None or len(df_domains) == 0:
+        return df_domains
+    if 'AA_start' not in df_domains.columns or 'AA_end' not in df_domains.columns:
+        return df_domains
+    start = pd.to_numeric(df_domains['AA_start'], errors='coerce')
+    end = pd.to_numeric(df_domains['AA_end'], errors='coerce')
+    keep = np.isfinite(start.to_numpy()) & np.isfinite(end.to_numpy())
+    if keep.all():
+        return df_domains
+    return df_domains[keep].reset_index(drop=True)
 
 
 def prepare_gene_data_bulk(conn, gene_ensembl_ids, use_representative_domains=False):
@@ -208,7 +232,8 @@ def prepare_gene_data_bulk(conn, gene_ensembl_ids, use_representative_domains=Fa
         if df_protein is None or len(df_protein) == 0:
             return pd.DataFrame()
         protein_id = df_protein.iloc[0]['protein_ensembl_id']
-        return domains_by_protein.get(protein_id, pd.DataFrame(columns=domains_columns)).reset_index(drop=True)
+        domains = domains_by_protein.get(protein_id, pd.DataFrame(columns=domains_columns)).reset_index(drop=True)
+        return _drop_undrawable_domains(domains)
 
     transcript_groups = {k: v for k, v in df_transcripts.groupby('gene_ensembl_id', sort=False)} if len(df_transcripts) else {}
 
@@ -380,7 +405,7 @@ class GeneVisualization:
                     df_rep = pd.DataFrame()
                 df_rep = _representative_domains_to_domain_columns(df_rep)
                 if len(df_rep):
-                    return df_rep.reset_index(drop=True)
+                    return _drop_undrawable_domains(df_rep.reset_index(drop=True))
 
         # Get domain events
         domain_query = """
@@ -390,7 +415,7 @@ class GeneVisualization:
             WHERE de.protein_ensembl_id = ?
             ORDER BY de.AA_start
         """
-        return pd.read_sql_query(domain_query, self.conn, params=[protein_id])
+        return _drop_undrawable_domains(pd.read_sql_query(domain_query, self.conn, params=[protein_id]))
     
     def _assign_exon_colors(self):
         """Assign colors to unique exons across all transcripts based on genomic location."""
@@ -420,23 +445,29 @@ class GeneVisualization:
         return DOCHAP_COLORS[idx]
 
     def _format_domain_label(self, domain_row, compact_mode=False, max_len=DOMAIN_LABEL_MAX_LEN):
-        """Build a compact domain label; append * when truncated or combined."""
-        names = []
-        for col in ['interpro', 'pfam', 'cdd', 'smart']:
+        """Return the single id shown for one domain in the figure.
+
+        Unlike results.csv - where the analysis deliberately *collapses* a
+        domain's cross-references down to one display name - the figure draws
+        every domain separately, so each domain gets exactly one id here with
+        no collapsing: no '*' merge/truncation marker, no dropped ids.
+
+        The id is picked interpro-first: the columns below are scanned in the
+        same order of preference the analysis uses when it collapses
+        (junction_analisys.DOMAIN_NAME_PREFIX_PRIORITY = IPR, pfam, cd, smart,
+        tigr), so the figure label and the results-table name agree on which id
+        represents a domain. 'CDD_id' is intentionally excluded - it holds a
+        numeric CDD PSSM id, not a human-facing accession (the 'cdd' column
+        already carries the cd##### accession, including for RepresentativeDomains
+        via _route_representative_domain_id_to_column()).
+        """
+        for col in ['interpro', 'pfam', 'cdd', 'smart', 'tigr']:
             if col in domain_row and pd.notna(domain_row[col]):
                 value = str(domain_row[col]).strip()
-                if value and value.lower() != 'nan' and value not in names:
-                    names.append(value)
+                if value and value.lower() != 'nan':
+                    return value
 
-        if not names:
-            return None
-
-        primary = names[0]
-        needs_star = compact_mode or len(names) > 1 or len(primary) > max_len
-        if len(primary) > max_len:
-            primary = primary[:max_len]
-
-        return f"{primary}*" if needs_star else primary
+        return None
     
     def _format_number(self, num):
         """Format number with commas."""
@@ -518,41 +549,55 @@ class GeneVisualization:
 
         return placed
 
-    def _select_longest_labels_for_overlaps(self, domain_entries):
-        """Pick one label per overlap cluster: the domain with the longest AA span."""
-        if not domain_entries:
-            return []
+    def _domain_row_layout(self, domains_df, max_protein_length):
+        """
+        Assign each domain in domains_df to a display row (0-based) so that
+        domains sharing a row never overlap - classic greedy interval-
+        scheduling row placement (sort by start, place each interval in the
+        first row whose last-placed interval already ends before this one
+        starts).
 
-        ordered = sorted(domain_entries, key=lambda entry: entry['start'])
-        selected = []
+        Uses each domain's *effective* (post min-width-padding) span rather
+        than its raw AA_start/AA_end, matching what _draw_protein_view()
+        actually renders - otherwise a narrow domain padded up to
+        min_domain_width could still visually collide with a "different
+        row" neighbor that was only clear of its raw (unpadded) span.
 
-        cluster = [ordered[0]]
-        cluster_end = ordered[0]['end']
+        Both create_pdf() (to size each transcript's GridSpec row before
+        drawing anything) and _draw_protein_view() (to actually place
+        ellipses) call this, so planning and drawing always agree on row
+        count/assignment.
 
-        for entry in ordered[1:]:
-            if entry['start'] <= cluster_end:
-                cluster.append(entry)
-                cluster_end = max(cluster_end, entry['end'])
+        Returns (row_of: {domains_df index -> row number}, num_rows: int).
+        Returns ({}, 1) for an empty/None domains_df, so callers can use
+        num_rows directly as a height multiplier without a special case.
+        """
+        if domains_df is None or len(domains_df) == 0:
+            return {}, 1
+
+        min_domain_width = max(8.0, max_protein_length * 0.02)
+        effective = {}
+        for idx, domain in domains_df.iterrows():
+            start = float(domain['AA_start'])
+            end = float(domain['AA_end'])
+            width = max(end - start, min_domain_width)
+            center = (start + end) / 2
+            effective[idx] = (center - width / 2, center + width / 2)
+
+        order = sorted(effective, key=lambda i: effective[i])
+        row_last_end = []
+        row_of = {}
+        for idx in order:
+            start, end = effective[idx]
+            row = next((r for r, last_end in enumerate(row_last_end) if start >= last_end), None)
+            if row is None:
+                row_last_end.append(end)
+                row_of[idx] = len(row_last_end) - 1
             else:
-                longest = max(cluster, key=lambda item: item['aa_span'])
-                selected.append({
-                    'center': longest['center'],
-                    'width': longest['width'],
-                    'domain': longest['domain'],
-                    'has_overlap': len(cluster) > 1,
-                })
-                cluster = [entry]
-                cluster_end = entry['end']
+                row_last_end[row] = end
+                row_of[idx] = row
 
-        longest = max(cluster, key=lambda item: item['aa_span'])
-        selected.append({
-            'center': longest['center'],
-            'width': longest['width'],
-            'domain': longest['domain'],
-            'has_overlap': len(cluster) > 1,
-        })
-
-        return selected
+        return row_of, len(row_last_end)
 
     def _get_coding_exon_segments(self, transcript):
         """Return coding exon segments in amino-acid coordinate space."""
@@ -933,10 +978,17 @@ class GeneVisualization:
                     transcript_start_row = cluster_events_row + 2
                 else:
                     transcript_start_row = scale_row + 2
-                for rows in transcript_results:
+                for transcript, rows in zip(page_transcripts, transcript_results):
                     num_rows = len(rows) if rows is not None else 0
                     results_height = 0.18 if num_rows == 0 else 0.42 + 0.30 * num_rows
-                    height_ratios += [results_height, 0.7, 1.2, 0.18]
+                    # A transcript with several overlapping domains needs
+                    # more than one domain row (see _domain_row_layout()) -
+                    # grow its genomic/protein row here so the extra rows
+                    # get real page space instead of being squeezed into a
+                    # fixed box and spilling into the next transcript.
+                    _, num_domain_rows = self._domain_row_layout(transcript['domains'], max_protein_length)
+                    protein_row_height = 1.2 + 0.55 * (num_domain_rows - 1)
+                    height_ratios += [results_height, 0.7, protein_row_height, 0.18]
                 show_no_comparison_note = (
                     page_idx == num_pages - 1 and no_comparison_note
                 )
@@ -1302,7 +1354,6 @@ class GeneVisualization:
     def _draw_protein_view(self, ax, transcript, max_protein_length):
         """Draw protein/domain view on the right (protein above domains)."""
         ax.set_xlim(0, max_protein_length)
-        ax.set_ylim(-0.35, 1)
         # Keep labels/borders as vector, but rasterize dense protein/domain fills.
         ax.set_rasterization_zorder(2.5)
         ax.set_yticks([])
@@ -1314,9 +1365,17 @@ class GeneVisualization:
 
         protein_y = 0.72
         protein_height = 0.18
-        domain_y = 0.32
+        domain_y_top = 0.32  # y of the first (topmost) domain row's ellipse center
         domain_height = 0.25
+        domain_row_step = 0.42  # vertical distance between successive domain rows
         min_domain_width = max(8.0, max_protein_length * 0.02)
+
+        row_of, num_domain_rows = self._domain_row_layout(transcript['domains'], max_protein_length)
+        # Extra rows push the bottom of the axis down so a transcript with
+        # several overlapping domains gets a taller box (see create_pdf(),
+        # which sizes the GridSpec row the same way) instead of its extra
+        # rows spilling into/being masked by the next transcript.
+        ax.set_ylim(-0.35 - (num_domain_rows - 1) * domain_row_step, 1)
 
         protein_length_aa = transcript['info'].get('protein_length')
         if protein_length_aa is None or pd.isna(protein_length_aa):
@@ -1360,21 +1419,22 @@ class GeneVisualization:
                    ha='center', va='center', fontsize=10, style='italic', color='black')
             return
         
-        # Sort domains by size (larger first)
         domains_sorted = transcript['domains'].sort_values('AA_end', ascending=False)
-        compact_labels = len(domains_sorted) > 1
-        
-        # Draw each domain as ellipse with gradient
-        label_candidates = []
-        for domain_idx, (_, domain) in enumerate(domains_sorted.iterrows()):
+
+        # Draw each domain as ellipse with gradient, one row per overlap
+        # group (row_of, from _domain_row_layout() above) so overlapping
+        # domains no longer draw on top of one another - every domain gets
+        # its own ellipse and label instead of one being picked to
+        # represent the group.
+        label_items_by_row = {}
+        for domain_idx, (row_key, domain) in enumerate(domains_sorted.iterrows()):
             domain_start_aa = float(domain['AA_start'])
             domain_end_aa = float(domain['AA_end'])
             domain_width_raw = domain_end_aa - domain_start_aa
             domain_width = max(domain_width_raw, min_domain_width)
             domain_center = (domain_start_aa + domain_end_aa) / 2
-            
-            domain_name = self._format_domain_label(domain, compact_mode=compact_labels, max_len=DOMAIN_LABEL_MAX_LEN)
-            
+            domain_y = domain_y_top - row_of[row_key] * domain_row_step
+
             overlapping_segments = []
             for segment in coding_segments:
                 overlap_start = max(domain_start_aa, segment['start_aa'])
@@ -1456,66 +1516,51 @@ class GeneVisualization:
                                        facecolor='none', edgecolor='black', linewidth=1.2, zorder=3)
                 ax.add_patch(ellipse_border)
             
-            # Collect candidates; label selection for overlaps is handled after drawing.
-            label_candidates.append({
-                'start': domain_start_aa,
-                'end': domain_end_aa,
-                'center': domain_center,
-                'width': max(1.0, domain_width_raw),
-                'aa_span': max(1.0, domain_end_aa - domain_start_aa + 1),
-                'domain': domain,
-            })
+            # Every domain gets its own label now - no more picking one
+            # representative per overlap group, since overlapping domains
+            # are on separate rows and no longer draw over each other.
+            domain_name = self._format_domain_label(domain, compact_mode=False, max_len=DOMAIN_LABEL_MAX_LEN)
+            if domain_name:
+                label_items_by_row.setdefault(row_of[row_key], []).append({
+                    'center': domain_center,
+                    'text': domain_name,
+                    'width': max(1.0, domain_width_raw),
+                })
 
-        label_items = []
-        selected_labels = self._select_longest_labels_for_overlaps(label_candidates)
-        for selected in selected_labels:
-            domain_name = self._format_domain_label(
-                selected['domain'],
-                compact_mode=False,
-                max_len=DOMAIN_LABEL_MAX_LEN,
+        for row, label_items in label_items_by_row.items():
+            row_domain_y = domain_y_top - row * domain_row_step
+            label_base_y = row_domain_y - (domain_height / 2) - 0.05
+            placed_labels = self._compute_domain_label_positions(
+                label_items,
+                max_protein_length,
+                label_base_y,
+                lane_step=0.08,
+                lanes=4,
             )
-            if not domain_name:
-                continue
-            if selected['has_overlap'] and not domain_name.endswith('*'):
-                domain_name = f"{domain_name}*"
-            label_items.append({
-                'center': selected['center'],
-                'text': domain_name,
-                'width': max(1.0, selected['width']),
-            })
 
-        label_base_y = domain_y - (domain_height / 2) - 0.05
-        placed_labels = self._compute_domain_label_positions(
-            label_items,
-            max_protein_length,
-            label_base_y,
-            lane_step=0.08,
-            lanes=4,
-        )
-
-        for label in placed_labels:
-            ax.plot(
-                [label['center'], label['center']],
-                [domain_y - domain_height / 2, label['label_y'] + 0.01],
-                color='gray',
-                linewidth=0.5,
-                zorder=4,
-                alpha=0.8,
-            )
-            ax.text(
-                label['center'],
-                label['label_y'],
-                label['text'],
-                ha='center',
-                va='top',
-                fontsize=6.2,
-                fontweight='bold',
-                style='italic',
-                zorder=5,
-                rotation=32,
-                color='black',
-                clip_on=True,
-            )
+            for label in placed_labels:
+                ax.plot(
+                    [label['center'], label['center']],
+                    [row_domain_y - domain_height / 2, label['label_y'] + 0.01],
+                    color='gray',
+                    linewidth=0.5,
+                    zorder=4,
+                    alpha=0.8,
+                )
+                ax.text(
+                    label['center'],
+                    label['label_y'],
+                    label['text'],
+                    ha='center',
+                    va='top',
+                    fontsize=6.2,
+                    fontweight='bold',
+                    style='italic',
+                    zorder=5,
+                    rotation=32,
+                    color='black',
+                    clip_on=True,
+                )
 
 
 def generate_gene_pdf(gene_name, conn, output_file=None,

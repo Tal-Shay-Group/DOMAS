@@ -2,8 +2,11 @@
 Tests for the restrict_pdf_to_comparable flag on
 JunctionsAnalysis.analyze_junctions(), and for the is_longest_cds /
 is_most_like_canonical tag columns it always produces, using the real
-fixture files ioe_example_junctions.csv (plain CSV format) and
-short_H_vs_M_HN6.xlsx (hadas format) against the local DoChaP database.
+fixture files ioe_example_junctions.csv (plain CSV format),
+short_H_vs_M_HN6.xlsx (hadas format), and category_examples_junctions.csv
+(hand-picked manual-review examples, one/two/three per results.csv
+event_type category - see tests/manual_review/category_examples/) against
+the local DoChaP database.
 """
 import glob
 import json
@@ -30,6 +33,7 @@ from pdf_text_utils import (  # noqa: E402
 
 IOE_CSV = os.path.join(TESTS_DIR, 'ioe_example_junctions.csv')
 HADAS_XLSX = os.path.join(TESTS_DIR, 'short_H_vs_M_HN6.xlsx')
+CATEGORY_EXAMPLES_CSV = os.path.join(TESTS_DIR, 'category_examples_junctions.csv')
 
 # Mirrors JunctionsAnalysis._SKIPPED_TRANSCRIPT_EVENTS plus the cluster-level
 # events that carry no real transcript id.
@@ -50,6 +54,7 @@ FLAG_COMBINATIONS = [
 INPUT_FILES = [
     ('ioe_csv', IOE_CSV, False),
     ('hadas_xlsx', HADAS_XLSX, True),
+    ('category_examples', CATEGORY_EXAMPLES_CSV, False),
 ]
 
 REFERENCE_OUTPUTS_DIR = os.path.join(TESTS_DIR, 'reference_outputs')

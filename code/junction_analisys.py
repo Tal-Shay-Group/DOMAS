@@ -351,9 +351,26 @@ def collapse_contained_domains(df_domains, tolerance=2, overlap_fraction=0.85):
     starts = df_domains['AA_start'].to_numpy()
     ends = df_domains['AA_end'].to_numpy()
     index = df_domains.index.to_numpy()
-    order_labels = (df_domains['AA_end'] - df_domains['AA_start']).sort_values(ascending=False).index.tolist()
-    pos_of_label = {label: pos for pos, label in enumerate(df_domains.index)}
-    order = [pos_of_label[label] for label in order_labels]
+    name_block = df_domains[DOMAIN_NAME_COLUMNS].to_numpy(dtype=object)
+
+    # Process longest domain first, but break ties with a *stable* key so the
+    # collapse result never depends on df_domains' own row order. That row order
+    # is hash-seed dependent (it flows from a set() of transcript ids into the
+    # domain query), and for equal-length overlapping domains the order decides
+    # which one is kept vs merged away - so ordering by length alone let a
+    # cluster's domain count (and thus its results.csv row count) vary between
+    # runs. Ties break by start, then end, then the row's merged identifier set.
+    name_key = [
+        ";".join(sorted(
+            str(v).strip() for v in name_block[pos]
+            if not pd.isna(v) and str(v).strip() not in ("", "None", "nan")
+        ))
+        for pos in range(len(df_domains))
+    ]
+    order = sorted(
+        range(len(df_domains)),
+        key=lambda pos: (starts[pos] - ends[pos], starts[pos], ends[pos], name_key[pos]),
+    )
 
     dropped = set()
     merges = {}  # position -> list of positions merged into it
@@ -374,7 +391,6 @@ def collapse_contained_domains(df_domains, tolerance=2, overlap_fraction=0.85):
                 dropped.add(oj)
 
     if merges:
-        name_block = df_domains[DOMAIN_NAME_COLUMNS].to_numpy(dtype=object)
         for oi, others in merges.items():
             for ci in range(len(DOMAIN_NAME_COLUMNS)):
                 values = [name_block[oi, ci]] + [name_block[oj, ci] for oj in others]
