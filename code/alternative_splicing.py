@@ -685,6 +685,129 @@ def hadas_read_input_file(con, input_path):
         raise(e)
 
 
+# --- LeafCutter differential-splicing output readers -------------------------
+# The two files are the standard leafcutter_ds outputs:
+#   - effect_sizes (leafcutter_ds_effect_sizes.txt): one row per intron, with an
+#     `intron` id of the form chr:start:end:clu_<n>_<strand> and a `deltapsi`
+#     column.
+#   - significance (leafcutter_ds_cluster_significance.txt): one row per cluster,
+#     with a `cluster` id of the form chr:clu_<n>_<strand>, a `genes` column and
+#     `p.adjust`.
+# We reshape them into the same per-junction schema hadas_read_input_file() /
+# ioe2junctions() produce, so the frame flows straight into analyze_junctions2().
+
+# Maps the specie label carried on the junctions (matching the hadas convention:
+# 'human'/'mouse') to the DoChaP Genes.specie value used for symbol lookups.
+_SPECIE_DB_NAME = {
+    'human': 'H_sapiens',
+    'mouse': 'M_musculus',
+    'rat': 'R_norvegicus',
+    'zebrafish': 'D_rerio',
+    'frog': 'X_tropicalis',
+}
+
+
+def _split_leafcutter_intron(intron):
+    """chr:start:end:clu_<n>_<strand> -> (chromosome, start, end, cluster_name),
+    where cluster_name is chr:clu_<n> (strand dropped, to match the hadas
+    `cluster` format)."""
+    parts = str(intron).split(':')
+    chromosome = parts[0] if len(parts) > 0 else ''
+    start = parts[1] if len(parts) > 1 else ''
+    end = parts[2] if len(parts) > 2 else ''
+    clu = parts[3] if len(parts) > 3 else ''
+    # clu is clu_<n>_<strand>; drop the trailing _<strand>
+    clu_no_strand = clu.rsplit('_', 1)[0] if clu.startswith('clu_') else clu
+    return chromosome, start, end, f'{chromosome}:{clu_no_strand}'
+
+
+def _leafcutter_cluster_key(cluster):
+    """chr:clu_<n>_<strand> (significance file) -> chr:clu_<n>, the same key
+    _split_leafcutter_intron() builds from the effect-sizes intron id."""
+    parts = str(cluster).split(':')
+    if len(parts) < 2:
+        return str(cluster)
+    chromosome, clu = parts[0], parts[1]
+    clu_no_strand = clu.rsplit('_', 1)[0] if clu.startswith('clu_') else clu
+    return f'{chromosome}:{clu_no_strand}'
+
+
+def leafcutter_read_input_files(con, significance_file, effect_sizes_file, specie='human'):
+    """Read a pair of LeafCutter differential-splicing outputs
+    (leafcutter_ds_cluster_significance.txt + leafcutter_ds_effect_sizes.txt) and
+    return a per-junction DataFrame with the same columns hadas_read_input_file()
+    produces, ready for analyze_junctions2().
+
+    The effect-sizes file supplies the junction coordinates and cluster; the
+    significance file supplies the gene symbol per cluster, which is resolved to a
+    gene_ensembl_id via the DoChaP `Genes` table.
+    """
+    # leafcutter_ds writes tab-separated files; the significance `status` column
+    # contains spaces (e.g. "<2 introns used in >=min_samples_per_intron
+    # samples"), so splitting on whitespace would corrupt it.
+    df_effect = pd.read_csv(effect_sizes_file, sep='\t')
+    df_sig = pd.read_csv(significance_file, sep='\t')
+
+    if 'intron' not in df_effect.columns:
+        raise ValueError(f"'intron' column not found in effect-sizes file {effect_sizes_file}")
+    if 'cluster' not in df_sig.columns or 'genes' not in df_sig.columns:
+        raise ValueError(f"'cluster'/'genes' columns not found in significance file {significance_file}")
+
+    # per-junction coordinates + cluster from the effect-sizes file
+    df = df_effect.copy()
+    split = df['intron'].apply(_split_leafcutter_intron)
+    df['chromosome'] = split.apply(lambda t: t[0])
+    df['start_position'] = split.apply(lambda t: t[1]).astype(int)
+    df['end_position'] = split.apply(lambda t: t[2]).astype(int)
+    df['cluster_name'] = split.apply(lambda t: t[3])
+    df['junction_name'] = (df['chromosome'] + ':' + df['start_position'].astype(str)
+                           + ':' + df['end_position'].astype(str))
+    df = df[(df.start_position >= 0) & (df.end_position >= 0)].copy()
+    # rank is only a display label downstream; keep deltapsi if present.
+    df['rank'] = df['deltapsi'] if 'deltapsi' in df.columns else ''
+
+    # cluster -> gene symbol (first gene if several) from the significance file
+    df_sig = df_sig.copy()
+    df_sig['cluster_key'] = df_sig['cluster'].apply(_leafcutter_cluster_key)
+    df_sig['gene_symbol_first'] = df_sig['genes'].astype(str).str.split(',').str[0].str.strip()
+    cluster_to_symbol = dict(zip(df_sig['cluster_key'], df_sig['gene_symbol_first']))
+    df['gene_symbol'] = df['cluster_name'].map(cluster_to_symbol)
+
+    # resolve gene symbol -> gene_ensembl_id via the DoChaP Genes table.
+    # The same symbol exists across species in the DB (e.g. USP16 -> human,
+    # mouse, rat, ...), so the lookup must be restricted to this input's species.
+    db_specie = _SPECIE_DB_NAME.get(specie, specie)
+    symbols = [s for s in df['gene_symbol'].dropna().unique().tolist()
+               if s and str(s).lower() not in ('nan', 'na', '.')]
+    symbol_to_ensembl = {}
+    if symbols:
+        placeholders = ','.join(['?'] * len(symbols))
+        query = (f"SELECT gene_ensembl_id, gene_symbol FROM Genes "
+                 f"WHERE specie = ? AND UPPER(gene_symbol) IN ({placeholders})")
+        df_genes = pd.read_sql_query(query, con, params=[db_specie] + [s.upper() for s in symbols])
+        symbol_to_ensembl = {sym.upper(): ens
+                             for ens, sym in zip(df_genes['gene_ensembl_id'], df_genes['gene_symbol'])}
+    df['gene_ensembl_id'] = df['gene_symbol'].apply(
+        lambda s: symbol_to_ensembl.get(str(s).upper()) if pd.notna(s) else None)
+
+    df['specie'] = specie
+
+    columns = ['gene_symbol', 'gene_ensembl_id', 'junction_name', 'chromosome',
+               'start_position', 'end_position', 'specie', 'cluster_name', 'rank']
+    return df[columns].reset_index(drop=True)
+
+
+def analyze_leafcutter_input(con, significance_file, effect_sizes_file, output_csv,
+                             specie='human', num_workers=5, use_representative_domains=False, max_clusters=0,
+                             filter_non_comparable=False):
+    """Read a pair of leafcutter_ds output files and run the domain analysis, the
+    same way analyze_ioe_file()/analyze_hadas_input() do for their formats."""
+    df_junctions = leafcutter_read_input_files(con, significance_file, effect_sizes_file, specie=specie)
+    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False,
+                       num_workers=num_workers, use_representative_domains=use_representative_domains,
+                       max_clusters=max_clusters, filter_non_comparable=filter_non_comparable)
+
+
 def create_events_junctions(con, df_events, output_csv):
     all_junctions = []
     
@@ -928,12 +1051,25 @@ def read_junctions_csv(junctions_csv):
     return pd.read_csv(junctions_csv)
 
 
+def _limit_clusters(df_junctions, max_clusters):
+    """Keep only the first `max_clusters` clusters (sorted, for determinism). Used
+    to cap the amount of work - e.g. the web GUI processes the first 100 clusters."""
+    if not max_clusters or max_clusters <= 0 or df_junctions is None:
+        return df_junctions
+    col = 'cluster_name' if 'cluster_name' in df_junctions.columns else 'cluster'
+    keep = sorted(df_junctions[col].dropna().unique())[:max_clusters]
+    return df_junctions[df_junctions[col].isin(keep)].copy()
+
+
 def analyze_junctions2(con, df_junctions=None, junctions_csv=None, hadas_format=False,
                         output_path='as_events_junctions_analysis.csv',
                         n=0, create_pdf=True, print_genes=None, num_workers=5,
-                        use_representative_domains=False):
+                        use_representative_domains=False, max_clusters=0,
+                        filter_non_comparable=False):
     """Read junctions (from a DataFrame, a plain CSV, or a hadas-format Excel file - exactly
-    one of df_junctions/junctions_csv must be given) and run JunctionsAnalysis.analyze_junctions()."""
+    one of df_junctions/junctions_csv must be given) and run JunctionsAnalysis.analyze_junctions().
+
+    max_clusters > 0 caps the analysis to the first N clusters (sorted)."""
     if df_junctions is None and junctions_csv is None:
         raise ValueError("Either df_junctions or junctions_csv must be provided.")
     if df_junctions is not None and junctions_csv is not None:
@@ -941,18 +1077,46 @@ def analyze_junctions2(con, df_junctions=None, junctions_csv=None, hadas_format=
     if junctions_csv is not None:
         df_junctions = hadas_read_input_file(con, junctions_csv) if hadas_format else read_junctions_csv(junctions_csv)
 
+    df_junctions = _limit_clusters(df_junctions, max_clusters)
+
     analyzer = JunctionsAnalysis(con, logger_instance=logger)
     return analyzer.analyze_junctions(df_junctions=df_junctions, output_path=output_path,
                                       filter_transcript_count=n, create_pdf=create_pdf, print_genes=print_genes, num_workers=num_workers,
-                                      use_representative_domains=use_representative_domains)
+                                      use_representative_domains=use_representative_domains,
+                                      filter_non_comparable=filter_non_comparable)
 
-def analyze_ioe_file(con, ioe_file, output_csv, num_workers=5, use_representative_domains=False):
+def analyze_ioe_file(con, ioe_file, output_csv, num_workers=5, use_representative_domains=False, max_clusters=0,
+                     filter_non_comparable=False):
     df_junctions = utils.ioe2junctions(ioe_file)
     gene_symbols_dict = utils.get_gene_symbols(con, df_junctions.gene_ensembl_id.unique().tolist())
     # add gene symbols to df_junctions
     df_junctions['gene_symbol'] = df_junctions['gene_ensembl_id'].map(gene_symbols_dict)
     analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False, num_workers=num_workers,
-                        use_representative_domains=use_representative_domains)
+                        use_representative_domains=use_representative_domains, max_clusters=max_clusters,
+                        filter_non_comparable=filter_non_comparable)
+
+
+def analyze_rmats_input(con, rmats_dir, output_csv, num_workers=5, use_representative_domains=False, max_clusters=0,
+                        filter_non_comparable=False):
+    """Read an rMATS-turbo output directory (the five [Event].MATS.JC.txt files)
+    and run the domain analysis. rMATS embeds the Ensembl GeneID and gene symbol
+    in each event, so - unlike the leafcutter path - no symbol->ensembl lookup is
+    needed. All events are analyzed (no significance filtering)."""
+    df_junctions = utils.rmats2junctions(rmats_dir)
+    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False,
+                       num_workers=num_workers, use_representative_domains=use_representative_domains,
+                       max_clusters=max_clusters, filter_non_comparable=filter_non_comparable)
+
+
+def analyze_voila_input(con, voila_tsv, output_csv, num_workers=5, use_representative_domains=False, max_clusters=0,
+                        filter_non_comparable=False):
+    """Read a MAJIQ voila TSV (`voila tsv` output) and run the domain analysis.
+    voila embeds the Ensembl Gene ID and gene name in each LSV, so no
+    symbol->ensembl lookup is needed. All LSVs are analyzed (no filtering)."""
+    df_junctions = utils.voila2junctions(voila_tsv)
+    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False,
+                       num_workers=num_workers, use_representative_domains=use_representative_domains,
+                       max_clusters=max_clusters, filter_non_comparable=filter_non_comparable)
 
 
 def keep_min_transcript_clusters(df, examples_per_event=2):
@@ -981,7 +1145,7 @@ def keep_min_transcript_clusters(df, examples_per_event=2):
     return filtered_df
 
 def analyze_ioe_files(con, input_path, pattern, output_csv, examples_per_event=5, num_workers=5,
-                       use_representative_domains=False):
+                       use_representative_domains=False, max_clusters=0, filter_non_comparable=False):
     dfs = []
     for file in os.listdir(input_path):
         if re.match(pattern, file):
@@ -1006,17 +1170,21 @@ def analyze_ioe_files(con, input_path, pattern, output_csv, examples_per_event=5
         df_examples = keep_min_transcript_clusters(df_all_junctions, examples_per_event=examples_per_event)
         df_examples.to_csv('ioe_example_junctions.csv', index=False)
         analyze_junctions2(con, df_junctions=df_examples, output_path=output_csv, create_pdf=False, num_workers=num_workers,
-                            use_representative_domains=use_representative_domains)
+                            use_representative_domains=use_representative_domains, max_clusters=max_clusters,
+                            filter_non_comparable=filter_non_comparable)
     else:
         df_all_junctions.to_csv('ioe_all_junctions.csv', index=False)
         analyze_junctions2(con, df_junctions=df_all_junctions, output_path=output_csv, create_pdf=False, num_workers=num_workers,
-                            use_representative_domains=use_representative_domains)
+                            use_representative_domains=use_representative_domains, max_clusters=max_clusters,
+                            filter_non_comparable=filter_non_comparable)
 
 def analyze_hadas_input(con, input_file, output_csv, print_genes=None, num_workers=5,
-                         use_representative_domains=False, create_pdf=True):
+                         use_representative_domains=False, create_pdf=True, max_clusters=0,
+                         filter_non_comparable=False):
     df_junctions = hadas_read_input_file(con, input_file)
     analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=create_pdf, print_genes=print_genes,
-                        num_workers=num_workers, use_representative_domains=use_representative_domains)
+                        num_workers=num_workers, use_representative_domains=use_representative_domains, max_clusters=max_clusters,
+                        filter_non_comparable=filter_non_comparable)
     return
     gene_ids = df_junctions['gene_ensembl_id'].unique().tolist()
     gene_transcript_counts = utils.get_genes_number_of_transcripts(con, gene_ids)

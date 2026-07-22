@@ -14,6 +14,7 @@ import os
 import shutil
 import sqlite3
 import sys
+import warnings
 
 import matplotlib
 matplotlib.use('Agg')  # headless rendering for PDF generation in tests
@@ -26,7 +27,10 @@ CODE_DIR = os.path.normpath(os.path.join(TESTS_DIR, '..', 'code'))
 sys.path.insert(0, CODE_DIR)
 
 from junction_analisys import JunctionsAnalysis, ClusterAnalysisResult  # noqa: E402
-from alternative_splicing import hadas_read_input_file, read_junctions_csv  # noqa: E402
+from alternative_splicing import (  # noqa: E402
+    hadas_read_input_file, read_junctions_csv, leafcutter_read_input_files,
+)
+from utils import rmats2junctions, voila2junctions  # noqa: E402
 from pdf_text_utils import (  # noqa: E402
     PDF_TEXT_MANIFEST_FILENAME, build_pdf_text_manifest,
 )
@@ -34,6 +38,24 @@ from pdf_text_utils import (  # noqa: E402
 IOE_CSV = os.path.join(TESTS_DIR, 'ioe_example_junctions.csv')
 HADAS_XLSX = os.path.join(TESTS_DIR, 'short_H_vs_M_HN6.xlsx')
 CATEGORY_EXAMPLES_CSV = os.path.join(TESTS_DIR, 'category_examples_junctions.csv')
+
+LEAFCUTTER_DIR = os.path.join(TESTS_DIR, 'leafcutter')
+LEAFCUTTER_SIG = os.path.join(LEAFCUTTER_DIR, 'leafcutter_ds_cluster_significance.txt')
+LEAFCUTTER_EFFECT = os.path.join(LEAFCUTTER_DIR, 'leafcutter_ds_effect_sizes.txt')
+# The full fixture has ~17k clusters (~15 min end-to-end); the default test runs a
+# fast subset (the leafcutter clusters for the rMATS subset's genes - see
+# _load_leafcutter_junctions), while the full run is available opt-in via
+# @pytest.mark.slow / --run-slow. This value sets the rMATS subset size that
+# selects those genes.
+LEAFCUTTER_SUBSET_CLUSTERS = 200
+
+RMATS_DIR = os.path.join(TESTS_DIR, 'rmats')
+# Same subset size as leafcutter (200 clusters), but spread evenly across the five
+# rMATS event types: a plain sorted-first-N slice would be all A3SS (it sorts first)
+# and would never exercise the SE/A5SS/MXE/RI junction conversion.
+RMATS_SUBSET_CLUSTERS = LEAFCUTTER_SUBSET_CLUSTERS
+
+MAJIQ_TSV = os.path.join(TESTS_DIR, 'majiq', 'NveB_Mono_voila.txt')
 
 # Mirrors JunctionsAnalysis._SKIPPED_TRANSCRIPT_EVENTS plus the cluster-level
 # events that carry no real transcript id.
@@ -255,6 +277,270 @@ def test_compare_against_reference_outputs(con, keep_test_output, label, junctio
 
     _compare_csv_to_reference(generated_csv, reference_csv)
     _compare_pdf_text_to_reference(output_dir, reference_dir)
+
+    if not keep_test_output:
+        shutil.rmtree(output_dir)
+
+
+# ---------------------------------------------------------------------------
+# LeafCutter input: golden-reference comparison
+#
+# Reads the pair of leafcutter_ds output files under tests/leafcutter/ via
+# alternative_splicing.leafcutter_read_input_files(), runs the domain analysis
+# with representative domains, and compares results.csv to a committed golden
+# reference. The reference is created on the first run (bootstrap), then
+# compared against on every run after. No PDFs (the leafcutter path never
+# generates them, and there are far too many clusters for that anyway).
+# ---------------------------------------------------------------------------
+
+def _load_leafcutter_junctions(con, subset):
+    """Load the leafcutter fixture into a junctions DataFrame.
+
+    When `subset` is None (the full test) every cluster is kept. Otherwise the
+    subset is the leafcutter clusters whose gene appears in the rMATS subset
+    (`_rmats_subset_df(subset)`): this way the leafcutter and rMATS subset tests
+    analyze the *same genes* - genes that in rMATS span all five event types - so
+    their domain-analysis outputs can be compared tool-to-tool. `subset` sets the
+    size of that rMATS subset."""
+    df = leafcutter_read_input_files(con, LEAFCUTTER_SIG, LEAFCUTTER_EFFECT)
+    if subset is None:
+        return df
+    rmats_genes = set(_rmats_subset_df(subset)['gene_ensembl_id'].dropna().unique())
+    return df[df['gene_ensembl_id'].isin(rmats_genes)].copy()
+
+
+def _run_leafcutter_case_to_dir(con, case_dir, subset):
+    """Run analyze_junctions (representative domains, no PDFs) on the leafcutter
+    fixture, writing results.csv into a freshly-created case_dir."""
+    if os.path.exists(case_dir):
+        shutil.rmtree(case_dir)
+    os.makedirs(case_dir)
+
+    df_junctions = _load_leafcutter_junctions(con, subset)
+    output_path = os.path.join(case_dir, 'results.csv')
+    analysis = JunctionsAnalysis(con)
+    analysis.analyze_junctions(
+        df_junctions=df_junctions,
+        output_path=output_path,
+        create_pdf=False,
+        num_workers=1,
+        use_representative_domains=True,
+    )
+    return output_path
+
+
+def _compare_or_create_reference(generated_csv, reference_csv):
+    """Compare generated_csv to the golden reference (ignoring row order). On the
+    first run, when no reference exists yet, create it from the generated output
+    and pass, so the reference is bootstrapped."""
+    if not os.path.exists(reference_csv):
+        os.makedirs(os.path.dirname(reference_csv), exist_ok=True)
+        shutil.copyfile(generated_csv, reference_csv)
+        warnings.warn(
+            f"Created new golden reference at {reference_csv} (first run); "
+            f"re-run the test to compare against it.")
+        return
+
+    df_generated = pd.read_csv(generated_csv).fillna('')
+    df_reference = pd.read_csv(reference_csv).fillna('')
+    sort_columns = list(df_reference.columns)
+    df_generated = df_generated.sort_values(sort_columns).reset_index(drop=True)
+    df_reference = df_reference.sort_values(sort_columns).reset_index(drop=True)
+    pd.testing.assert_frame_equal(df_generated, df_reference, check_dtype=False)
+
+
+def test_leafcutter_subset_compare_against_reference(con, keep_test_output):
+    """Default (fast) leafcutter golden test: the leafcutter clusters for the
+    genes in the rMATS subset (so it covers the same genes as the rMATS test,
+    which span all five event types), representative domains. Bootstraps its
+    reference on first run."""
+    case_name = 'leafcutter_subset__representative_True'
+    output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
+    reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
+
+    generated_csv = _run_leafcutter_case_to_dir(con, output_dir, subset=LEAFCUTTER_SUBSET_CLUSTERS)
+    assert os.path.getsize(generated_csv) > 0, "Results CSV should not be empty"
+
+    _compare_or_create_reference(generated_csv, reference_csv)
+
+    if not keep_test_output:
+        shutil.rmtree(output_dir)
+
+
+@pytest.mark.slow
+def test_leafcutter_full_compare_against_reference(con, keep_test_output):
+    """Full leafcutter golden test over all ~17k clusters (~15 min). Opt in with
+    --run-slow; skipped by default. Bootstraps its reference on first run."""
+    case_name = 'leafcutter_full__representative_True'
+    output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
+    reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
+
+    generated_csv = _run_leafcutter_case_to_dir(con, output_dir, subset=None)
+    assert os.path.getsize(generated_csv) > 0, "Results CSV should not be empty"
+
+    _compare_or_create_reference(generated_csv, reference_csv)
+
+    if not keep_test_output:
+        shutil.rmtree(output_dir)
+
+
+# ---------------------------------------------------------------------------
+# rMATS input: golden-reference comparison
+#
+# Reads the five [Event].MATS.JC.txt files under tests/rmats/ via
+# utils.rmats2junctions(), runs the domain analysis with representative domains,
+# and compares results.csv to a committed golden reference (bootstrapped on the
+# first run). Same 200-cluster subset size as the leafcutter test, but spread
+# across the five event types for coverage. No PDFs.
+# ---------------------------------------------------------------------------
+
+def _rmats_subset_df(subset):
+    """The deterministic rMATS subset used by the rMATS test: `subset` clusters
+    spread evenly across the five event types (sorted within each type). `subset`
+    None returns every event. Also drives the leafcutter subset's gene set."""
+    df = rmats2junctions(RMATS_DIR)
+    if subset is None:
+        return df
+
+    event_types = sorted(df['event_type'].unique())
+    per_type = max(1, subset // len(event_types))
+    keep = []
+    for event_type in event_types:
+        et_clusters = sorted(df.loc[df['event_type'] == event_type, 'cluster_name'].unique())
+        keep.extend(et_clusters[:per_type])
+    return df[df['cluster_name'].isin(keep)].copy()
+
+
+def _load_rmats_junctions(subset):
+    """Load the rMATS fixture, optionally reduced to the deterministic subset."""
+    return _rmats_subset_df(subset)
+
+
+def _run_rmats_case_to_dir(con, case_dir, subset, filter_non_comparable=False):
+    """Run analyze_junctions (representative domains, no PDFs) on the rMATS
+    fixture, writing results.csv into a freshly-created case_dir."""
+    if os.path.exists(case_dir):
+        shutil.rmtree(case_dir)
+    os.makedirs(case_dir)
+
+    df_junctions = _load_rmats_junctions(subset)
+    output_path = os.path.join(case_dir, 'results.csv')
+    analysis = JunctionsAnalysis(con)
+    analysis.analyze_junctions(
+        df_junctions=df_junctions,
+        output_path=output_path,
+        create_pdf=False,
+        num_workers=1,
+        use_representative_domains=True,
+        filter_non_comparable=filter_non_comparable,
+    )
+    return output_path
+
+
+def test_rmats_subset_compare_against_reference(con, keep_test_output):
+    """Default (fast) rMATS golden test: a deterministic subset of
+    `RMATS_SUBSET_CLUSTERS` clusters spread across the five event types,
+    representative domains. Bootstraps its reference on first run."""
+    case_name = 'rmats_subset__representative_True'
+    output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
+    reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
+
+    generated_csv = _run_rmats_case_to_dir(con, output_dir, subset=RMATS_SUBSET_CLUSTERS)
+    assert os.path.getsize(generated_csv) > 0, "Results CSV should not be empty"
+
+    _compare_or_create_reference(generated_csv, reference_csv)
+
+    if not keep_test_output:
+        shutil.rmtree(output_dir)
+
+
+# events that mark a transcript/cluster that was NOT compared to canonical -
+# mirrors junction_analisys.NON_COMPARISON_EVENTS; filter_non_comparable drops these.
+_NON_COMPARISON_EVENTS = {
+    'gene_not_in_db', 'no_canonical_transcript', 'only_one_transcript',
+    'no_canonical_junctions', 'junction_not_mapped',
+    'transcript_doesnt_have_junctions', 'no_unique_junctions',
+}
+
+
+def test_rmats_subset_filter_non_comparable_compare_against_reference(con, keep_test_output):
+    """rMATS subset run with filter_non_comparable=True: the output must contain
+    only transcripts that were actually compared to canonical. Verifies no
+    non-comparison event survives, then compares to a committed golden reference
+    (bootstrapped on first run)."""
+    case_name = 'rmats_subset_filtered__representative_True'
+    output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
+    reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
+
+    generated_csv = _run_rmats_case_to_dir(
+        con, output_dir, subset=RMATS_SUBSET_CLUSTERS, filter_non_comparable=True)
+    assert os.path.getsize(generated_csv) > 0, "Results CSV should not be empty"
+
+    # the filter's contract: no skip/non-comparison rows remain
+    df = pd.read_csv(generated_csv)
+    leaked = set(df['event_type']) & _NON_COMPARISON_EVENTS
+    assert not leaked, f"filter_non_comparable left non-comparison events in the output: {leaked}"
+
+    _compare_or_create_reference(generated_csv, reference_csv)
+
+    if not keep_test_output:
+        shutil.rmtree(output_dir)
+
+
+# ---------------------------------------------------------------------------
+# MAJIQ input: golden-reference comparison
+#
+# Reads the voila TSV under tests/majiq/ via utils.voila2junctions(), runs the
+# domain analysis with representative domains, and compares results.csv to a
+# committed golden reference (bootstrapped on first run). Like the leafcutter
+# subset, the subset is the LSVs for the genes in the rMATS subset - so the
+# leafcutter, rMATS and MAJIQ subset tests all cover the same genes and their
+# outputs can be compared across all three tools. No PDFs.
+# ---------------------------------------------------------------------------
+
+def _load_majiq_junctions(subset):
+    """Load the MAJIQ voila TSV into a junctions DataFrame. When `subset` is set,
+    keep only the LSVs whose gene appears in the rMATS subset, so this test
+    covers the same genes as the leafcutter and rMATS subset tests."""
+    df = voila2junctions(MAJIQ_TSV)
+    if subset is None:
+        return df
+    rmats_genes = set(_rmats_subset_df(subset)['gene_ensembl_id'].dropna().unique())
+    return df[df['gene_ensembl_id'].isin(rmats_genes)].copy()
+
+
+def _run_majiq_case_to_dir(con, case_dir, subset):
+    """Run analyze_junctions (representative domains, no PDFs) on the MAJIQ
+    fixture, writing results.csv into a freshly-created case_dir."""
+    if os.path.exists(case_dir):
+        shutil.rmtree(case_dir)
+    os.makedirs(case_dir)
+
+    df_junctions = _load_majiq_junctions(subset)
+    output_path = os.path.join(case_dir, 'results.csv')
+    analysis = JunctionsAnalysis(con)
+    analysis.analyze_junctions(
+        df_junctions=df_junctions,
+        output_path=output_path,
+        create_pdf=False,
+        num_workers=1,
+        use_representative_domains=True,
+    )
+    return output_path
+
+
+def test_majiq_subset_compare_against_reference(con, keep_test_output):
+    """Default (fast) MAJIQ golden test: the LSVs for the genes in the rMATS
+    subset (same genes as the leafcutter/rMATS subset tests), representative
+    domains. Bootstraps its reference on first run."""
+    case_name = 'majiq_subset__representative_True'
+    output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
+    reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
+
+    generated_csv = _run_majiq_case_to_dir(con, output_dir, subset=RMATS_SUBSET_CLUSTERS)
+    assert os.path.getsize(generated_csv) > 0, "Results CSV should not be empty"
+
+    _compare_or_create_reference(generated_csv, reference_csv)
 
     if not keep_test_output:
         shutil.rmtree(output_dir)

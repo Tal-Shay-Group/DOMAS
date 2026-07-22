@@ -865,12 +865,28 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
     return cluster_result
 
 
-def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_instance=None):
+# Events recorded for a transcript/cluster that was NOT a real comparison to the
+# canonical transcript: cluster-level non-comparisons (gene/canonical/junction
+# problems) plus per-transcript skips (no junctions / no unique junction). Rows
+# carrying these events are the "non-comparable" / "not chosen" transcripts that
+# analyze_junctions(filter_non_comparable=True) drops from the output CSV.
+NON_COMPARISON_EVENTS = frozenset({
+    'gene_not_in_db', 'no_canonical_transcript', 'only_one_transcript',
+    'no_canonical_junctions', 'junction_not_mapped',
+    'transcript_doesnt_have_junctions', 'no_unique_junctions',
+})
+
+
+def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_instance=None,
+                       filter_non_comparable=False):
     """
     Dedicated writer thread that processes results from a queue and writes to CSV.
 
     Runs continuously until it receives a None sentinel value.
     Writes results incrementally as they arrive from compute workers.
+
+    filter_non_comparable: if True, rows whose event is in NON_COMPARISON_EVENTS
+    (transcripts that were not actually compared to canonical) are dropped.
     """
     log = logger_instance or logger
     output_dir = tempfile.mkdtemp(prefix='domas_csv_')
@@ -894,6 +910,12 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
                     df_cluster_results = cluster_result.get_results_df()
                     if df_cluster_results.empty:
                         continue
+
+                    if filter_non_comparable:
+                        df_cluster_results = df_cluster_results[
+                            ~df_cluster_results['event'].isin(NON_COMPARISON_EVENTS)]
+                        if df_cluster_results.empty:
+                            continue
 
                     df_transformed = (
                         df_cluster_results
@@ -1111,7 +1133,8 @@ class JunctionsAnalysis:
         return cluster_groups
 
     def _run_parallel_analysis(self, cluster_groups, df_exons, df_domains, canonical_transcript_ids,
-                               gene_strand, transcripts_by_gene, empty_transcripts, num_workers, output_path):
+                               gene_strand, transcripts_by_gene, empty_transcripts, num_workers, output_path,
+                               filter_non_comparable=False):
         """Execute cluster analysis in parallel with dedicated writer thread."""
         total = len(cluster_groups)
         actual_workers = min(num_workers, total)
@@ -1154,7 +1177,7 @@ class JunctionsAnalysis:
         # Start dedicated writer thread
         writer_thread = threading.Thread(
             target=_csv_writer_worker,
-            args=(result_queue, output_path, df_results_columns, self.logger),
+            args=(result_queue, output_path, df_results_columns, self.logger, filter_non_comparable),
             daemon=False
         )
         writer_thread.start()
@@ -1296,7 +1319,7 @@ class JunctionsAnalysis:
     def analyze_junctions(self, df_junctions, output_path='as_events_junctions_analysis.csv',
                           filter_transcript_count=0, create_pdf=True, print_genes=None,
                           num_workers=4, use_ensembl_only=False, restrict_pdf_to_comparable=False,
-                          use_representative_domains=False):
+                          use_representative_domains=False, filter_non_comparable=False):
         """
         Analyze junctions and detect domain changes across alternative transcripts.
 
@@ -1327,6 +1350,11 @@ class JunctionsAnalysis:
                 DomainEvent/DomainType domains. If False (default), the
                 algorithm is unchanged - domains come from DomainEvent/DomainType
                 only, exactly as before.
+            filter_non_comparable: If True, the output CSV contains only rows for
+                transcripts that were actually compared to canonical - rows whose
+                event is a non-comparison / skip event (see NON_COMPARISON_EVENTS)
+                are dropped. The returned ClusterAnalysisResult objects and any
+                PDFs are unaffected; only the written CSV is filtered.
 
         Returns:
             List of ClusterAnalysisResult objects
@@ -1354,7 +1382,7 @@ class JunctionsAnalysis:
         results = self._run_parallel_analysis(
             cluster_groups, df_exons, df_domains, canonical_transcript_ids,
             gene_strand, transcripts_by_gene, empty_transcripts, num_workers,
-            output_path,
+            output_path, filter_non_comparable=filter_non_comparable,
         )
 
         # Generate PDFs if requested

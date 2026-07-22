@@ -1,0 +1,28 @@
+# OS
+.DS_Store
+**/.DS_Store
+
+# Python
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Logs & scratch
+*.log
+error.txt
+SESSION_HANDOFF_CONTEXT.md
+/a
+tests/x.py
+
+# Local docs, figures, archives (not source)
+*.docx
+*.pptx
+*.key
+*.pdf
+*.xlsx
+*.tar
+domain_*.png
+domas_paper/
+
+# Large full-run golden (slow test) — kept local only, regenerate on demand
+tests/reference_outputs/leafcutter_full__representative_True/

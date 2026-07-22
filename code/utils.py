@@ -1,4 +1,173 @@
+import os
+
 import pandas as pd
+
+
+# rMATS-turbo per-event result files (junction-count variant). The JCEC files
+# carry identical coordinates, so JC is enough for DOMAS's coordinate mapping.
+_RMATS_EVENT_FILES = {
+    'SE': 'SE.MATS.JC.txt',
+    'A5SS': 'A5SS.MATS.JC.txt',
+    'A3SS': 'A3SS.MATS.JC.txt',
+    'MXE': 'MXE.MATS.JC.txt',
+    'RI': 'RI.MATS.JC.txt',
+}
+
+
+def _clean_ensembl_id(gene_id):
+    """rMATS GeneID like '"ENSG00000156256.15"' -> 'ENSG00000156256'."""
+    gid = str(gene_id).strip().strip('"').strip("'")
+    return gid.split('.')[0]
+
+
+def _ordered_pair(a, b):
+    """(a, b) as a genomically ordered (low, high) int pair."""
+    a, b = int(a), int(b)
+    return (a, b) if a <= b else (b, a)
+
+
+def _rmats_event_junctions(event_type, r):
+    """The (start, end) intron junctions implied by one rMATS event row `r`
+    (a pandas Series indexable by the MATS column names). A junction is a
+    (genomic_low, genomic_high) pair; JunctionsAnalysis's matcher resolves strand.
+
+    No base adjustment is applied to the coordinates. Despite the `_0base` column
+    names, these rMATS start values were verified to align *exactly* with DoChaP's
+    stored exon coordinates (626/626 exact across all five event types, zero
+    off-by-one), so adding +1 would introduce a 1bp error rather than fix one. The
+    matcher's 1bp tolerance is for exon- vs intron-boundary conventions, not to
+    compensate for any base-offset here."""
+    if event_type == 'SE':
+        return [
+            _ordered_pair(r['upstreamEE'], r['exonStart_0base']),  # inclusion: upstream -> exon
+            _ordered_pair(r['exonEnd'], r['downstreamES']),        # inclusion: exon -> downstream
+            _ordered_pair(r['upstreamEE'], r['downstreamES']),     # skipping
+        ]
+    if event_type == 'A5SS':
+        return [
+            _ordered_pair(r['longExonEnd'], r['flankingES']),      # long form
+            _ordered_pair(r['shortEE'], r['flankingES']),          # short form
+        ]
+    if event_type == 'A3SS':
+        return [
+            _ordered_pair(r['flankingEE'], r['longExonStart_0base']),  # long form
+            _ordered_pair(r['flankingEE'], r['shortES']),              # short form
+        ]
+    if event_type == 'MXE':
+        return [
+            _ordered_pair(r['upstreamEE'], r['1stExonStart_0base']),
+            _ordered_pair(r['1stExonEnd'], r['downstreamES']),
+            _ordered_pair(r['upstreamEE'], r['2ndExonStart_0base']),
+            _ordered_pair(r['2ndExonEnd'], r['downstreamES']),
+        ]
+    if event_type == 'RI':
+        return [
+            _ordered_pair(r['upstreamEE'], r['downstreamES']),     # spliced (intron removed)
+        ]
+    return []
+
+
+def rmats2junctions(rmats_dir):
+    """Parse an rMATS-turbo output directory (the five [Event].MATS.JC.txt files)
+    into a junctions DataFrame ready for JunctionsAnalysis.analyze_junctions().
+
+    rMATS provides the Ensembl GeneID and gene symbol directly, so no
+    symbol->ensembl DB lookup is needed. ALL events are taken (no
+    FDR/IncLevelDifference filtering) - pre-filter the input files if you only
+    want significant events.
+    """
+    junctions = []
+    idx = 0
+    for event_type, filename in _RMATS_EVENT_FILES.items():
+        path = os.path.join(rmats_dir, filename)
+        if not os.path.exists(path):
+            continue
+        df = pd.read_csv(path, sep='\t')
+        for _, r in df.iterrows():
+            gene_ensembl_id = _clean_ensembl_id(r['GeneID'])
+            gene_symbol = str(r['geneSymbol']).strip().strip('"')
+            chromosome = str(r['chr'])
+            if chromosome.startswith('chr'):
+                chromosome = chromosome[3:]  # DoChaP stores bare '21', not 'chr21'
+            idx += 1
+            cluster_name = f'{event_type}_{gene_ensembl_id}_{chromosome}_{idx}'
+            try:
+                event_junctions = _rmats_event_junctions(event_type, r)
+            except (KeyError, ValueError, TypeError):
+                continue  # malformed / incomplete row - skip it
+            for start, end in event_junctions:
+                junctions.append([chromosome, gene_ensembl_id, gene_symbol,
+                                  event_type, start, end, cluster_name])
+
+    if not junctions:
+        raise ValueError(f"No rMATS MATS.JC.txt events found under {rmats_dir}")
+
+    return pd.DataFrame(junctions, columns=[
+        'chromosome', 'gene_ensembl_id', 'gene_symbol', 'event_type',
+        'start_position', 'end_position', 'cluster_name'])
+
+
+def _parse_coord_pairs(text):
+    """'a-b;c-d' -> [(low, high), ...] as int pairs; blanks/malformed skipped."""
+    pairs = []
+    for token in str(text).split(';'):
+        token = token.strip()
+        if not token or '-' not in token:
+            continue
+        try:
+            a, b = token.split('-')[:2]
+            a, b = int(a), int(b)
+        except ValueError:
+            continue
+        pairs.append((a, b) if a <= b else (b, a))
+    return pairs
+
+
+def voila2junctions(tsv_path):
+    """Parse a MAJIQ voila TSV (`voila tsv` output, deltapsi or psi) into a
+    junctions DataFrame ready for JunctionsAnalysis.analyze_junctions().
+
+    One LSV -> one cluster; each coordinate in 'Junctions coords' (plus 'IR
+    coords', when present) -> one junction row. voila embeds the Ensembl Gene ID,
+    so - like the rMATS path - no symbol->ensembl lookup is needed. ALL LSVs are
+    taken (no probability/dPSI filtering); pre-filter the TSV for significant LSVs
+    if desired. event_type is built from MAJIQ's A5SS/A3SS/ES/IR classification.
+    """
+    df = pd.read_csv(tsv_path, sep='\t', dtype=str)  # header line starts with '#'
+
+    gene_name_col = '#Gene Name' if '#Gene Name' in df.columns else 'Gene Name'
+
+    junctions = []
+    for _, r in df.iterrows():
+        gene_ensembl_id = str(r['Gene ID']).split('.')[0].strip().strip('"')
+        gene_symbol = str(r[gene_name_col]).strip()
+        chromosome = str(r['chr']).strip()
+        if chromosome.startswith('chr'):
+            chromosome = chromosome[3:]  # DoChaP stores bare '5', not 'chr5'
+        cluster_name = str(r['LSV ID']).strip()
+
+        ir_coords = str(r['IR coords']).strip() if 'IR coords' in df.columns and pd.notna(r['IR coords']) else ''
+        types = [name for name in ('A5SS', 'A3SS', 'ES')
+                 if name in df.columns and str(r[name]).strip() == 'True']
+        if ir_coords:
+            types.append('IR')
+        event_type = '+'.join(types) if types else 'LSV'
+
+        event_junctions = _parse_coord_pairs(r['Junctions coords'])
+        if ir_coords:
+            event_junctions += _parse_coord_pairs(ir_coords)
+
+        for start, end in event_junctions:
+            junctions.append([chromosome, gene_ensembl_id, gene_symbol,
+                              event_type, start, end, cluster_name])
+
+    if not junctions:
+        raise ValueError(f"No LSV junctions found in {tsv_path}")
+
+    return pd.DataFrame(junctions, columns=[
+        'chromosome', 'gene_ensembl_id', 'gene_symbol', 'event_type',
+        'start_position', 'end_position', 'cluster_name'])
+
 
 def ioe2junctions(file_path):
     """

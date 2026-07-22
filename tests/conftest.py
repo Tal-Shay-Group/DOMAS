@@ -19,6 +19,27 @@ def pytest_addoption(parser):
         help="Path to the DoChaP merged sqlite database to run the tests "
              f"against. Defaults to {DEFAULT_DB_PATH}.",
     )
+    parser.addoption(
+        "--run-slow",
+        action="store_true",
+        default=False,
+        help="Run tests marked @pytest.mark.slow (e.g. the full-dataset "
+             "leafcutter golden comparison, ~17k clusters). Skipped by default.",
+    )
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "slow: slow test, opt in with --run-slow")
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--run-slow"):
+        return
+    skip_slow = pytest.mark.skip(reason="need --run-slow option to run")
+    for item in items:
+        if "slow" in item.keywords:
+            item.add_marker(skip_slow)
 
 
 @pytest.fixture

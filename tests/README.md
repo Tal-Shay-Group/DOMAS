@@ -12,10 +12,25 @@ database; `test_junction_analysis.py` is DB-free unit tests for
 - `short_H_vs_M_HN6.xlsx` - human-vs-mouse comparative splicing table, read
   with `alternative_splicing.hadas_read_input_file()` (needs a DB connection
   to resolve mouse gene symbols to ensembl ids).
+- `leafcutter/leafcutter_ds_cluster_significance.txt` +
+  `leafcutter/leafcutter_ds_effect_sizes.txt` - a pair of `leafcutter_ds`
+  outputs (human, ~17k clusters), read with
+  `alternative_splicing.leafcutter_read_input_files()` (needs a DB connection
+  to resolve gene symbols to ensembl ids).
 
-Both are read into a DataFrame first, then passed as `df_junctions` to
+All are read into a DataFrame first, then passed as `df_junctions` to
 `JunctionsAnalysis.analyze_junctions()` - reading junctions from a file is
 alternative_splicing.py's job, not junction_analisys.py's.
+
+## Slow tests
+
+The full-dataset leafcutter golden comparison
+(`test_leafcutter_full_compare_against_reference`, ~17k clusters, ~15 min) is
+marked `@pytest.mark.slow` and skipped by default. Opt in with `--run-slow`.
+The default `test_leafcutter_subset_compare_against_reference` runs a
+deterministic 200-cluster slice (~10s). Both use representative domains and
+bootstrap their golden reference under `reference_outputs/` on first run, then
+compare against it on every run after.
 
 ## Running the tests
 
