@@ -20,7 +20,7 @@ _DEFAULT_NUM_WORKERS = os.cpu_count() or 5
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Analyze junctions and detect domain changes across alternative transcripts.")
-    parser.add_argument("-format", required=True, choices=["hadas", "ioe", "leafcutter", "rmats", "majiq"],
+    parser.add_argument("-format", required=False, choices=["hadas", "ioe", "leafcutter", "rmats", "majiq"],
                          help="Input file format: 'hadas' for a hadas-style comparative "
                               "splicing Excel file, 'ioe' for a SUPPA .ioe file (or a "
                               "directory of them, see -ioe_pattern), 'leafcutter' for a pair "
@@ -39,7 +39,7 @@ def parse_args():
     parser.add_argument("-lc_effect", required=False, default=None, type=str,
                          help="Path to the leafcutter_ds_effect_sizes.txt file "
                               "(only used with -format leafcutter)")
-    parser.add_argument("-dochap", required=True, type=str, help="Path to the DoChaP sqlite db")
+    parser.add_argument("-dochap", required=False, type=str, help="Path to the DoChaP sqlite db")
     parser.add_argument("-output_csv", type=str, default="junctions_analysis.csv", help="Path to the output csv")
     parser.add_argument("-gene_ids", type=str, default=None,
                          help="Comma-separated list of gene symbols to generate PDFs for "
@@ -79,8 +79,46 @@ def parse_args():
                               "canonical transcript in the output CSV; drop rows for "
                               "non-comparable (not chosen) transcripts, e.g. those with a "
                               "gene_not_in_db / junction_not_mapped / no_unique_junctions event.")
+
+    # --- enrichment-DB setup mode (does not run an analysis) ---
+    setup = parser.add_argument_group(
+        "enrichment setup",
+        "Provision the local enrichment database (afdb_plddt / uniprot_feature / "
+        "uniprot_alias / ensembl_sequence + Pfam). -download and -build run in "
+        "setup mode and exit; -format/-dochap/-input are not needed.")
+    setup.add_argument("-download", action="store_true",
+                       help="Download the raw enrichment sources into -data_dir, then exit.")
+    setup.add_argument("-build", action="store_true",
+                       help="Build -enrichment_db from the raw files in -data_dir, then exit "
+                            "(may be combined with -download to do both).")
+    setup.add_argument("-data_dir", type=str, default="enrichment_data",
+                       help="Directory for the raw source files (default: ./enrichment_data).")
+    setup.add_argument("-enrichment_db", type=str, default=None,
+                       help="Output sqlite path for -build (default: <data_dir>/enrichment.sqlite).")
+    setup.add_argument("-species", type=str, default=None,
+                       help="Comma-separated species subset for -download/-build "
+                            "(default: all; choices: H_sapiens,M_musculus,R_norvegicus,D_rerio).")
+    setup.add_argument("-only", type=str, default=None,
+                       help="Comma-separated source subset for -download/-build "
+                            "(default: all; choices: uniprot,afdb,ensembl,pfam).")
+    setup.add_argument("-delete_raw", action="store_true",
+                       help="After -build, delete the large raw downloads (keeps Pfam-A.hmm).")
+    setup.add_argument("-force_download", action="store_true",
+                       help="Re-download sources even if already present in -data_dir.")
+
     args = parser.parse_args()
 
+    # In setup mode we skip all analysis-input validation and return early;
+    # main() dispatches to download.py / build.py and exits.
+    if args.download or args.build:
+        if args.enrichment_db is None:
+            args.enrichment_db = os.path.join(args.data_dir, "enrichment.sqlite")
+        return args
+
+    if not args.format:
+        parser.error("-format is required (or use -download/-build for enrichment setup)")
+    if not args.dochap:
+        parser.error("-dochap is required")
     if not os.path.exists(args.dochap):
         parser.error(f"DoChaP db not found at {args.dochap}")
 
@@ -120,6 +158,21 @@ def parse_args():
     return args
 
 
+def run_setup(args):
+    """Provision the enrichment database: -download fetches raw sources,
+    -build parses them into -enrichment_db. Both may be given together."""
+    import build
+    import download
+
+    species = [s.strip() for s in args.species.split(",")] if args.species else None
+    only = [s.strip() for s in args.only.split(",")] if args.only else None
+    if args.download:
+        download.download_all(args.data_dir, species=species, only=only, force=args.force_download)
+    if args.build:
+        build.build_all(args.data_dir, args.enrichment_db, species=species, only=only,
+                        delete_raw=args.delete_raw)
+
+
 def main():
     # junction_analisys.py's JunctionsAnalysis already logs progress every
     # 10,000 clusters (with an ETA) via self.logger.info(...) - but nothing
@@ -133,6 +186,12 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     args = parse_args()
+
+    # Enrichment setup mode: provision the local DB and exit, no analysis run.
+    if args.download or args.build:
+        run_setup(args)
+        return
+
     con = sqlite3.connect(args.dochap)
     try:
         if args.format == "leafcutter":
