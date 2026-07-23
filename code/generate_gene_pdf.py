@@ -330,6 +330,10 @@ class GeneVisualization:
         # ellipses and create_pdf() adds a changed-HMM-elements table under each
         # results table. When empty, the PDF is drawn exactly as before.
         self.hmm_by_transcript = {}
+        # Optional calibrated fold-change probability per transcript (vs canonical),
+        # keyed by transcript_ensembl_id -> float in [0,1] (P(TM<0.5), the
+        # structural companion score). Shown on the transcript label when present.
+        self.fold_change_by_transcript = {}
 
     def _normalize_species_value(self, species_value):
         """Normalize common species aliases to the values used in the DB."""
@@ -1291,11 +1295,20 @@ class GeneVisualization:
                         if 'is_most_like_canonical' in rows_for_transcript.columns and rows_for_transcript['is_most_like_canonical'].any():
                             tie_break_tags.append('most like canonical')
                     tag_suffix = f"  [{', '.join(tie_break_tags)}]" if tie_break_tags else ""
+                    fc = (self.fold_change_by_transcript.get(transcript_name)
+                          or self.fold_change_by_transcript.get(str(transcript_name).split('.')[0]))
                     ax_label.text(
                         0.02, 0.98,
                         f"Transcript: {transcript_name}  |  Protein: {protein_name}{tag_suffix}",
                         fontsize=8, va='top', transform=ax_label.transAxes,
                     )
+                    if fc is not None:
+                        ax_label.text(
+                            0.98, 0.98,
+                            f"P(fold change, TM<0.5) = {fc:.2f}",
+                            fontsize=7.5, va='top', ha='right', fontweight='bold',
+                            color='#1a365d', transform=ax_label.transAxes,
+                        )
 
                 if show_no_comparison_note:
                     ax_note = fig.add_subplot(gs[note_row, :])
@@ -1305,6 +1318,15 @@ class GeneVisualization:
                         fontsize=9, fontstyle='italic', va='center', transform=ax_note.transAxes,
                     )
 
+                if self.fold_change_by_transcript:
+                    fig.text(
+                        0.02, 0.004,
+                        "Note on P(fold change): AlphaFold burial enters this structural score with the "
+                        "OPPOSITE sign to the functional/pathogenicity score — a buried changed region "
+                        "PRESERVES the fold (structural) yet is where pathogenic variants concentrate "
+                        "(functional). The two are different questions.",
+                        fontsize=5.6, style='italic', color='#555555', va='bottom', wrap=True,
+                    )
                 pdf.savefig(fig, bbox_inches='tight', dpi=PDF_RASTER_DPI)
                 plt.close(fig)
 
