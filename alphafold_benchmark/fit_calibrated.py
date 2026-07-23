@@ -68,7 +68,18 @@ for i in range(5):
     w = fit(np.column_stack([np.ones(len(tr)), Xstd[tr]]), y[tr])
     oof[te] = 1 / (1 + np.exp(-np.clip(np.column_stack([np.ones(len(te)), Xstd[te]]) @ w, -30, 30)))
 print(f"n={n}  positives(patho)={int(y.sum())}  base={y.mean():.3f}")
-print(f"5-fold CV AUC = {auc(y, oof):.3f}")
+print(f"5-fold CV AUC (pair-level) = {auc(y, oof):.3f}")
+
+# gene-grouped CV: each protein confined to one fold (no gene in train AND test),
+# the leakage-free estimate since LOEUF is gene-level and overlap is gene-correlated
+grp = disc['acc'].values; uacc = pd.unique(grp)
+gfold = {a: i for a, i in zip(uacc, rng.integers(0, 5, len(uacc)))}
+gassign = np.array([gfold[a] for a in grp]); goof = np.zeros(n)
+for i in range(5):
+    te = np.where(gassign == i)[0]; tr = np.where(gassign != i)[0]
+    w = fit(np.column_stack([np.ones(len(tr)), Xstd[tr]]), y[tr])
+    goof[te] = 1 / (1 + np.exp(-np.clip(np.column_stack([np.ones(len(te)), Xstd[te]]) @ w, -30, 30)))
+print(f"5-fold CV AUC (gene-grouped, leakage-free) = {auc(y, goof):.3f}  ({len(uacc)} proteins)")
 
 # final model on all data (the shipped coefficients)
 wf = fit(np.column_stack([np.ones(n), Xstd]), y)

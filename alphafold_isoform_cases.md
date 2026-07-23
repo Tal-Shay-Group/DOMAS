@@ -431,9 +431,13 @@ What was tried and what survived (`improve_proto.py`):
   AM 0.754 for patho-vs-benign — same signal, un-bucketed.
 - **gnomAD LOEUF: the useful new feature** (non-circular): 0.754 → 0.770.
 
-The shipped model: **5-fold CV AUC 0.769**, well-calibrated (predicted prob tracks
-observed rate), and the deciles are now **monotonic** with the top decile at **58%
-pathogenic** (vs the categorical score's 38%). Full per-pair decile table
+The shipped model: **5-fold CV AUC 0.769** (pair-level), and **0.765 under
+gene-grouped CV** — each protein confined to one fold, so no gene appears in both
+train and test. The 0.003 gap confirms negligible leakage (1,979 proteins for
+3,282 pairs, ~1.7 isoforms each; even LOEUF alone survives gene-grouped CV at
+0.654). The model is well-calibrated (predicted prob tracks observed rate), and
+the deciles are now **monotonic** with the top decile at **58% pathogenic** (vs
+the categorical score's 38%). Full per-pair decile table
 (r% = share within class, c% = pathogenic share within bin; patho 907, benign 2,746):
 
 | impact_prob decile (range) | Pathogenic (r%, c%) | Benign (r%, c%) | bin N | % pathogenic |
