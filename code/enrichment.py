@@ -7,7 +7,8 @@ value repeated on that comparison's domain rows):
 
   canon_hmm            per-Pfam-family HMM coverage of the canonical protein
   alt_hmm              same for the compared protein (or SEQ-NOT-FOUND)
-  changed_region       canonical AA span that differs (prefix/suffix trimmed)
+  changed_region       AA span that differs (prefix/suffix trimmed); canonical
+                       coords, or ins:<alt coords> for an alt-only insertion
   region_plddt_mean    mean AlphaFold pLDDT over that span (canonical model)
   region_plddt_pct70   % of that span with pLDDT > 70
   region_uniprot_sites UniProt features overlapping that span
@@ -25,7 +26,7 @@ import pandas as pd
 
 import build  # _parse_hmmsearch_domtbl (bitscores)
 from junction_analisys import NON_COMPARISON_EVENTS
-from utils import calc_spade_score, hmm_change_impact
+from utils import calc_spade_score, hmm_change_impact, insertion_impact
 
 _PRIMARY_FT_SKIP = {'CHAIN', 'SIGNAL', 'Chain', 'Signal'}
 _IMPACT_RANK = {'none': 0, 'gain': 1, 'low': 1, 'moderate': 2, 'high': 3}
@@ -200,19 +201,41 @@ class Enricher:
         return '; '.join(f'{fam}:{cov}' for fam, cov in hitlist)
 
     @staticmethod
-    def changed_region(a, b):
-        """Canonical AA span [lo,hi] that differs from the compared seq, by
-        trimming the shared prefix and suffix. None if identical or missing."""
-        if not a or not b:
+    def changed_region(canonical_seq, alt_seq):
+        """Divergent span between the canonical and alternative protein sequences,
+        found by trimming the shared prefix and shared suffix.
+
+        Returns the change described in BOTH coordinate systems, because an
+        insertion has residues only in the alt sequence (no canonical
+        coordinate) and a deletion only in the canonical sequence:
+
+            {'canon': (lo, hi) | None,   # 1-based span on the canonical sequence
+             'alt':   (lo, hi) | None,   # 1-based span on the alternative sequence
+             'kind':  'substitution' | 'insertion' | 'deletion'}
+
+        None if either sequence is missing or the two are identical.
+        """
+        if not canonical_seq or not alt_seq:
             return None
-        p = 0
-        while p < min(len(a), len(b)) and a[p] == b[p]:
-            p += 1
-        s = 0
-        while s < min(len(a), len(b)) - p and a[-1 - s] == b[-1 - s]:
-            s += 1
-        lo, hi = p + 1, len(a) - s
-        return (lo, hi) if hi >= lo else None
+        shorter_len = min(len(canonical_seq), len(alt_seq))
+        shared_prefix = 0
+        while (shared_prefix < shorter_len
+               and canonical_seq[shared_prefix] == alt_seq[shared_prefix]):
+            shared_prefix += 1
+        shared_suffix = 0
+        while (shared_suffix < shorter_len - shared_prefix
+               and canonical_seq[-1 - shared_suffix] == alt_seq[-1 - shared_suffix]):
+            shared_suffix += 1
+        canon_lo, canon_hi = shared_prefix + 1, len(canonical_seq) - shared_suffix
+        alt_lo, alt_hi = shared_prefix + 1, len(alt_seq) - shared_suffix
+        canon_span = (canon_lo, canon_hi) if canon_hi >= canon_lo else None
+        alt_span = (alt_lo, alt_hi) if alt_hi >= alt_lo else None
+        if canon_span is None and alt_span is None:
+            return None
+        kind = ('insertion' if canon_span is None else
+                'deletion' if alt_span is None else
+                'substitution')
+        return {'canon': canon_span, 'alt': alt_span, 'kind': kind}
 
 
 def enrich_results(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
@@ -242,9 +265,16 @@ def enrich_results(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
         uni = e.uniprot_for(canon)
         reg = e.changed_region(a, b)
         plddt_mean = plddt_pct = region = sites = ''
-        if reg:
-            lo, hi = reg
+        if reg and reg['canon']:
+            # substitution / deletion: pLDDT and UniProt features are indexed on
+            # the canonical sequence, so they only apply to a canonical span.
+            lo, hi = reg['canon']
             region = f'{lo}-{hi}'
+            if reg['alt']:
+                # flag when the alt span adds net residues (expansion/insertion)
+                net_added = (reg['alt'][1] - reg['alt'][0] + 1) - (hi - lo + 1)
+                if net_added > 0:
+                    region += f' +{net_added}alt'
             pl = e.plddt(uni)
             if pl and len(pl) == len(a):
                 seg = pl[lo - 1:hi]
@@ -252,6 +282,10 @@ def enrich_results(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
                     plddt_mean = round(sum(seg) / len(seg))
                     plddt_pct = round(100 * sum(x > 70 for x in seg) / len(seg))
             sites = ' | '.join(e.features(uni, lo, hi))
+        elif reg and reg['kind'] == 'insertion':
+            # alt-only residues: report the span in alt coordinates.
+            alo, ahi = reg['alt']
+            region = f'ins:{alo}-{ahi}'
         enr_cols[(canon, comp)] = {
             'canon_hmm': e._fmt_hmm(hits.get(canon, [] if a else None)),
             'alt_hmm': e._fmt_hmm(hits.get(comp, [] if b else None)),
@@ -342,20 +376,47 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
         # functional sites, and mean AlphaMissense constraint (if provisioned).
         reg = Enricher.changed_region(seqs.get(canon), seqs.get(comp))
         fold_state, sites, region_am = None, [], None
-        if reg:
-            lo, hi = reg
+        added_label = 'none'
+        if reg and reg['canon']:
+            lo, hi = reg['canon']
             fold_state = e.fold_state(uni, lo, hi)
             sites = e.functional_sites(uni, lo, hi)
             am_arr = e.am_pathogenicity(uni)
             if am_arr:
                 seg = [v for v in am_arr[lo - 1:hi] if v is not None]
                 region_am = round(sum(seg) / len(seg), 3) if seg else None
+        if reg and reg['alt']:
+            # residues the alt isoform ADDS - a pure insertion, or the surplus of
+            # a substitution whose alt span is longer than the canonical span -
+            # have no canonical coordinate, so the loss-based per-Pfam loop below
+            # misses them. Score the net-added segment by size + whether it lands
+            # inside a Pfam domain on the alt sequence (disruptive) vs a
+            # terminus/linker.
+            alo, ahi = reg['alt']
+            alt_span_len = ahi - alo + 1
+            canon_span_len = (hi - lo + 1) if reg['canon'] else 0
+            net_added = alt_span_len - canon_span_len
+            if net_added > 0:
+                inside_domain = any(
+                    min(ahi, m[4]) - max(alo, m[3]) + 1 >= 0.5 * alt_span_len
+                    for m in matches.get(comp, []))
+                if reg['canon']:
+                    f_lo, f_hi = lo, hi           # canonical residues being replaced/expanded
+                else:
+                    canon_len = len(seqs.get(canon) or '')
+                    flank = alo - 1               # canonical residue before a pure insertion
+                    f_lo, f_hi = max(1, flank), min(canon_len, flank + 1)
+                junction_fold = (e.fold_state(uni, f_lo, f_hi) if f_hi >= f_lo else None)
+                added_label = insertion_impact(net_added, inside_domain, junction_fold)
         hits = bool(sites)
         func_col[(canon, comp)] = ' | '.join(sites)
         am_col[(canon, comp)] = region_am if region_am is not None else ''
         # a functional residue in the changed region is at least 'moderate' even
-        # if no Pfam coverage changes (the disordered-motif case)
+        # if no Pfam coverage changes (the disordered-motif case); net-added
+        # residues seed their own size/placement level (the loss-based loop can't).
         best_rank, best_label = (_IMPACT_RANK['moderate'], 'moderate') if hits else (0, 'none')
+        if _IMPACT_RANK.get(added_label, 0) > best_rank:
+            best_rank, best_label = _IMPACT_RANK[added_label], added_label
         for acc in set(cm) | set(am):
             ccov = cm[acc][2] if acc in cm else None
             acov = am[acc][2] if acc in am else None

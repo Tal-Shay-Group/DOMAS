@@ -352,6 +352,48 @@ def hmm_change_impact(canonical_cov, alt_cov, canonical_plddt,
     return {1: 'low', 2: 'moderate', 3: 'high'}[level]
 
 
+def insertion_impact(inserted_len, inside_domain, junction_fold_state=None):
+    """Deterministic impact label for residues present ONLY in the alternative
+    isoform (an insertion, i.e. the added part of a longer isoform).
+
+    hmm_change_impact is loss-based: an insertion removes no canonical Pfam
+    coverage, so it scores 'none' there even for a large added segment. An
+    insertion is scored instead on the two signals that matter for added
+    sequence - how much was added, and where it lands:
+
+        size (inserted_len)              base level
+          >= 30 aa                         moderate
+          10 - 30 aa                       low
+          < 10 aa                          none (low only if inside a domain)
+        placement
+          inside a folded/Pfam domain      -> up one level (splits the fold)
+          disordered junction              -> down one level (tolerated linker/tail)
+
+    inside_domain: the inserted residues overlap a Pfam domain on the
+    alternative sequence. An insertion within a structured domain disrupts the
+    fold; one at a terminus or in a linker usually does not.
+
+    junction_fold_state: UniProt fold-state ('folded'/'disordered'/None) of the
+    canonical residues flanking the insertion point - a disordered flank means
+    the insertion sits in a tolerant region.
+
+    Returns: 'none', 'low', 'moderate', or 'high'.
+    """
+    if inserted_len <= 0:
+        return 'none'
+    if inserted_len >= 30:
+        level = 2
+    elif inserted_len >= 10:
+        level = 1
+    else:
+        level = 1 if inside_domain else 0
+    if inside_domain and level < 3:
+        level += 1
+    elif junction_fold_state == 'disordered' and level > 0:
+        level -= 1
+    return {0: 'none', 1: 'low', 2: 'moderate', 3: 'high'}[level]
+
+
 def calc_spade_score(domains_by_isoform):
     """SPADE-style per-isoform Pfam domain-integrity score.
 
