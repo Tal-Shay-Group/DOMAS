@@ -283,45 +283,72 @@ def get_canonical_exon_counts(con, gene_ensembl_ids):
 # table, and let the GUI and the PDF read them instead of recomputing.
 # ============================================================================
 
-def hmm_change_impact(canonical_cov, alt_cov, canonical_plddt):
+def hmm_change_impact(canonical_cov, alt_cov, canonical_plddt,
+                      fold_state=None, hits_functional_site=False, region_am=None):
     """Deterministic likely-impact label for a change to one HMM (Pfam) element.
 
-    Pure function of three numbers from the changed-HMM comparison:
-      canonical_cov, alt_cov  - % of the Pfam model matched in each isoform
-      canonical_plddt         - mean AlphaFold pLDDT over the canonical element
-
-    Severity scales with how much of the domain model the alternative isoform
-    loses (coverage), weighted by whether the canonical region is structured
-    (a well-folded domain being damaged matters more than a disordered one).
+    Base signal: how much of the Pfam model the alternative isoform loses
+    (coverage), weighted by whether the changed region is structured.
 
         coverage lost (pts)      base level
           lost entirely / >= 30    high
           10 - 30                  moderate
           < 10                     low
-        structure adjustment (canonical pLDDT)
-          >= 70  -> up one level (max high)
-          <  50  -> down one level (min low)
+        structure weighting
+          structured -> up one level (max high)
+          disordered -> down one level (min low)
 
-    Returns: 'none' (no loss), 'gain' (only in the alt), 'low'/'moderate'/'high',
-    or 'n/a'.
+    Structure is taken from UniProt `fold_state` when available (curated /
+    experimental beats predicted), else from AlphaFold `canonical_plddt`:
+      fold_state='folded'      or pLDDT >= 70  -> structured
+      fold_state='disordered'  or pLDDT <  50  -> disordered
+
+    hits_functional_site: the changed region overlaps a UniProt functional
+    residue (ACT_SITE/BINDING/MOD_RES/SITE/MOTIF/...). Losing such a residue is
+    significant regardless of how much coverage/structure changed, so it forces
+    at least 'high' when coverage is lost, and 'moderate' even when the domain
+    coverage is unchanged (the disordered-functional-motif case pLDDT alone
+    would dismiss).
+
+    Returns: 'none', 'gain', 'low', 'moderate', 'high', or 'n/a'.
     """
     if canonical_cov is None:
         return 'gain' if alt_cov is not None else 'n/a'
     a = 0 if alt_cov is None else alt_cov
     loss = canonical_cov - a
     if loss <= 0:
+        # no domain coverage lost; still flag if a functional residue is affected
+        # or the changed region is functionally constrained (high AlphaMissense).
+        if hits_functional_site or (region_am is not None and region_am >= 0.564):
+            return 'moderate'
         return 'none'
+    if hits_functional_site:
+        return 'high'
     if a == 0 or loss >= 30:
         level = 3
     elif loss >= 10:
         level = 2
     else:
         level = 1
-    if canonical_plddt is not None:
-        if canonical_plddt >= 70 and level < 3:
-            level += 1
-        elif canonical_plddt < 50 and level > 1:
-            level -= 1
+    # constraint/structure weighting, best signal first: AlphaMissense functional
+    # constraint (region_am, mean per-residue pathogenicity) > curated UniProt
+    # fold_state > predicted AlphaFold pLDDT. AM wins because it flags constraint
+    # even in disordered regions (region_am >= 0.564 = AM "likely pathogenic";
+    # <= 0.34 = "likely benign").
+    if region_am is not None:
+        raise_lvl, lower_lvl = region_am >= 0.564, region_am <= 0.34
+    elif fold_state == 'folded':
+        raise_lvl, lower_lvl = True, False
+    elif fold_state == 'disordered':
+        raise_lvl, lower_lvl = False, True
+    elif canonical_plddt is not None:
+        raise_lvl, lower_lvl = canonical_plddt >= 70, canonical_plddt < 50
+    else:
+        raise_lvl, lower_lvl = False, False
+    if raise_lvl and level < 3:
+        level += 1
+    elif lower_lvl and level > 1:
+        level -= 1
     return {1: 'low', 2: 'moderate', 3: 'high'}[level]
 
 

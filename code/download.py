@@ -45,8 +45,25 @@ LICENSES = {
     "afdb":    "CC-BY 4.0",
     "ensembl": "Ensembl terms (open, no restrictions)",
     "pfam":    "CC0 1.0",
+    "alphamissense": "CC BY 4.0",
 }
 ALL_SOURCES = ("uniprot", "afdb", "ensembl", "pfam")
+# Opt-in sources: large and/or not part of a default provision run.
+OPTIN_SOURCES = ("alphamissense",)
+
+# AlphaMissense per-variant pathogenicity predictions (human canonical UniProt
+# isoforms; ~1.2 GB gzipped, 216M variant rows). build.py aggregates them to a
+# per-residue mean pathogenicity used as a functional-constraint signal.
+#
+# LICENSE: the AlphaMissense *predictions* are CC BY 4.0. DeepMind relicensed
+# them from the original CC BY-NC-SA 4.0 after release, so they are usable
+# (incl. commercially) with attribution (Cheng et al., Science 2023). DeepMind's
+# current terms: https://github.com/google-deepmind/alphamissense#readme
+# NOTE: the Zenodo record below still shows *stale* CC BY-NC-SA 4.0 metadata -
+# the operative license is CC BY 4.0 per DeepMind's own repo. (Code is Apache
+# 2.0; model weights are not released - we use only the prediction file.)
+_ALPHAMISSENSE_URL = ("https://zenodo.org/records/8208688/files/"
+                      "AlphaMissense_aa_substitutions.tsv.gz")
 
 
 def _subdir(data_dir, source):
@@ -115,6 +132,12 @@ def download_pfam(data_dir, force=False):
     _download(_PFAM_URL, os.path.join(out, "Pfam-A.hmm.gz"), force)
 
 
+def download_alphamissense(data_dir, force=False):
+    # See the _ALPHAMISSENSE_URL definition above for the license (CC BY 4.0).
+    out = _subdir(data_dir, "alphamissense")
+    _download(_ALPHAMISSENSE_URL, os.path.join(out, "AlphaMissense_aa_substitutions.tsv.gz"), force)
+
+
 def download_all(data_dir, species=None, only=None, force=False):
     """Download every requested source for every requested species.
     `species` limits to a subset of SPECIES (default all); `only` limits to a
@@ -122,7 +145,7 @@ def download_all(data_dir, species=None, only=None, force=False):
     species = species or list(SPECIES)
     only = only or list(ALL_SOURCES)
     bad_sp = [s for s in species if s not in SPECIES]
-    bad_src = [s for s in only if s not in ALL_SOURCES]
+    bad_src = [s for s in only if s not in ALL_SOURCES + OPTIN_SOURCES]
     if bad_sp:
         sys.exit(f"Unknown species: {bad_sp}. Known: {list(SPECIES)}")
     if bad_src:
@@ -131,6 +154,9 @@ def download_all(data_dir, species=None, only=None, force=False):
     if "pfam" in only:
         print("[pfam] (species-independent)")
         download_pfam(data_dir, force)
+    if "alphamissense" in only:
+        print("[alphamissense] (human canonical, ~1.2 GB; CC BY 4.0)")
+        download_alphamissense(data_dir, force)
     for sp in species:
         for src in only:
             if src == "pfam":

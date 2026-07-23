@@ -29,6 +29,10 @@ from utils import calc_spade_score, hmm_change_impact
 
 _PRIMARY_FT_SKIP = {'CHAIN', 'SIGNAL', 'Chain', 'Signal'}
 _IMPACT_RANK = {'none': 0, 'gain': 1, 'low': 1, 'moderate': 2, 'high': 3}
+# UniProt functional-residue feature keys (losing one of these matters regardless
+# of how much domain coverage/structure changed).
+_FUNCTIONAL_FT = ('ACT_SITE', 'BINDING', 'SITE', 'MOTIF', 'MOD_RES', 'DISULFID',
+                  'CROSSLNK', 'METAL', 'CA_BIND', 'DNA_BIND', 'NP_BIND', 'LIPID', 'CARBOHYD')
 
 
 class Enricher:
@@ -68,6 +72,21 @@ class Enricher:
             "SELECT plddt FROM afdb_plddt WHERE accession=?", (uniprot,)).fetchone()
         return [float(x) for x in row[0].split(',')] if row else None
 
+    def am_pathogenicity(self, uniprot):
+        """Per-residue mean AlphaMissense pathogenicity for a UniProt accession,
+        or None. The am_pathogenicity table is optional (present only if
+        AlphaMissense was provisioned)."""
+        if not uniprot:
+            return None
+        try:
+            row = self.enr.execute(
+                "SELECT am FROM am_pathogenicity WHERE accession=?", (uniprot,)).fetchone()
+        except sqlite3.OperationalError:
+            return None
+        if not row:
+            return None
+        return [float(x) if x else None for x in row[0].split(',')]
+
     def features(self, uniprot, lo, hi):
         if not uniprot:
             return []
@@ -78,6 +97,35 @@ class Enricher:
             if ftype in _PRIMARY_FT_SKIP:
                 continue
             out.append(f"{ftype} {s}-{e}{(' ' + note) if note else ''}".strip())
+        return out
+
+    def fold_state(self, uniprot, lo, hi):
+        """Curated UniProt structure state of region [lo,hi]: 'folded' if it
+        overlaps an experimental HELIX/STRAND, else 'disordered' if it overlaps a
+        REGION annotated 'Disordered', else None. Experimental secondary
+        structure wins over the (MobiDB-derived) disorder call."""
+        if not uniprot:
+            return None
+        q = ("SELECT ftype, note FROM uniprot_feature WHERE acc=? "
+             "AND start IS NOT NULL AND NOT (end<? OR start>?)")
+        folded = disordered = False
+        for ftype, note in self.enr.execute(q, (uniprot, lo, hi)):
+            if ftype in ('HELIX', 'STRAND'):
+                folded = True
+            elif ftype == 'REGION' and note and 'isorder' in note.lower():
+                disordered = True
+        return 'folded' if folded else ('disordered' if disordered else None)
+
+    def functional_sites(self, uniprot, lo, hi):
+        """UniProt functional-residue features overlapping [lo,hi]."""
+        if not uniprot:
+            return []
+        ph = ",".join("?" * len(_FUNCTIONAL_FT))
+        q = (f"SELECT ftype,start,end,note FROM uniprot_feature WHERE acc=? "
+             f"AND ftype IN ({ph}) AND start IS NOT NULL AND NOT (end<? OR start>?) ORDER BY start")
+        out = []
+        for ftype, s, e, note in self.enr.execute(q, (uniprot, *_FUNCTIONAL_FT, lo, hi)):
+            out.append(f"{ftype} {s}-{e}{(' ' + note[:22]) if note else ''}".strip())
         return out
 
     # --- HMM (batched: one hmmscan over all unique sequences) --------------
@@ -280,14 +328,34 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
         for tx, info in calc_spade_score(doms).items():
             spade[tx] = info['spade_score']
 
-    # impact per (canonical, compared): worst severity across changed Pfam families
-    impact = {}
+    # impact per (canonical, compared): worst severity across changed Pfam
+    # families, structure-weighted by UniProt fold-state (else pLDDT) and raised
+    # when the changed region hits a UniProt functional residue.
+    impact, func_col, am_col = {}, {}, {}
     for canon, comp in {(r['canonical_transcript_id'], r['transcript_id'])
                         for _, r in analyzable[['canonical_transcript_id', 'transcript_id']].dropna().iterrows()}:
         cm = {m[0]: m for m in matches.get(canon, [])}
         am = {m[0]: m for m in matches.get(comp, [])}
-        pl = e.plddt(e.uniprot_for(canon))
-        best_rank, best_label = 0, 'none'
+        uni = e.uniprot_for(canon)
+        pl = e.plddt(uni)
+        # region-level signals over the changed span: UniProt fold-state +
+        # functional sites, and mean AlphaMissense constraint (if provisioned).
+        reg = Enricher.changed_region(seqs.get(canon), seqs.get(comp))
+        fold_state, sites, region_am = None, [], None
+        if reg:
+            lo, hi = reg
+            fold_state = e.fold_state(uni, lo, hi)
+            sites = e.functional_sites(uni, lo, hi)
+            am_arr = e.am_pathogenicity(uni)
+            if am_arr:
+                seg = [v for v in am_arr[lo - 1:hi] if v is not None]
+                region_am = round(sum(seg) / len(seg), 3) if seg else None
+        hits = bool(sites)
+        func_col[(canon, comp)] = ' | '.join(sites)
+        am_col[(canon, comp)] = region_am if region_am is not None else ''
+        # a functional residue in the changed region is at least 'moderate' even
+        # if no Pfam coverage changes (the disordered-motif case)
+        best_rank, best_label = (_IMPACT_RANK['moderate'], 'moderate') if hits else (0, 'none')
         for acc in set(cm) | set(am):
             ccov = cm[acc][2] if acc in cm else None
             acov = am[acc][2] if acc in am else None
@@ -296,18 +364,19 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
                 s, en = cm[acc][3], cm[acc][4]
                 seg = pl[s - 1:en] if en <= len(pl) else []
                 cpl = round(sum(seg) / len(seg), 1) if seg else None
-            lab = hmm_change_impact(ccov, acov, cpl)
+            lab = hmm_change_impact(ccov, acov, cpl, fold_state=fold_state,
+                                    hits_functional_site=hits, region_am=region_am)
             if _IMPACT_RANK.get(lab, 0) > best_rank:
                 best_rank, best_label = _IMPACT_RANK[lab], lab
         impact[(canon, comp)] = best_label
 
-    def _spade(row, col):
-        return '' if row['event_type'] in NON_COMPARISON_EVENTS else spade.get(row[col], '')
+    def _blank_nc(row, val):
+        return '' if row['event_type'] in NON_COMPARISON_EVENTS else val
 
-    df['spade_canonical'] = df.apply(lambda r: _spade(r, 'canonical_transcript_id'), axis=1)
-    df['spade_compared'] = df.apply(lambda r: _spade(r, 'transcript_id'), axis=1)
-    df['impact'] = df.apply(
-        lambda r: '' if r['event_type'] in NON_COMPARISON_EVENTS
-        else impact.get((r['canonical_transcript_id'], r['transcript_id']), ''), axis=1)
+    df['spade_canonical'] = df.apply(lambda r: _blank_nc(r, spade.get(r['canonical_transcript_id'], '')), axis=1)
+    df['spade_compared'] = df.apply(lambda r: _blank_nc(r, spade.get(r['transcript_id'], '')), axis=1)
+    df['impact'] = df.apply(lambda r: _blank_nc(r, impact.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
+    df['functional_sites'] = df.apply(lambda r: _blank_nc(r, func_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
+    df['region_am_mean'] = df.apply(lambda r: _blank_nc(r, am_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df.to_csv(out_csv, index=False)
     return df

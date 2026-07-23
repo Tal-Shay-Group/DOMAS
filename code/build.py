@@ -410,6 +410,74 @@ def build_pfam_match(data_dir, con, species=None, chunk_size=20000):
     return total
 
 
+# ---------------------------------------------------------- AlphaMissense ----
+_AM_SCHEMA = """
+CREATE TABLE IF NOT EXISTS am_pathogenicity (
+    accession TEXT PRIMARY KEY,   -- UniProt canonical accession
+    length    INTEGER,
+    mean_am   REAL,               -- whole-protein mean pathogenicity
+    am        TEXT                -- comma-joined per-residue mean pathogenicity
+);
+"""
+_AM_VAR = re.compile(r'^[A-Z](\d+)[A-Z]$')   # e.g. V2L -> position 2
+
+
+def build_alphamissense(data_dir, con):
+    """Aggregate AlphaMissense per-variant predictions to a per-residue mean
+    pathogenicity table (am_pathogenicity), mirroring afdb_plddt. The raw file
+    lists every substitution; we average the ~19 substitutions per position.
+    Streaming, grouped by protein -> flat memory. See download.py for license
+    (predictions are CC BY 4.0). Explicit-only build step (not in default set).
+    """
+    raw = os.path.join(data_dir, "alphamissense", "AlphaMissense_aa_substitutions.tsv.gz")
+    if not os.path.exists(raw):
+        print(f"  [alphamissense] missing {raw} - run -download first; skipping")
+        return 0
+    con.executescript(_AM_SCHEMA)
+    insert = "INSERT OR REPLACE INTO am_pathogenicity(accession,length,mean_am,am) VALUES(?,?,?,?)"
+    cur_acc, pos_scores, n = None, {}, 0
+
+    def flush():
+        nonlocal n
+        if not cur_acc or not pos_scores:
+            return
+        maxp = max(pos_scores)
+        arr, allv = [], []
+        for p in range(1, maxp + 1):
+            v = pos_scores.get(p)
+            arr.append(str(round(sum(v) / len(v), 2)) if v else "")
+            if v:
+                allv.extend(v)
+        mean = round(sum(allv) / len(allv), 3) if allv else None
+        con.execute(insert, (cur_acc, maxp, mean, ",".join(arr)))
+        n += 1
+
+    with gzip.open(raw, "rt", errors="replace") as fh:
+        for line in fh:
+            if line.startswith("#") or line.startswith("uniprot"):
+                continue
+            f = line.rstrip("\n").split("\t")
+            if len(f) < 3:
+                continue
+            acc, var, score = f[0], f[1], f[2]
+            m = _AM_VAR.match(var)
+            if not m:
+                continue
+            if acc != cur_acc:
+                flush()
+                pos_scores, cur_acc = {}, acc
+                if n and n % 2000 == 0:
+                    con.commit()
+            pos_scores.setdefault(int(m.group(1)), []).append(float(score))
+    flush()
+    con.commit()
+    _record_meta(con, "alphamissense", "AlphaMissense_aa_substitutions", None,
+                 download._ALPHAMISSENSE_URL, raw, n,
+                 notes="per-residue mean pathogenicity; predictions CC BY 4.0 (see download.py)")
+    print(f"  [alphamissense] {n:,} proteins")
+    return n
+
+
 # ------------------------------------------------------------------- driver --
 def build_all(data_dir, db_path, species=None, only=None, delete_raw=False):
     species = species or list(download.SPECIES)
@@ -430,6 +498,8 @@ def build_all(data_dir, db_path, species=None, only=None, delete_raw=False):
     # explicitly (never in the default source set).
     if "pfam_match" in only:
         build_pfam_match(data_dir, con, species=species)
+    if "alphamissense" in only:
+        build_alphamissense(data_dir, con)
     con.execute("ANALYZE")
     con.commit()
     con.close()
