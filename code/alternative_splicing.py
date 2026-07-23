@@ -524,6 +524,12 @@ REPRESENTATIVE_DOMAINS_COLUMNS = [
     'protein_ensembl_id_version', 'transcript_ensembl_id_version', 'protein_interpro_id',
     'gene_ensembl_id', 'canonical', 'AA_start', 'AA_end', 'short_description',
     'CDD_id', 'cdd', 'pfam', 'smart', 'tigr', 'interpro',
+    # domain_id + InterPro entry `type` are carried through so
+    # junction_analisys.filter_representative_domains() can reduce the domain
+    # set by curated type (Domain/Repeat vs Family/Homologous_superfamily)
+    # instead of the geometric collapse heuristic. `type` is NULL for DBs built
+    # before RepresentativeDomains gained the column (filter then no-ops).
+    'domain_id', 'type',
 ]
 
 
@@ -579,6 +585,11 @@ def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_pr
     df_rep = df_rep.dropna(subset=['start', 'end'])
     if df_rep.empty:
         return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
+
+    # `type` is absent in DBs built before RepresentativeDomains gained the
+    # column; add it as NULL so downstream columns/filtering stay uniform.
+    if 'type' not in df_rep.columns:
+        df_rep['type'] = None
 
     merged_df = pd.merge(df_protein, df_transcript, on=['protein_ensembl_id', 'transcript_ensembl_id'])
     merged_df = pd.merge(merged_df, df_rep, on='protein_interpro_id')

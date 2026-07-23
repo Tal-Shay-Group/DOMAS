@@ -273,3 +273,110 @@ def get_canonical_exon_counts(con, gene_ensembl_ids):
         result[gene_ensembl_id] = exon_count
 
     return result
+
+
+# ============================================================================
+# Domain-change scoring (analysis-flow functions; kept out of the PDF code).
+#
+# These are pure functions so the analysis can compute a per-comparison
+# `impact` and a per-isoform `spade_score`, write them as columns in the result
+# table, and let the GUI and the PDF read them instead of recomputing.
+# ============================================================================
+
+def hmm_change_impact(canonical_cov, alt_cov, canonical_plddt):
+    """Deterministic likely-impact label for a change to one HMM (Pfam) element.
+
+    Pure function of three numbers from the changed-HMM comparison:
+      canonical_cov, alt_cov  - % of the Pfam model matched in each isoform
+      canonical_plddt         - mean AlphaFold pLDDT over the canonical element
+
+    Severity scales with how much of the domain model the alternative isoform
+    loses (coverage), weighted by whether the canonical region is structured
+    (a well-folded domain being damaged matters more than a disordered one).
+
+        coverage lost (pts)      base level
+          lost entirely / >= 30    high
+          10 - 30                  moderate
+          < 10                     low
+        structure adjustment (canonical pLDDT)
+          >= 70  -> up one level (max high)
+          <  50  -> down one level (min low)
+
+    Returns: 'none' (no loss), 'gain' (only in the alt), 'low'/'moderate'/'high',
+    or 'n/a'.
+    """
+    if canonical_cov is None:
+        return 'gain' if alt_cov is not None else 'n/a'
+    a = 0 if alt_cov is None else alt_cov
+    loss = canonical_cov - a
+    if loss <= 0:
+        return 'none'
+    if a == 0 or loss >= 30:
+        level = 3
+    elif loss >= 10:
+        level = 2
+    else:
+        level = 1
+    if canonical_plddt is not None:
+        if canonical_plddt >= 70 and level < 3:
+            level += 1
+        elif canonical_plddt < 50 and level > 1:
+            level -= 1
+    return {1: 'low', 2: 'moderate', 3: 'high'}[level]
+
+
+def calc_spade_score(domains_by_isoform):
+    """SPADE-style per-isoform Pfam domain-integrity score.
+
+    SPADE (APPRIS) scores each isoform by how intact its Pfam domains are,
+    using the HMMER per-domain **bitscore** as the integrity measure and taking
+    the most-intact isoform as the per-domain reference. This reproduces that
+    mechanic from our `pfam_match` data (which stores pfam_acc + bitscore per
+    protein); it is SPADE-*style*, not byte-identical to the APPRIS code (whose
+    exact aggregation formula isn't published).
+
+    Algorithm:
+      1. Per isoform, sum the bitscores of each Pfam family's hits
+         (so an isoform missing one of three zinc fingers scores lower on that
+         family, and a weakened/partial domain scores lower too).
+      2. For each family, the reference = the highest summed bitscore across the
+         gene's isoforms (the most-intact copy).
+      3. An isoform's penalty for a family = reference - its own summed bitscore
+         (0 if it holds the best copy; = reference if the family is absent = lost).
+      4. spade_score = -sum(penalties): 0 means every domain is held at its best
+         (most intact, domain-wise); more negative = more damaged/lost domains.
+
+    Input : {isoform_id: [(pfam_acc, bitscore), ...]}
+    Output: {isoform_id: {'spade_score': float, 'lost': [acc,...],
+                          'damaged': [acc,...], 'intact': bool}}
+    """
+    # family -> {isoform: summed bitscore}
+    fam_bits = {}
+    for iso, doms in domains_by_isoform.items():
+        per_fam = {}
+        for pfam_acc, bitscore in doms:
+            if bitscore is None:
+                continue
+            per_fam[pfam_acc] = per_fam.get(pfam_acc, 0.0) + float(bitscore)
+        for fam, b in per_fam.items():
+            fam_bits.setdefault(fam, {})[iso] = b
+
+    best = {fam: max(iso_b.values()) for fam, iso_b in fam_bits.items()}
+
+    result = {}
+    for iso in domains_by_isoform:
+        penalty = 0.0
+        lost, damaged = [], []
+        for fam, ref in best.items():
+            b = fam_bits[fam].get(iso, 0.0)
+            deficit = ref - b
+            if deficit > 1e-9:
+                penalty += deficit
+                (lost if b == 0 else damaged).append(fam)
+        result[iso] = {
+            'spade_score': round(-penalty, 1),
+            'lost': lost,
+            'damaged': damaged,
+            'intact': penalty <= 1e-9,
+        }
+    return result

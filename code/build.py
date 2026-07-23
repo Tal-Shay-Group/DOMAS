@@ -307,6 +307,109 @@ def build_pfam(data_dir, con):
     return n
 
 
+# -------------------------------------------------------------- pfam_match ----
+_PFAM_MATCH_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pfam_match (
+    protein_ensembl_id TEXT,     -- versionless ENSP (matches ensembl_sequence)
+    pfam_acc           TEXT,     -- PFxxxxx (version stripped)
+    pfam_name          TEXT,     -- e.g. zf-C2H2, RRM_1, Pkinase
+    ali_start          INTEGER,  -- alignment on the protein
+    ali_end            INTEGER,
+    env_start          INTEGER,  -- envelope (fuller domain extent)
+    env_end            INTEGER,
+    hmm_from           INTEGER,  -- match on the Pfam model
+    hmm_to             INTEGER,
+    hmm_len            INTEGER,  -- model length
+    bitscore           REAL,     -- domain bitscore (SPADE-style integrity metric)
+    ievalue            REAL,     -- domain independent E-value
+    coverage           INTEGER   -- round(100*(hmm_to-hmm_from+1)/hmm_len)
+);
+CREATE INDEX IF NOT EXISTS ix_pfam_match_prot ON pfam_match(protein_ensembl_id);
+"""
+
+
+def _parse_hmmsearch_domtbl(path):
+    """Yield pfam_match rows from an hmmsearch --domtblout file.
+
+    hmmsearch searches profiles->sequences, so vs hmmscan the target/query are
+    swapped: target = the sequence (our protein), query = the Pfam profile.
+    1-based columns used: 1 target(seq) name, 4 query(profile) name, 5 query acc
+    (PFxxxxx), 6 qlen (model length), 13 i-Evalue, 14 domain score, 16-17 hmm
+    from/to, 18-19 ali from/to, 20-21 env from/to.
+    """
+    with open(path) as fh:
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            f = line.split()
+            if len(f) < 23:
+                continue
+            prot = f[0]
+            pfam_name = f[3]
+            pfam_acc = f[4].split(".")[0]                 # strip version suffix
+            hmm_len = int(f[5])
+            ievalue = float(f[12])
+            bitscore = float(f[13])
+            hmm_from, hmm_to = int(f[15]), int(f[16])
+            ali_from, ali_to = int(f[17]), int(f[18])
+            env_from, env_to = int(f[19]), int(f[20])
+            cov = round(100 * (hmm_to - hmm_from + 1) / hmm_len)
+            yield (prot, pfam_acc, pfam_name, ali_from, ali_to, env_from, env_to,
+                   hmm_from, hmm_to, hmm_len, bitscore, ievalue, cov)
+
+
+def build_pfam_match(data_dir, con, species=None, chunk_size=20000):
+    """Populate the pfam_match cache: every protein in ensembl_sequence scanned
+    against Pfam-A, one row per domain hit (see _PFAM_MATCH_SCHEMA).
+
+    Uses hmmsearch (profiles -> sequences): it reads the pressed Pfam profile DB
+    once and streams the proteome, so it is markedly faster than per-protein
+    hmmscan for a bulk fill and gives identical hits. Incremental - proteins
+    already in pfam_match are skipped, so it can resume or top up new isoforms.
+
+    NOTE: this is the expensive step (order ~0.15 CPU-s/protein). It is NOT part
+    of the default build_all/only set; run it explicitly (only=['pfam_match']).
+    """
+    hmm = os.path.join(data_dir, "pfam", "Pfam-A.hmm")
+    if not os.path.exists(hmm + ".h3i"):
+        print(f"  [pfam_match] {hmm} not pressed - run build_pfam first; skipping")
+        return 0
+    con.executescript(_PFAM_MATCH_SCHEMA)
+    done = {r[0] for r in con.execute("SELECT DISTINCT protein_ensembl_id FROM pfam_match")}
+
+    q = "SELECT protein_ensembl_id, seq FROM ensembl_sequence WHERE seq IS NOT NULL AND seq!=''"
+    params = ()
+    if species:
+        q += " AND species IN (%s)" % ",".join("?" * len(species))
+        params = tuple(species)
+    todo = [(pe, s) for pe, s in con.execute(q, params) if pe not in done]
+    print(f"  [pfam_match] {len(todo):,} proteins to scan ({len(done):,} already present)")
+
+    insert = ("INSERT INTO pfam_match(protein_ensembl_id,pfam_acc,pfam_name,ali_start,ali_end,"
+              "env_start,env_end,hmm_from,hmm_to,hmm_len,bitscore,ievalue,coverage) "
+              "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    total = 0
+    for i in range(0, len(todo), chunk_size):
+        chunk = todo[i:i + chunk_size]
+        fa = tempfile.NamedTemporaryFile("w", suffix=".fa", delete=False)
+        for pe, s in chunk:
+            fa.write(f">{pe}\n{s}\n")
+        fa.close()
+        out = fa.name + ".domtbl"
+        subprocess.run(["hmmsearch", "--cut_ga", "--domtblout", out, hmm, fa.name],
+                       check=True, capture_output=True)
+        con.executemany(insert, _parse_hmmsearch_domtbl(out))
+        con.commit()
+        os.remove(fa.name)
+        os.remove(out)
+        total = con.execute("SELECT COUNT(*) FROM pfam_match").fetchone()[0]
+        print(f"  [pfam_match] {min(i + chunk_size, len(todo)):,}/{len(todo):,} proteins, {total:,} matches")
+    _record_meta(con, "pfam", "pfam_match", None, download._PFAM_URL, hmm, total,
+                 notes="per-protein Pfam-A matches (hmmsearch --cut_ga); cache for HMMER-free lookup")
+    print(f"  [pfam_match] done: {total:,} matches")
+    return total
+
+
 # ------------------------------------------------------------------- driver --
 def build_all(data_dir, db_path, species=None, only=None, delete_raw=False):
     species = species or list(download.SPECIES)
@@ -323,6 +426,10 @@ def build_all(data_dir, db_path, species=None, only=None, delete_raw=False):
         build_ensembl(data_dir, con, species)
     if "pfam" in only:
         build_pfam(data_dir, con)
+    # pfam_match is the expensive per-protein HMMER scan; only when asked for
+    # explicitly (never in the default source set).
+    if "pfam_match" in only:
+        build_pfam_match(data_dir, con, species=species)
     con.execute("ANALYZE")
     con.commit()
     con.close()

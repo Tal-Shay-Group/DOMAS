@@ -401,6 +401,126 @@ def collapse_contained_domains(df_domains, tolerance=2, overlap_fraction=0.85):
     return df_domains.drop(index=index[list(dropped)] if dropped else [])
 
 
+# InterPro entry types (from RepresentativeDomains.type, sourced from
+# interpro.xml.gz). Domain/Repeat are the real structural-functional units;
+# Family/Homologous_superfamily are broader groupings; the site/PTM types are
+# residue features, not domains.
+_PRIMARY_ENTRY_TYPES = frozenset({'Domain', 'Repeat'})
+_SITE_ENTRY_TYPES = frozenset({'Active_site', 'Binding_site', 'Conserved_site', 'PTM'})
+# A lower-tier entry is treated as redundant (and dropped) only when MORE THAN
+# this fraction of its residues is already covered by higher-tier entries. The
+# "majority" midpoint keeps a member-DB/family entry that annotates a region no
+# domain covers (e.g. KLF1's cd21581 N-terminal domain, which merely abuts the
+# zinc fingers), while still dropping a co-hit that sits on top of a domain
+# (e.g. TRIB2's two G3DSA kinase lobes over the Pkinase family).
+_REDUNDANT_COVER = 0.5
+
+
+def _aa_overlap(s1, e1, s2, e2):
+    """True if [s1,e1] and [s2,e2] overlap by at least one residue."""
+    return s1 <= e2 and s2 <= e1
+
+
+def _covered_fraction(s, e, intervals):
+    """Fraction of residues in [s,e] covered by the union of `intervals`."""
+    length = e - s + 1
+    if length <= 0:
+        return 0.0
+    segs = sorted((max(s, a), min(e, b)) for a, b in intervals if a <= e and b >= s)
+    covered = 0
+    cur = s - 1
+    for a, b in segs:
+        a = max(a, cur + 1)
+        if b >= a:
+            covered += b - a + 1
+            cur = b
+    return covered / length
+
+
+def filter_representative_domains(df_domains):
+    """
+    Reduce a single transcript's representative domains to a clean domain set
+    using the curated InterPro entry `type`, replacing the geometric
+    collapse_contained_domains() heuristic (the 2 AA / 85% overlap rule).
+
+    Priority ladder - per region, keep the best available annotation, and drop a
+    lower tier only where a higher tier already covers the MAJORITY of it
+    (>_REDUNDANT_COVER). This is "demote, don't delete": a member-DB or family
+    entry that annotates a region no domain covers is kept, so we never lose the
+    only annotation for a region (e.g. KLF1's cd21581, which carries the change).
+
+      Tier 1 PRIMARY : InterPro Domain / Repeat
+      Tier 2 PARENT  : InterPro Family / Homologous_superfamily (+ IPR of unknown
+                       type) - kept unless the majority is covered by PRIMARY
+      Tier 3 MEMBER  : non-InterPro member-DB hits (G3DSA/PTHR/SSF/cd/PF/...) -
+                       kept unless the majority is covered by kept PRIMARY+PARENT
+      dropped        : InterPro site/PTM types (residue features, not domains)
+
+    Then collapse genuine duplicates: two kept rows with the SAME domain_id that
+    overlap -> keep the longer (same accession at DISJOINT positions, e.g. two
+    RRM instances, is kept as two domains). Return sorted by AA_start.
+
+    Deliberately NOT handled here (left to the HMM/Pfam enrichment layer): cross-
+    transcript identity when canonical and compared annotate one physical domain
+    under different accessions (Pfam family from hmmscan is the stable key), and
+    surfacing an event region with no InterPro Domain entry (hmmscan recovers it).
+
+    Requires 'domain_id' and 'type' columns. If either is absent, or `type` is
+    entirely NULL (DomainEvent/DomainType fallback rows, or a DB built before the
+    type column existed), the frame is returned unchanged.
+    """
+    if len(df_domains) <= 1:
+        return df_domains
+    if 'domain_id' not in df_domains.columns or 'type' not in df_domains.columns:
+        return df_domains
+    if df_domains['type'].isna().all():
+        return df_domains
+
+    df = df_domains
+    dom_id = df['domain_id'].astype(str)
+    is_ipr = dom_id.str.startswith('IPR')
+    etype = df['type']
+    starts = df['AA_start']
+    ends = df['AA_end']
+
+    is_primary = is_ipr & etype.isin(_PRIMARY_ENTRY_TYPES)
+    is_site = is_ipr & etype.isin(_SITE_ENTRY_TYPES)
+    primary_idx = df.index[is_primary].tolist()
+    parent_idx = df.index[is_ipr & ~is_primary & ~is_site].tolist()  # Family/HSF/unknown-type IPR
+    member_idx = df.index[~is_ipr].tolist()                          # non-IPR member DBs
+
+    keep = list(primary_idx)
+    prim_iv = [(starts[i], ends[i]) for i in primary_idx]
+    for pi in parent_idx:                                            # tier 2
+        if _covered_fraction(starts[pi], ends[pi], prim_iv) <= _REDUNDANT_COVER:
+            keep.append(pi)
+    higher_iv = [(starts[i], ends[i]) for i in keep]                 # PRIMARY + kept PARENT
+    for mi in member_idx:                                            # tier 3
+        if _covered_fraction(starts[mi], ends[mi], higher_iv) <= _REDUNDANT_COVER:
+            keep.append(mi)
+
+    # collapse genuine duplicates (same accession, overlapping) -> keep the longer
+    keep.sort(key=lambda i: (starts[i], ends[i]))
+    dropped = set()
+    for a in range(len(keep)):
+        ia = keep[a]
+        if ia in dropped:
+            continue
+        for b in range(a + 1, len(keep)):
+            ib = keep[b]
+            if ib in dropped or dom_id[ia] != dom_id[ib]:
+                continue
+            if _aa_overlap(starts[ia], ends[ia], starts[ib], ends[ib]):
+                len_a = ends[ia] - starts[ia]
+                len_b = ends[ib] - starts[ib]
+                dropped.add(ib if len_a >= len_b else ia)
+                if ia in dropped:
+                    break
+
+    keep = [i for i in keep if i not in dropped]
+    return df.loc[keep].sort_values('AA_start')
+
+
 def _min_skip_none(values):
     present = [v for v in values if v is not None]
     return min(present) if present else None
@@ -435,8 +555,11 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
     t_min_aa, t_max_aa = get_aa_range(t_first_exon, t_last_exon)
     c_min_aa, c_max_aa = get_aa_range(c_first_exon, c_last_exon)
 
-    df_t_domains = collapse_contained_domains(domain_lookup(transcript_id))
-    df_c_domains = collapse_contained_domains(domain_lookup(canonical_transcript_id))
+    # collapse_contained_domains() (the geometric 2 AA / 85% overlap heuristic)
+    # is retained above but no longer called; the domain set is now reduced by
+    # curated InterPro entry type via filter_representative_domains().
+    df_t_domains = filter_representative_domains(domain_lookup(transcript_id))
+    df_c_domains = filter_representative_domains(domain_lookup(canonical_transcript_id))
 
     t_domains_round1 = _domains_in_aa_range(df_t_domains, t_min_aa, t_max_aa)
     c_domains_round1 = _domains_in_aa_range(df_c_domains, c_min_aa, c_max_aa)
