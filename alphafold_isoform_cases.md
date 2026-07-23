@@ -207,6 +207,16 @@ real, identity-orthogonal predictive power for fold change (impact did not). The
 remaining ceiling (does the *remainder* refold — the SRP9 class) still needs the
 isoform actually folded, which is what the TM ground truth already encodes.
 
+**Contact modularity is redundant with burial** (`extract_contacts.py`,
+`contact_features.csv`). Contacts from the changed region to the rest of the fold
+(Cβ<8Å) correlate with TM on their own (Spearman +0.46–0.48) and survive identity
+control (partial +0.18–0.25), but once burial is also controlled the partial drops
+to ~+0.10, and incremental R² over identity+burial is only +0.006 (0.308 → 0.314).
+Contacts and burial measure the same packing (mutual Spearman +0.42), so **burial
+is the compact summary of the canonical-structure geometry** — contacts (and, by
+extension, likely PAE, the one untested AF signal) add little on top. Burial is the
+signal worth carrying forward.
+
 ### Numeric score vs TM, identity control, and where the errors fall
 
 (`alphafold_benchmark/analyze_identity_control.py`, `bench_rich_results.csv`.)
