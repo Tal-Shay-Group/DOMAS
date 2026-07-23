@@ -358,36 +358,39 @@ def insertion_impact(inserted_len, inside_domain, junction_fold_state=None):
 
     hmm_change_impact is loss-based: an insertion removes no canonical Pfam
     coverage, so it scores 'none' there even for a large added segment. An
-    insertion is scored instead on the two signals that matter for added
-    sequence - how much was added, and where it lands:
+    insertion is scored instead on where the added residues land - because
+    insertions are usually tolerated: empirically only ~1 in 5 isoform insertions
+    changes the fold (most sit in exposed termini/linkers). So SIZE ALONE does not
+    imply disruption; the escalating factor is whether the residues land inside a
+    folded/Pfam domain.
 
-        size (inserted_len)              base level
-          >= 30 aa                         moderate
-          10 - 30 aa                       low
-          < 10 aa                          none (low only if inside a domain)
-        placement
-          inside a folded/Pfam domain      -> up one level (splits the fold)
-          disordered junction              -> down one level (tolerated linker/tail)
+        placement                              base level
+          outside any domain (terminus/linker)
+            >= 30 aa                             low
+            < 30 aa                              none
+          inside a Pfam domain
+            >= 30 aa                             moderate
+            < 30 aa                              low
+        junction fold-state
+          'folded'      -> up one level (max high)   [inserted into ordered structure]
+          'disordered'  -> down one level (min none) [inserted into a tolerant region]
 
     inside_domain: the inserted residues overlap a Pfam domain on the
     alternative sequence. An insertion within a structured domain disrupts the
     fold; one at a terminus or in a linker usually does not.
 
     junction_fold_state: UniProt fold-state ('folded'/'disordered'/None) of the
-    canonical residues flanking the insertion point - a disordered flank means
-    the insertion sits in a tolerant region.
+    canonical residues flanking the insertion point.
 
     Returns: 'none', 'low', 'moderate', or 'high'.
     """
     if inserted_len <= 0:
         return 'none'
-    if inserted_len >= 30:
-        level = 2
-    elif inserted_len >= 10:
-        level = 1
+    if inside_domain:
+        level = 2 if inserted_len >= 30 else 1
     else:
-        level = 1 if inside_domain else 0
-    if inside_domain and level < 3:
+        level = 1 if inserted_len >= 30 else 0
+    if junction_fold_state == 'folded' and level < 3:
         level += 1
     elif junction_fold_state == 'disordered' and level > 0:
         level -= 1
