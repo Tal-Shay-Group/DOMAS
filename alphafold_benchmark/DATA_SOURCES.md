@@ -75,7 +75,21 @@ Base FTP: `https://ftp.uniprot.org/pub/databases/uniprot/current_release/`
   scanned by `hmmsearch --cut_ga` for the impact score and SPADE. 19k+ families.
 - License: Pfam CC0.
 
-## 6. Literature search — resources identified (not all used)
+## 6. gnomAD — per-gene loss-of-function constraint
+
+- **File** — `gnomad.v2.1.1.lof_metrics.by_gene.txt.bgz` (~5 MB) from
+  `https://storage.googleapis.com/gcp-public-data--gnomad/release/2.1.1/constraint/`.
+  Columns used: `gene`, **`oe_lof_upper` (LOEUF)**, `pLI`. Gene symbol → UniProt
+  accession via the reference-proteome headers (17,142 accessions mapped) →
+  `gene_constraint` table. The non-circular gene-level feature for both calibrated
+  scores. License: gnomAD terms (freely available, CC0).
+
+## 6b. AlphaFold burial (derived from §3 structures)
+
+- Per-residue **RSA** (Shrake–Rupley via Biopython) computed from the 5,880 AF
+  structures → `afdb_rsa` table. No new download — same structures as §3.
+
+## 7. Literature search — resources identified (not all used)
 
 Via web search; catalogued for context / future work:
 - **ASpdb** — isoform-structure knowledgebase, >7,200 alt-isoform AF2 models with
@@ -89,7 +103,7 @@ Via web search; catalogued for context / future work:
 - **AlphaSync** — bioRxiv 2025.03.12.642845 (AFDB synced to UniProt).
 - **AF2/ESMFold/OmegaFold benchmark** — bioRxiv 2025.06.20.660709 (not isoform-specific).
 
-## 7. Considered but NOT retrieved
+## 8. Considered but NOT retrieved
 
 - **AlphaMissense** raw file — already built into `am_pathogenicity`; not re-downloaded.
 - **phyloP / phastCons** (UCSC bigWig) — proposed for cross-species conservation; the
@@ -108,8 +122,13 @@ Via web search; catalogued for context / future work:
 | `full_pairs.csv` | 11,068 runnable pairs with canonical changed-region spans |
 | `bench_full_results.csv` | per-pair DOMAS impact + kind vs TM |
 | `bench_rich_results.csv` | per-pair impact + drivers (coverage loss, region_am, func_site, …) |
-| `full_features.csv` | per-pair burial (RSA), buried_frac, DSSP secondary-structure |
+| `full_features.csv` / `sample_features.csv` | per-pair burial (RSA), buried_frac, DSSP secondary-structure |
 | `contact_features.csv` | per-pair contact-modularity features |
 | `predict_eval_results.txt` | cross-validated AUC / R² comparison |
 | `clinvar_enrichment_results.txt` | pathogenic vs benign enrichment |
+| `calib_model.json` / `foldchange_model.json` | shipped logistic coefficients for `impact_prob` / `fold_change_prob` |
+| `fit_calibrated.py` / `fit_foldchange.py` | fit + gene-grouped CV for the two scores |
+| `improve_proto.py` | peak-AM / gnomAD feature prototype (peak rejected) |
+| `ml_compare.py` | model-family comparison (logistic chosen over trees/NN) |
+| `variant_impact_contingency.py` / `variant_impact_by_score_decile.py` | pathogenic/benign × impact tables |
 | `domas_vs_tm.png` / `pred_vs_tm.png` | the two scatter figures |

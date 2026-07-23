@@ -164,6 +164,31 @@ pathogenic (vs categorical 38%). Wired into add_scores as a companion column.
 region_am dominates (+0.80 std coef), LOEUF the non-circular add (−0.42), burial
 +0.24, coverage-loss ~0.*
 
+**E23. Rigorous evaluation — gene-grouped CV.** Checked whether pair-level CV leaks
+(a protein's isoforms split across train/test; LOEUF is gene-level).
+→ *Gene-grouped AUC **0.765** vs pair-level 0.768 (−0.003): negligible leakage
+(~1.7 isoforms/protein). The ~0.77 is honest. Reported number switched to the
+gene-grouped one.*
+
+**E24. Second calibrated score — `fold_change_prob` (structural axis).** Same
+approach applied to the TM target: logistic over identity + burial + region_am +
+LOEUF + max_cov_loss → P(TM<0.5). (`fit_foldchange.py`, `foldchange_model.json`,
+`utils.fold_change_probability`.) Runtime identity from the trimmed changed region.
+→ *Gene-grouped AUC **0.777**, accuracy 74% (@0.5), well-calibrated. AM helps only
+**in combination** (suppressor: 0.54 alone, 0.70 with identity, 0.78 with
+identity+burial). **burial flips sign** vs impact_prob (−0.93 structural vs +0.24
+functional) — the two scores answer different questions. Wired into add_scores and
+shown on the gene PDF with a sign-flip footnote.*
+
+**E25. Model-family comparison.** logistic vs +interactions vs random forest vs
+gradient boosting vs hist-GB vs MLP neural net, gene-grouped CV, both targets.
+(`ml_compare.py`.)
+→ *Logistic **wins** functional (0.761; trees/NN 0.72–0.75) and loses only ~0.01
+structural (RF 0.798 vs logistic 0.787). With 4–6 monotone tabular features, tree
+ensembles and NNs add nothing; logistic kept for interpretability + native
+calibration. The ceiling is set by features/labels, not the algorithm. (Bayesian
+would add per-prediction uncertainty, not accuracy.)*
+
 ---
 
 ## Overall conclusion
@@ -177,10 +202,19 @@ region_am dominates (+0.80 std coef), LOEUF the non-circular add (−0.42), buri
 - **AlphaFold burial is the one structural feature worth adding** — identity-orthogonal
   for fold change (partial +0.30; AUC 0.697 → 0.755) and non-circular for the
   functional axis (+0.022, pathogenicity-specific).
-- **Ceilings.** Cheap features predict fold change to ~AUC 0.75 / R² 0.31; the residual
-  ("does the remainder refold" — the SRP9 class) needs the isoform actually folded,
-  which is what the TM label already encodes. Functional truth is positive-only, so
-  these are recall/enrichment results, not specificity.
+- **Ceilings.** Cheap features predict fold change to ~AUC 0.79 (calibrated model) /
+  R² 0.31; the residual ("does the remainder refold" — the SRP9 class) needs the
+  isoform actually folded, which is what the TM label already encodes. Functional
+  truth is positive-only, so these are recall/enrichment results, not specificity.
+- **Two shipped calibrated scores.** DOMAS now emits `impact_prob` (functional /
+  pathogenicity, gene-grouped AUC 0.765) and `fold_change_prob` (structural /
+  P(TM<0.5), 0.777) alongside the categorical `impact`, both logistic (chosen
+  empirically over trees/NN) and well-calibrated. Burial enters them with opposite
+  signs — the core duality (buried = fold-preserving but pathogenic-variant-rich).
+- **The improvement lever is features/labels, not the model.** Un-quantising
+  recovered the biggest gain (0.585 → 0.75); gnomAD LOEUF and burial add small
+  orthogonal signal; peak-AM and fancier ML add ~nothing. Next real gains need
+  cross-species conservation and/or better functional labels.
 
 ## Open threads (not done)
 

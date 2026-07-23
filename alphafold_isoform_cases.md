@@ -503,6 +503,25 @@ investigation: a buried changed region *harbours pathogenic variants* (functiona
 calibrated probabilities — `impact_prob` for functional relevance and
 `fold_change_prob` for structural change — alongside the categorical `impact`.
 
+**Why logistic regression** (`ml_compare.py`). Both scores use L2-regularised
+logistic regression, chosen empirically over random forest, gradient boosting,
+hist-gradient-boosting and a small neural net (all gene-grouped CV):
+
+| model | Functional AUC | Structural AUC |
+|-------|:---:|:---:|
+| **logistic (chosen)** | **0.761** | 0.787 |
+| logistic + interactions | 0.760 | 0.788 |
+| random forest | 0.741 | 0.798 |
+| gradient boosting | 0.748 | 0.796 |
+| neural net (MLP 32,16) | 0.732 | 0.794 |
+
+Logistic wins outright on the functional target and loses only ~0.01 on the
+structural one, while keeping signed, interpretable coefficients (the sign-flip
+story) and native calibration. With just 4–6 monotone tabular features, tree
+ensembles and NNs have nothing extra to exploit — the ceiling is set by the
+features/labels, not the algorithm. (A Bayesian logistic would give the same
+point AUC and add only per-prediction uncertainty, not accuracy.)
+
 ---
 
 ## Sources

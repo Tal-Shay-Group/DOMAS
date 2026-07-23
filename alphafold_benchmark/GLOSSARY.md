@@ -102,6 +102,22 @@ grouped by area. Definitions are scoped to how the term was used here.
   pathogenic variant" doesn't prove neutrality); limits specificity claims.
 - **Contingency table (row% / col%)** — cross-tab of two categoricals; row% within a
   row, col% within a column.
+- **Calibration** — whether a predicted probability matches the observed rate (a "0.6"
+  really means 60%). Logistic is naturally calibrated; trees/NNs usually need
+  post-hoc Platt/isotonic calibration.
+- **Gene-grouped (grouped) CV** — cross-validation where all of a gene's isoforms sit
+  in one fold, so no gene is in both train and test. The leakage-free evaluation when
+  a feature is gene-level (LOEUF) — used for the shipped scores.
+- **Suppressor / interaction effect** — a feature useless *alone* that becomes useful
+  *in combination* (here AM: ~0 for TM by itself, but +0.03 AUC on top of
+  identity+burial). Logistic captures it only via explicit interaction terms; trees
+  capture it natively.
+- **Random forest / gradient boosting / hist-gradient-boosting** — tree-ensemble
+  classifiers (sklearn); tested and *not* better here (few, monotone features).
+- **Neural network / MLP (multi-layer perceptron)** — feed-forward net; tested (32,16)
+  and no better — wrong regime for 6 tabular features.
+- **Bayesian inference** — gives posterior *uncertainty* on predictions/coefficients;
+  same point accuracy as frequentist logistic, so not pursued for AUC.
 
 ## Tools / software
 
@@ -118,6 +134,8 @@ grouped by area. Definitions are scoped to how the term was used here.
 - **freesasa** — fast C SASA library (failed to build here; Biopython used instead).
 - **pandas / numpy** — dataframes / numerical arrays.
 - **matplotlib** — plotting (hexbin, boxplots).
+- **scikit-learn** — the ML library used for the model-family comparison
+  (`GroupKFold`, `LogisticRegression`, tree ensembles, `MLPClassifier`, `roc_auc_score`).
 - **PyMuPDF (`fitz`)** — read/rasterize PDFs (extract text, render benchmark PDFs to PNG).
 - **pyBigWig** — remote/local bigWig reader (proposed for phyloP; not run).
 - **curl / xargs -P** — parallel bulk download of AF structures.
@@ -140,6 +158,12 @@ grouped by area. Definitions are scoped to how the term was used here.
 - **InterPro** — integrative domain database; supplies representative-domain `type`.
 - **ClinVar** — clinical variant archive (humsavar aggregates its interpretations).
 - **OMIM** — Mendelian-disease/gene catalog (referenced by humsavar disease names).
+- **gnomAD** — population variation database; source of per-gene loss-of-function
+  constraint. Provisioned into the `gene_constraint` table.
+- **LOEUF** (`oe_lof_upper`) — gnomAD's observed/expected LoF upper-bound; **lower =
+  more loss-intolerant** (dosage-sensitive gene). The non-circular gene-level feature.
+- **pLI** — gnomAD probability a gene is LoF-intolerant (near 1 = intolerant); weaker
+  than LOEUF here.
 - **ASpdb** — isoform-structure knowledgebase (>7,200 alt-isoform AF2 models +
   structural-alteration calls); identified as an independent cross-check, not integrated.
 - **APPRIS / TRIFID** — principal-isoform annotation; **SPADE** is its Pfam
@@ -157,10 +181,21 @@ grouped by area. Definitions are scoped to how the term was used here.
 - **DoChaP** — domain-charting database; `DB_merged.sqlite` holds Genes / Transcripts
   / Proteins / **RepresentativeDomains** (InterPro-keyed) built by
   `RepresentativeDomainsBuilder`.
-- **enrichment.sqlite** — DOMAS's local evidence DB: `afdb_plddt`, `am_pathogenicity`,
-  `uniprot_feature`, `uniprot_alias`, `ensembl_sequence`, `pfam_match`, `source_meta`.
+- **enrichment.sqlite** — DOMAS's local evidence DB: `afdb_plddt`, **`afdb_rsa`**
+  (per-residue relative solvent accessibility / burial), `am_pathogenicity`,
+  `uniprot_feature`, `uniprot_alias`, `ensembl_sequence`, **`gene_constraint`**
+  (gnomAD LOEUF/pLI per accession), `pfam_match`, `source_meta`.
 - **impact level** — DOMAS's categorical change severity: `none` / `low` / `moderate` /
   `high` (plus `gain`, `n/a`), from `hmm_change_impact`.
+- **`impact_prob`** — calibrated **functional** probability (pathogenicity-relevance),
+  logistic over region_am + LOEUF + max_cov_loss + buried_frac
+  (`utils.impact_probability`, gene-grouped AUC 0.765).
+- **`fold_change_prob`** — calibrated **structural** probability, P(TM-score < 0.5),
+  logistic over identity + burial + region_am + LOEUF + max_cov_loss
+  (`utils.fold_change_probability`, gene-grouped AUC 0.777). Burial enters with the
+  **opposite sign** to `impact_prob`.
+- **`buried_frac` / `region_rsa`** — fraction of the changed region with RSA<0.25 /
+  mean RSA, from `afdb_rsa` (AlphaFold burial).
 - **`changed_region`** — the divergent span between canonical and isoform; now returns
   canonical + alt spans and a **kind** (`substitution` / `insertion` / `deletion`).
 - **`insertion_impact`** — scores alt-only added residues (softened to escalate on
