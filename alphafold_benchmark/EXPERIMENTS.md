@@ -121,6 +121,31 @@ DOMAS finds functionally important regions, not merely variant-dense ones.*
 → *75% of pathogenic-overlapping splicing events are high-impact (vs 3% none); the
 pathogenic share within a column rises none 7% → high 28%, benign stays diffuse.*
 
+## Phase 7 — fold burial into the scorer, and its limits
+
+**E19. Incorporate burial into the impact score.** Added `afdb_rsa` (per-residue
+RSA) + `Enricher.rsa`; `hmm_change_impact` weights by burial of the changed region
+(buried < 0.30 RSA → raise, exposed > 0.50 → lower). Tried (A) burial as a fallback
+below AlphaMissense, then (B) a fall-through ladder where an inconclusive AM yields
+to burial.
+→ *Direction is function-correct (buried regions overlap pathogenic variants more:
+buried_frac 0.38 vs 0.21). Effect on 11k: exposed changes downgraded
+(moderate→none). On disease proteins, B cleans the high bucket (benign high −47,
+pathogenic +3). **But the predictive gain is marginal (+0.001 AUC)** because
+AlphaMissense — top of the ladder, 92% coverage — is a correlated
+functional-constraint signal that already carries burial's information (burial is
+to AM what contacts were to burial: largely redundant). Kept B; burial's
+non-redundant value is the ~8% of pairs lacking AM, plus being non-circular.*
+
+**E20. Enrichment signal vs. classifier (50:50 prior).** Asked the harder question:
+given a region overlaps *some* variant, can impact call pathogenic vs benign?
+→ *No — near chance. Both classes pile into moderate/high (P(mod-or-high|patho)=95%,
+|benign=84%), specificity ~16%. Under a balanced prior, "impact ≥ moderate →
+pathogenic" has precision 53% (wrong 47%); "= high" 55%. The length-controlled
+enrichment (E16–E17) was largely region-size; conditioning on variant-presence and
+balancing classes removes it. **DOMAS impact is a coarse enrichment/prioritisation
+signal, never a per-event pathogenic-vs-benign classifier.***
+
 ---
 
 ## Overall conclusion

@@ -348,20 +348,46 @@ in; **burial is structure-only and non-circular**, making its +0.022 the cleaner
 result. (3) Positive-only: "no known variant" is not proof of neutrality, so this
 measures recall/enrichment on functional positives, not specificity.
 
-**Per-pair contingency** (`variant_impact_contingency.py`; unit = one splicing
-event; row% = share within the class, col% = pathogenic/benign split within that
-impact level; proteins: 552 pathogenic, 1,674 benign):
+**Per-pair contingency** (`variant_impact_contingency.py`; impact scored *with
+burial*, Option B; unit = one splicing event; row% = share within the class,
+col% = pathogenic/benign split within that impact level; proteins: 552 pathogenic,
+1,674 benign):
 
 | variant class \ DOMAS impact | none | low | moderate | high | total |
 |------------------------------|:----:|:---:|:--------:|:----:|:-----:|
-| **Pathogenic** | 28 (r3% c7%) | 13 (r1% c14%) | 188 (r21% c25%) | **678 (r75% c28%)** | 907 |
-| **Benign** | 355 (r13% c93%) | 82 (r3% c86%) | 561 (r20% c75%) | 1748 (r64% c72%) | 2746 |
-| column total | 383 | 95 | 749 | 2426 | 3653 |
+| **Pathogenic** | 29 (r3% c7%) | 13 (r1% c14%) | 184 (r20% c23%) | **681 (r75% c29%)** | 907 |
+| **Benign** | 369 (r13% c93%) | 77 (r3% c86%) | 599 (r22% c77%) | 1701 (r62% c71%) | 2746 |
+| column total | 398 | 90 | 783 | 2382 | 3653 |
 
 75% of pathogenic-overlapping events are high-impact (vs 3% none); the pathogenic
-share within a column climbs monotonically none 7% → high 28%, while benign stays
+share within a column climbs monotonically none 7% → high 29%, while benign stays
 diffuse. (Rows are different-sized universes, so the column *trend* is the signal,
 not the absolute split; a region can overlap both classes.)
+
+### An enrichment signal, NOT a classifier
+
+The enrichment above is real but must not be over-read. Everything so far tests
+*variant-overlap presence* (does the region overlap a pathogenic variant),
+controlling for region length. A harder, clinically-useful question is: **given a
+region overlaps some variant, is it the pathogenic or the benign one?** There the
+score is near chance, because **both classes pile into moderate/high**:
+`P(mod-or-high | pathogenic) = 95%` but `P(mod-or-high | benign) = 84%` — it says
+"important" to almost everything, so specificity is only ~16%.
+
+Under an assumed **50:50 pathogenic:benign prior** (using the class-conditional
+row rates, so base-rate-independent):
+
+| rule → call Pathogenic | precision (right) | wrong | sensitivity | specificity | balanced acc |
+|------------------------|:-----------------:|:-----:|:-----------:|:-----------:|:------------:|
+| impact ≥ moderate | 53.2% | 46.8% | 95.4% | 16.2% | 55.8% |
+| impact = high     | 54.8% | 45.2% | 75.1% | 38.1% | 56.6% |
+
+So as a pathogenic-vs-benign *classifier* DOMAS impact is barely above a coin flip
+(~53% precision, ~47% wrong). The length-controlled enrichment (E16–E17) was
+largely carried by region size; conditioning on "a variant is present" and forcing
+class balance removes that crutch. **Correct framing: impact is a coarse
+enrichment / prioritisation signal ("these high-impact events are enriched for
+functional consequence — look here first"), never a per-event classification.**
 
 ---
 
