@@ -389,6 +389,30 @@ class balance removes that crutch. **Correct framing: impact is a coarse
 enrichment / prioritisation signal ("these high-impact events are enriched for
 functional consequence — look here first"), never a per-event classification.**
 
+**Finer view — by continuous DOMAS-score decile** (`variant_impact_by_score_decile.py`;
+score = the reconstruction coverage-loss + functional-site + AM + insertion, binned
+into 10 equal-count deciles; c% = pathogenic share within the bin; overall base 25%):
+
+| score decile (range) | Pathogenic (r%, c%) | Benign (r%, c%) | bin N | % pathogenic |
+|----------------------|:-------------------:|:---------------:|:-----:|:------------:|
+| 1 · [0.0–1.2)   | 20 (2%, 5%)   | 346 (13%, 95%) | 366 | **5%** |
+| 2 · [1.2–25)    | 122 (13%, 20%)| 475 (17%, 80%) | 597 | 20% |
+| 3 · [25–29)     | 40 (4%, 30%)  | 93 (3%, 70%)   | 133 | 30% |
+| 4 · [29–45)     | 117 (13%, 32%)| 253 (9%, 68%)  | 370 | 32% |
+| 5 · [45–64)     | 106 (12%, 29%)| 256 (9%, 71%)  | 362 | 29% |
+| 6 · [64–86)     | 117 (13%, 32%)| 247 (9%, 68%)  | 364 | 32% |
+| 7 · [86–103)    | 78 (9%, 21%)  | 288 (10%, 79%) | 366 | 21% |
+| 8 · [103–122)   | 95 (10%, 24%) | 296 (11%, 76%) | 391 | 24% |
+| 9 · [122–126)   | 73 (8%, 21%)  | 267 (10%, 79%) | 340 | 21% |
+| 10 · [126–190)  | 139 (15%, 38%)| 225 (8%, 62%)  | 364 | **38%** |
+
+The score's real resolution is at the **bottom** — the lowest decile (score ≈ 0) is
+95% benign, so a near-zero score reliably means benign. Above that it **plateaus and
+is non-monotonic** (~20–38%, dips at deciles 7 and 9), and **even the top decile is
+only 38% pathogenic** — a maximal DOMAS score is still more likely benign. Same
+conclusion as the categorical view, sharpened: good at flagging the benign low end,
+weak resolution across the moderate-to-high range.
+
 ---
 
 ## Sources
