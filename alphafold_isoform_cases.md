@@ -348,6 +348,21 @@ in; **burial is structure-only and non-circular**, making its +0.022 the cleaner
 result. (3) Positive-only: "no known variant" is not proof of neutrality, so this
 measures recall/enrichment on functional positives, not specificity.
 
+**Per-pair contingency** (`variant_impact_contingency.py`; unit = one splicing
+event; row% = share within the class, col% = pathogenic/benign split within that
+impact level; proteins: 552 pathogenic, 1,674 benign):
+
+| variant class \ DOMAS impact | none | low | moderate | high | total |
+|------------------------------|:----:|:---:|:--------:|:----:|:-----:|
+| **Pathogenic** | 28 (r3% c7%) | 13 (r1% c14%) | 188 (r21% c25%) | **678 (r75% c28%)** | 907 |
+| **Benign** | 355 (r13% c93%) | 82 (r3% c86%) | 561 (r20% c75%) | 1748 (r64% c72%) | 2746 |
+| column total | 383 | 95 | 749 | 2426 | 3653 |
+
+75% of pathogenic-overlapping events are high-impact (vs 3% none); the pathogenic
+share within a column climbs monotonically none 7% → high 28%, while benign stays
+diffuse. (Rows are different-sized universes, so the column *trend* is the signal,
+not the absolute split; a region can overlap both classes.)
+
 ---
 
 ## Sources
