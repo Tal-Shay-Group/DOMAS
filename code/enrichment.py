@@ -27,7 +27,7 @@ import pandas as pd
 import build  # _parse_hmmsearch_domtbl (bitscores)
 from junction_analisys import NON_COMPARISON_EVENTS
 from utils import (calc_spade_score, hmm_change_impact, insertion_impact,
-                   impact_probability)
+                   impact_probability, fold_change_probability)
 
 _PRIMARY_FT_SKIP = {'CHAIN', 'SIGNAL', 'Chain', 'Signal'}
 _IMPACT_RANK = {'none': 0, 'gain': 1, 'low': 1, 'moderate': 2, 'high': 3}
@@ -392,7 +392,7 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
     # impact per (canonical, compared): worst severity across changed Pfam
     # families, structure-weighted by UniProt fold-state (else pLDDT) and raised
     # when the changed region hits a UniProt functional residue.
-    impact, func_col, am_col, prob_col = {}, {}, {}, {}
+    impact, func_col, am_col, prob_col, fold_col = {}, {}, {}, {}, {}
     for canon, comp in {(r['canonical_transcript_id'], r['transcript_id'])
                         for _, r in analyzable[['canonical_transcript_id', 'transcript_id']].dropna().iterrows()}:
         cm = {m[0]: m for m in matches.get(canon, [])}
@@ -402,10 +402,14 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
         # region-level signals over the changed span: UniProt fold-state +
         # functional sites, and mean AlphaMissense constraint (if provisioned).
         reg = Enricher.changed_region(seqs.get(canon), seqs.get(comp))
-        fold_state, sites, region_am, region_rsa, buried_frac = None, [], None, None, None
+        fold_state, sites, region_am, region_rsa, buried_frac, identity = None, [], None, None, None, None
         added_label = 'none'
         if reg and reg['canon']:
             lo, hi = reg['canon']
+            cs, alt_seq = seqs.get(canon), seqs.get(comp)
+            if cs and alt_seq:                   # sequence identity (%) from the trimmed change
+                shared = (lo - 1) + (len(cs) - hi)
+                identity = 100.0 * shared / max(len(cs), len(alt_seq))
             fold_state = e.fold_state(uni, lo, hi)
             sites = e.functional_sites(uni, lo, hi)
             am_arr = e.am_pathogenicity(uni)
@@ -467,12 +471,18 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
             if _IMPACT_RANK.get(lab, 0) > best_rank:
                 best_rank, best_label = _IMPACT_RANK[lab], lab
         impact[(canon, comp)] = best_label
-        # calibrated continuous companion score (pathogenicity-relevance prob);
-        # defined only where there is a canonical changed region (not pure insertions).
-        prob_col[(canon, comp)] = (
-            impact_probability(region_am=region_am, loeuf=e.loeuf(uni),
-                               max_cov_loss=max_cov_loss, buried_frac=buried_frac)
-            if reg and reg['canon'] else '')
+        # two calibrated continuous companion scores, defined only where there is a
+        # canonical changed region (not pure insertions): impact_prob = functional
+        # (pathogenicity-relevance), fold_change_prob = structural (P(TM<0.5)).
+        loeuf = e.loeuf(uni)
+        if reg and reg['canon']:
+            prob_col[(canon, comp)] = impact_probability(
+                region_am=region_am, loeuf=loeuf, max_cov_loss=max_cov_loss, buried_frac=buried_frac)
+            fold_col[(canon, comp)] = fold_change_probability(
+                identity=identity, buried_frac=buried_frac, mean_rsa=region_rsa,
+                region_am=region_am, loeuf=loeuf, max_cov_loss=max_cov_loss)
+        else:
+            prob_col[(canon, comp)] = fold_col[(canon, comp)] = ''
 
     def _blank_nc(row, val):
         return '' if row['event_type'] in NON_COMPARISON_EVENTS else val
@@ -481,6 +491,7 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
     df['spade_compared'] = df.apply(lambda r: _blank_nc(r, spade.get(r['transcript_id'], '')), axis=1)
     df['impact'] = df.apply(lambda r: _blank_nc(r, impact.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df['impact_prob'] = df.apply(lambda r: _blank_nc(r, prob_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
+    df['fold_change_prob'] = df.apply(lambda r: _blank_nc(r, fold_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df['functional_sites'] = df.apply(lambda r: _blank_nc(r, func_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df['region_am_mean'] = df.apply(lambda r: _blank_nc(r, am_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df.to_csv(out_csv, index=False)

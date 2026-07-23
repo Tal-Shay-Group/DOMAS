@@ -460,6 +460,49 @@ constructed `domas_score` 38% → calibrated `impact_prob` **58%**.
 it stays honestly bounded (semi-circular via AM, positive-only labels), but it is
 calibrated and monotonic where the categorical score was neither.
 
+### Second calibrated score: `fold_change_prob` (structural axis)
+
+The same calibration approach, applied to the **TM (fold-change)** target, gives a
+second companion score `fold_change_prob` = P(TM < 0.5). `utils.fold_change_probability`
+over identity + burial (buried_frac, mean_rsa) + region_am + LOEUF + max_cov_loss,
+trained on the 10,232 TM-labelled changed regions. Fit/eval in
+`alphafold_benchmark/fit_foldchange.py`, coefficients in `foldchange_model.json`.
+Runtime `identity` is computed from the trimmed changed region (correlates 0.81
+with the paper's alignment identity).
+
+**Gene-grouped 5-fold CV AUC = 0.777**, well-calibrated. Notably AM helps here only
+*in combination* — useless alone (0.54) or with identity (0.70), but identity +
+burial + AM = 0.78 (a suppressor effect). Confusion matrix (out-of-fold, threshold
+P ≥ 0.5; base rate TM<0.5 = 34%, majority-class accuracy 66%):
+
+| | actual CHANGE | actual PRESERVED |
+|--------------------|:---:|:---:|
+| **predicted CHANGE** | TP 1,580 | FP 745 |
+| **predicted PRESERVED** | FN 1,874 | TN 6,033 |
+
+**Accuracy 74%**, sensitivity 0.46, specificity 0.89, precision 0.68, balanced 0.67.
+(Threshold 0.5 is conservative given the 34% base rate — high specificity, half the
+changes missed; the AUC 0.777 is the threshold-independent summary.)
+
+**The two models are different questions — and burial flips sign** (standardised
+logistic coefficients):
+
+| feature | `impact_prob` (functional / pathogenic) | `fold_change_prob` (structural / TM) |
+|--------------|:---:|:---:|
+| identity     | —      | **−0.67** |
+| region_am    | **+0.80** | +0.46 |
+| buried_frac  | **+0.24** | **−0.93** |
+| mean_rsa     | —      | +0.18 |
+| loeuf        | **−0.42** | +0.11 |
+| max_cov_loss | −0.07  | **+0.54** |
+| intercept    | −1.19  | −0.85 |
+
+The **buried_frac sign flip** is the biological duality of the whole
+investigation: a buried changed region *harbours pathogenic variants* (functional,
++0.24) yet *preserves the fold* (structural, −0.93). DOMAS now emits both honest,
+calibrated probabilities — `impact_prob` for functional relevance and
+`fold_change_prob` for structural change — alongside the categorical `impact`.
+
 ---
 
 ## Sources

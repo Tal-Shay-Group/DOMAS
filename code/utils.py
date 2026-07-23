@@ -452,6 +452,45 @@ def impact_probability(region_am=None, loeuf=None, max_cov_loss=None, buried_fra
     return round(1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, z)))), 4)
 
 
+# Calibrated logistic model for the fold-change probability (structural axis):
+# P(the alternative isoform has a different fold, TM-score < 0.5). Trained on
+# 10,232 changed-regions labelled by the Genome Biology 2025 AlphaFold TM-scores,
+# features standardised, missing imputed to the training median. Gene-grouped
+# 5-fold CV AUC 0.777, accuracy 74% (@0.5), well-calibrated. This is a DIFFERENT
+# question from impact_probability: burial flips sign - a buried changed region
+# PRESERVES the fold here (coef -0.93) but harbours pathogenic variants there
+# (+0.24). Regenerate with alphafold_benchmark/fit_foldchange.py.
+_FOLD_CHANGE_MODEL = {
+    'features': ['identity', 'buried_frac', 'mean_rsa', 'region_am', 'loeuf', 'max_cov_loss'],
+    'median':   [75.0, 0.236, 0.4509, 0.483, 0.884, 11.0],
+    'mean':     [66.3421, 0.2584, 0.4678, 0.481, 0.9085, 33.2563],
+    'std':      [28.0247, 0.2339, 0.1819, 0.1855, 0.4535, 39.2996],
+    'coef':     [-0.6662, -0.9294, 0.1828, 0.4646, 0.114, 0.537],
+    'intercept': -0.8508,
+}
+
+
+def fold_change_probability(identity=None, buried_frac=None, mean_rsa=None,
+                            region_am=None, loeuf=None, max_cov_loss=None):
+    """Calibrated probability (0-1) that the alternative isoform adopts a DIFFERENT
+    fold (AlphaFold TM-score < 0.5) - the structural companion to
+    impact_probability (which is functional/pathogenicity). `identity` is the
+    sequence identity (%) between the canonical and alternative protein. A missing
+    feature is imputed to the training median. See `_FOLD_CHANGE_MODEL`.
+
+    Returns a float in [0, 1], or None if every feature is missing.
+    """
+    m = _FOLD_CHANGE_MODEL
+    vals = [identity, buried_frac, mean_rsa, region_am, loeuf, max_cov_loss]
+    if all(v is None for v in vals):
+        return None
+    z = m['intercept']
+    for i, v in enumerate(vals):
+        x = m['median'][i] if v is None else v          # impute missing to the median
+        z += m['coef'][i] * ((x - m['mean'][i]) / m['std'][i])
+    return round(1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, z)))), 4)
+
+
 def calc_spade_score(domains_by_isoform):
     """SPADE-style per-isoform Pfam domain-integrity score.
 
