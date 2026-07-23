@@ -288,6 +288,68 @@ ground truth — the visual/experimental standard the structure biologist named.
 
 ---
 
+## Functional axis — pathogenic-variant overlap (the first positive result)
+
+TM measures *fold*, not *biological significance*; on TM, impact added nothing
+beyond identity. So we tested the axis DOMAS is actually for: does the changed
+region harbour disease variants? Label = the changed region overlaps a
+**pathogenic/likely-pathogenic (LP/P)** variant from UniProt **humsavar** (33,233
+LP/P variants, annotated in canonical coordinates — no genomic mapping needed).
+Restricted to proteins that have ≥1 LP/P variant (so a positive is possible).
+`alphafold_benchmark/clinvar_enrichment.py`.
+
+Coverage: of 10,233 non-insertion pairs, **2,023 pairs (998 disease proteins)**
+are testable; **907 (44.8%)** overlap a pathogenic variant.
+
+**Impact tracks pathogenic overlap strongly** — raw rate rises none 8.5% → low
+17.8% → moderate 34.1% → **high 63.5%** (7.5×). Region length is a big confound
+(longer regions catch more variants; AUC 0.813 alone), but the enrichment
+**survives length control** — within every length band:
+
+| region length | none | moderate | high |
+|---------------|:----:|:--------:|:----:|
+| 1–50 aa   | 0.05 | 0.17 | 0.31 |
+| 50–120 aa | 0.15 | 0.28 | 0.54 |
+| 120–300 aa| 0.33 | 0.69 | 0.73 |
+| 300+ aa   | —    | 0.72 | 0.91 |
+
+Multivariate 5-fold CV AUC for predicting overlap (disease proteins):
+
+| model | AUC |
+|-------|:---:|
+| region length alone | 0.813 |
+| length + identity (baseline) | 0.817 |
+| baseline + DOMAS impact | 0.833 |
+| baseline + burial | 0.839 |
+| baseline + impact + burial | 0.841 |
+
+**The finding:** unlike on TM (where impact added ~0 after identity control),
+impact adds real signal here (+0.016 AUC over baseline; strong within-band
+separation), and burial adds even more (+0.022). This is consistent with impact
+being a **functional-disruption** score, not a fold predictor — validated for the
+first time on an independent, non-structural label.
+
+**Benign contrast — the specificity check.** Repeating the test with *benign*
+(LB/B) variants (5,924 pairs, 3,103 proteins) rules out "impact just finds
+variant-dense regions." At fixed length (1–50 aa band), impact separates
+**pathogenic** overlap 6× (none 0.05 → high 0.31) but is **flat for benign**
+(none 0.17 → high 0.17). Multivariate, **both features are pathogenicity-specific**:
+impact adds **+0.016 AUC for pathogenic** overlap but **−0.001 for benign**;
+burial adds **+0.022 for pathogenic** but **+0.000 for benign**. Benign variants
+are spread everywhere (none-impact regions overlap them 28% vs 8.5% for
+pathogenic), and neither feature carries information about their location. So the
+enrichment is **pathogenicity-specific**, not variant density — DOMAS is finding
+functionally important regions, not just polymorphic ones.
+
+**Caveats.** (1) Length dominates and must be controlled (done). (2) *Semi-circular*:
+impact uses UniProt functional residues (`func_site`) as a feature, and pathogenic
+variants cluster at functional sites — so impact's contribution is partly built
+in; **burial is structure-only and non-circular**, making its +0.022 the cleaner
+result. (3) Positive-only: "no known variant" is not proof of neutrality, so this
+measures recall/enrichment on functional positives, not specificity.
+
+---
+
 ## Sources
 
 - **Cases 1–7:** *Predicting the structural impact of human alternative
