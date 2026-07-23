@@ -433,14 +433,24 @@ What was tried and what survived (`improve_proto.py`):
 
 The shipped model: **5-fold CV AUC 0.769**, well-calibrated (predicted prob tracks
 observed rate), and the deciles are now **monotonic** with the top decile at **58%
-pathogenic** (vs the categorical score's 38%):
+pathogenic** (vs the categorical score's 38%). Full per-pair decile table
+(r% = share within class, c% = pathogenic share within bin; patho 907, benign 2,746):
 
-| impact_prob decile | % pathogenic |
-|--------------------|:------------:|
-| 1 (0.02–0.07) | 4% |
-| 5 (0.19–0.24) | 19% |
-| 8 (0.35–0.44) | 38% |
-| 10 (0.58–0.90) | **58%** |
+| impact_prob decile (range) | Pathogenic (r%, c%) | Benign (r%, c%) | bin N | % pathogenic |
+|----------------------------|:-------------------:|:---------------:|:-----:|:------------:|
+| 1 · [0.02–0.07) | 14 (2%, 4%) | 352 (13%, 96%) | 366 | 4% |
+| 2 · [0.07–0.11) | 29 (3%, 8%) | 336 (12%, 92%) | 365 | 8% |
+| 3 · [0.11–0.15) | 31 (3%, 8%) | 334 (12%, 92%) | 365 | 8% |
+| 4 · [0.15–0.19) | 60 (7%, 16%) | 305 (11%, 84%) | 365 | 16% |
+| 5 · [0.19–0.24) | 68 (7%, 19%) | 299 (11%, 81%) | 367 | 19% |
+| 6 · [0.24–0.29) | 95 (10%, 26%) | 269 (10%, 74%) | 364 | 26% |
+| 7 · [0.29–0.35) | 110 (12%, 30%) | 262 (10%, 70%) | 372 | 30% |
+| 8 · [0.35–0.44) | 135 (15%, 38%) | 223 (8%, 62%) | 358 | 38% |
+| 9 · [0.44–0.58) | 151 (17%, 41%) | 214 (8%, 59%) | 365 | 41% |
+| 10 · [0.58–0.90) | 214 (24%, 58%) | 152 (6%, 42%) | 366 | **58%** |
+
+Top-decile % pathogenic across the three scores: categorical high bucket 29% →
+constructed `domas_score` 38% → calibrated `impact_prob` **58%**.
 
 `impact_prob` is a companion to (not a replacement for) the categorical `impact`;
 it stays honestly bounded (semi-circular via AM, positive-only labels), but it is
