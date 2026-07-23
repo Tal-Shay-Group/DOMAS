@@ -113,6 +113,150 @@ professor said only visual AlphaFold inspection is definitive.
 
 ---
 
+## Scaled benchmark — 11,068 isoform pairs vs TM-score
+
+The 7 hand-picked cases are too few to measure specificity, so the whole
+Genome Biology 2025 dataset was turned into a benchmark. Its supplementary
+**Table S4** lists **11,161 isoforms (5,923 genes)** with an exact UniProt
+isoform ID, TM-score, sequence identity, pLDDT and structural features;
+**Table S2** is 328 curated high-identity / low-TM "real change" outliers. Data
+in `alphafold_benchmark/` (`table_s4_all.csv`, `table_s2_changes.csv`), runner
+`alphafold_benchmark/run_tm_benchmark.py`, per-pair output `bench_full_results.csv`.
+
+No DoChaP transcript is needed to score DOMAS impact vs TM: impact needs only the
+two protein sequences + the canonical UniProt accession (the enrichment key).
+Isoform sequences came from UniProt `varsplic` (99% coverage), canonicals from
+the human reference proteome (100%). One hmmsearch over 16,948 unique sequences,
+then the updated (insertion-aware) impact scorer on **11,068 runnable pairs**.
+
+**Verdict = TM<0.5 (CHANGE) vs TM≥0.5 (PRESERVED). Base rate of CHANGE = 32.8%.**
+
+| operating point | sensitivity | specificity | precision | lift over base |
+|-----------------|:-----------:|:-----------:|:---------:|:--------------:|
+| impact ≥ moderate | 0.79 | 0.29 | 35% | 1.08× |
+| impact = high     | 0.57 | 0.58 | 40% | 1.21× |
+
+Sharper cuts:
+- **Curated real-changes (Table S2, 327):** only **68%** flagged ≥moderate (28%
+  scored "none"). The pilot's 3/3 sensitivity was small-sample luck.
+- **Clean negatives (TM≥0.95, 392):** only **51%** correctly "none/low" — nearly
+  half of near-identical-fold isoforms get flagged moderate/high.
+- **Monotone but shallow:** mean impact-rank falls 2.26 (TM<0.4) → 1.22 (TM≥0.95).
+  Signal exists; it is weak.
+
+**The dominant confound is sequence identity.** Mean identity by impact label:
+none 86% · moderate 81% · **high 62.6%**. Impact largely tracks how much sequence
+diverged — and TM tracks identity too (the paper's central finding), so most of
+the impact↔TM association is both variables following identity. Controlling for
+identity, DOMAS adds little independent *structural* signal.
+
+**Honest conclusion.** At scale, DOMAS impact is a **weak predictor of global
+fold change** (high-impact enriches for real change only ~1.2× over base rate).
+It is best read as a *functional-disruption / domain-integrity* flag whose main
+correlate is sequence divergence — not a TM-score surrogate. Two caveats keep
+this from being purely a negative result: (1) TM-score is global-fold
+superposition and under-weights peripheral domain loss (a dropped peripheral
+domain can still give TM>0.85), so some "false positives" are real domain losses
+TM misses; (2) neither TM nor impact measures biological significance — the
+structure-biology point that only visual AlphaFold inspection is definitive. The
+SRP9 specificity gap from the pilot generalises across 11k pairs.
+
+Independent cross-check not yet integrated: **ASpdb** (>7,200 alt-isoform AF2
+structures with comparative structural-alteration calls) — a second, non-TM label
+source to test whether the specificity gap is TM-metric-specific.
+
+### AlphaFold burial (SASA/RSA) + DSSP — the first identity-orthogonal signal
+
+Since impact (a UniProt/Pfam-derived score) collapses to zero once identity is
+controlled, we tested whether the **canonical AlphaFold 3D structure** carries
+signal identity can't — at **full scale**. For every runnable pair we downloaded
+the canonical AFDB model (5,880 structures) and computed, over the changed region:
+mean **RSA** (exposure, Biopython Shrake–Rupley), **buried fraction** (RSA<0.25),
+and DSSP-style secondary structure (pydssp). Features land for **10,232 / 11,068
+pairs** (the ~7.5% pure insertions have no canonical region). Data + extractor in
+`alphafold_benchmark/` (`full_features.csv`, `extract_burial_dssp_full.py`).
+
+**Burial predicts TM and survives identity control** (unlike impact) — full 11k:
+
+| feature | Spearman vs TM | partial \| identity | partial \| identity + region-length |
+|---------|:--------------:|:-------------------:|:-----------------------------------:|
+| buried_frac | +0.13 | **+0.30** | **+0.30** |
+| mean_rsa    | −0.14 | **−0.28** | −0.28 |
+| structured_frac (H+E) | +0.08 | +0.17 | +0.17 |
+| *impact rank (for contrast)* | −0.19 | *+0.05* | — |
+
+Non-zero in **every** identity band (Spearman(buried,TM) +0.22…+0.37). Incremental
+variance: R²(TM ~ identity) = **0.24** → R²(TM ~ identity + buried_frac) = **0.31**
+(+0.069, ~+29%); region length adds nothing on top (0.310). So burial is a genuine
+identity-independent structural signal — the one thing we found that improves
+fold-change prediction, robust from the 2k sample to the full 11k.
+
+**The direction is counter-intuitive and matters.** Real changes (TM<0.5) have
+*more exposed* changed regions (mean RSA 0.50, buried 0.21); preserved isoforms
+have *more buried* ones (0.44, buried 0.30). So **exposed/peripheral changes drive
+low global TM**, not buried-core losses. Mechanistically: TM is dominated by the
+compact core, so a small buried substitution is scaffolded and superposes (high
+TM), whereas large alternative exons sit in exposed loops/termini and form a big
+non-superposing fraction (low TM). This is the **opposite sign** to the current
+impact scorer's "structured/folded → raise level" weighting — but note that
+weighting targets *functional* importance, not TM, so it should not be blindly
+flipped; the two targets differ.
+
+**Net:** AlphaFold is not exhausted by pLDDT. Burial of the changed region adds
+real, identity-orthogonal predictive power for fold change (impact did not). The
+remaining ceiling (does the *remainder* refold — the SRP9 class) still needs the
+isoform actually folded, which is what the TM ground truth already encodes.
+
+### Numeric score vs TM, identity control, and where the errors fall
+
+(`alphafold_benchmark/analyze_identity_control.py`, `bench_rich_results.csv`.)
+
+**(B) Do the DOMAS numeric scores correlate with TM?** Weakly, in the right
+direction (higher impact → lower TM):
+
+| DOMAS numeric | Spearman vs TM | Pearson vs TM |
+|---------------|:--------------:|:-------------:|
+| impact rank (0–3)         | −0.19 | −0.17 |
+| max Pfam coverage loss    | −0.27 | −0.31 |
+| region AlphaMissense      | −0.09 | −0.10 |
+| constructed domas_score   | −0.28 | −0.31 |
+| **sequence identity**     | **+0.46** | **+0.49** |
+
+Sequence identity alone tracks TM ~2× more strongly than any DOMAS score.
+
+**(A) Control for identity — the decisive test.** Within fixed identity bands the
+score→TM relationship **vanishes**: Spearman(rank, TM) is ≈0 in every band
+(−0.08…+0.09), and mean TM for "none" vs "high" calls is nearly equal within a
+band (e.g. identity 85–90%: none 0.696 vs high 0.697). Partial correlation
+collapses to zero:
+
+- partial Pearson(rank, TM | identity): **−0.17 → +0.05**
+- partial Pearson(domas_score, TM | identity): **−0.31 → −0.03**
+
+So once sequence divergence is held constant, DOMAS's fold/domain/functional-site
+signals carry **essentially no additional information about global fold change.**
+The whole (weak) impact↔TM association was identity acting through both. For the
+task "predict TM," DOMAS impact ≈ a sequence-identity threshold, no better.
+
+**(C) Are the errors near the TM=0.5 boundary?** No — many are gross, not
+borderline. At impact≥moderate: FP=5250, FN=770. Median |TM−0.5| for false
+positives is **0.238** (a typical FP has TM≈0.74, well inside "preserved"), and
+**1,279 FPs have TM≥0.85** (clearly-preserved folds flagged moderate/high). 198
+FNs have TM<0.3 (clear changes missed entirely). Treating the levels as ordered
+against TM-implied levels, only 27% match exactly, 36% are adjacent, and **37%
+are off by ≥2 levels** — half of all disagreements are *not* adjacent.
+
+**Bottom line.** DOMAS impact is a noisy proxy for sequence identity with no
+demonstrable independent power to predict global fold change, and its errors are
+frequently severe rather than borderline. The honest caveat still stands: TM is
+global-fold superposition and is the wrong ground truth for *functional* /
+domain-integrity disruption (a dropped peripheral domain can leave TM high). This
+benchmark therefore refutes "impact predicts structure (TM)"; it cannot confirm
+or refute "impact predicts functional significance," which needs functional
+ground truth — the visual/experimental standard the structure biologist named.
+
+---
+
 ## Sources
 
 - **Cases 1–7:** *Predicting the structural impact of human alternative
