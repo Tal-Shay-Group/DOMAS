@@ -284,7 +284,8 @@ def get_canonical_exon_counts(con, gene_ensembl_ids):
 # ============================================================================
 
 def hmm_change_impact(canonical_cov, alt_cov, canonical_plddt,
-                      fold_state=None, hits_functional_site=False, region_am=None):
+                      fold_state=None, hits_functional_site=False, region_am=None,
+                      region_rsa=None):
     """Deterministic likely-impact label for a change to one HMM (Pfam) element.
 
     Base signal: how much of the Pfam model the alternative isoform loses
@@ -298,10 +299,15 @@ def hmm_change_impact(canonical_cov, alt_cov, canonical_plddt,
           structured -> up one level (max high)
           disordered -> down one level (min low)
 
-    Structure is taken from UniProt `fold_state` when available (curated /
-    experimental beats predicted), else from AlphaFold `canonical_plddt`:
-      fold_state='folded'      or pLDDT >= 70  -> structured
-      fold_state='disordered'  or pLDDT <  50  -> disordered
+    "Structured" is read best-signal-first: UniProt `fold_state` (curated) >
+    AlphaFold **burial** of the changed region (`region_rsa`, mean relative
+    solvent accessibility) > AlphaFold `canonical_plddt` (confidence). Burial
+    beats pLDDT because it is region-specific and directional: a buried-core loss
+    destabilises the fold and (empirically) is where pathogenic variants sit, so
+    it raises impact; a solvent-exposed surface loss is usually tolerated, so it
+    lowers it. Thresholds: region_rsa < 0.30 -> buried/structured; > 0.50 ->
+    exposed. (fold_state='folded' or pLDDT >= 70 -> structured;
+    fold_state='disordered' or pLDDT < 50 -> disordered.)
 
     hits_functional_site: the changed region overlaps a UniProt functional
     residue (ACT_SITE/BINDING/MOD_RES/SITE/MOTIF/...). Losing such a residue is
@@ -330,21 +336,29 @@ def hmm_change_impact(canonical_cov, alt_cov, canonical_plddt,
         level = 2
     else:
         level = 1
-    # constraint/structure weighting, best signal first: AlphaMissense functional
-    # constraint (region_am, mean per-residue pathogenicity) > curated UniProt
-    # fold_state > predicted AlphaFold pLDDT. AM wins because it flags constraint
-    # even in disordered regions (region_am >= 0.564 = AM "likely pathogenic";
-    # <= 0.34 = "likely benign").
+    # constraint/structure weighting: take the FIRST signal that has an opinion,
+    # in priority order AlphaMissense constraint > curated fold_state > AlphaFold
+    # burial > pLDDT confidence. A signal that is present but *inconclusive*
+    # (e.g. mid-range AlphaMissense 0.34-0.564) yields to the next, so burial can
+    # still nudge when AM is ambiguous. (region_am >= 0.564 = AM "likely
+    # pathogenic"; <= 0.34 = "likely benign"; region_rsa < 0.30 = buried core;
+    # > 0.50 = solvent-exposed; pLDDT >= 70 structured, < 50 disordered.)
+    ladder = []
     if region_am is not None:
-        raise_lvl, lower_lvl = region_am >= 0.564, region_am <= 0.34
-    elif fold_state == 'folded':
-        raise_lvl, lower_lvl = True, False
+        ladder.append((region_am >= 0.564, region_am <= 0.34))
+    if fold_state == 'folded':
+        ladder.append((True, False))
     elif fold_state == 'disordered':
-        raise_lvl, lower_lvl = False, True
-    elif canonical_plddt is not None:
-        raise_lvl, lower_lvl = canonical_plddt >= 70, canonical_plddt < 50
-    else:
-        raise_lvl, lower_lvl = False, False
+        ladder.append((False, True))
+    if region_rsa is not None:
+        ladder.append((region_rsa < 0.30, region_rsa > 0.50))
+    if canonical_plddt is not None:
+        ladder.append((canonical_plddt >= 70, canonical_plddt < 50))
+    raise_lvl, lower_lvl = False, False
+    for r, l in ladder:
+        if r or l:
+            raise_lvl, lower_lvl = r, l
+            break
     if raise_lvl and level < 3:
         level += 1
     elif lower_lvl and level > 1:

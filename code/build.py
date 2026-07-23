@@ -31,6 +31,12 @@ CREATE TABLE IF NOT EXISTS afdb_plddt (
     mean_plddt  REAL,
     plddt       TEXT      -- comma-joined per-residue pLDDT
 );
+CREATE TABLE IF NOT EXISTS afdb_rsa (
+    accession   TEXT PRIMARY KEY,
+    length      INTEGER,
+    mean_rsa    REAL,
+    rsa         TEXT      -- comma-joined per-residue relative solvent accessibility (0=buried..1=exposed)
+);
 CREATE TABLE IF NOT EXISTS uniprot_feature (
     acc   TEXT,
     ftype TEXT,
@@ -187,6 +193,69 @@ def _plddt_from_pdb(raw_bytes):
 
 
 _AF_NAME = re.compile(r"AF-([A-Z0-9]+)-F1-model_v\d+\.pdb\.gz$")
+
+# Tien et al. 2013 theoretical maximum solvent-accessible surface area (A^2),
+# used to turn absolute SASA into relative solvent accessibility (RSA).
+_MAX_ASA = {"ALA": 129, "ARG": 274, "ASN": 195, "ASP": 193, "CYS": 167, "GLN": 225,
+            "GLU": 223, "GLY": 104, "HIS": 224, "ILE": 197, "LEU": 201, "LYS": 236,
+            "MET": 224, "PHE": 240, "PRO": 159, "SER": 155, "THR": 172, "TRP": 285,
+            "TYR": 263, "VAL": 174}
+
+
+def _rsa_from_pdb(raw_text):
+    """Per-residue relative solvent accessibility (0=buried..1=exposed) from a PDB
+    model, via Bio.PDB Shrake-Rupley. Biopython is imported lazily so the rest of
+    build.py works without it. Returns [] on any parse/compute failure."""
+    from io import StringIO
+    from Bio.PDB import PDBParser
+    from Bio.PDB.SASA import ShrakeRupley
+    try:
+        st = PDBParser(QUIET=True).get_structure("m", StringIO(raw_text))
+        res = [r for r in list(st[0].get_chains())[0] if r.id[0] == " "]
+        if not res:
+            return []
+        ShrakeRupley().compute(st, level="R")
+        return [round(min(1.0, r.sasa / _MAX_ASA.get(r.resname, 200)), 3) for r in res]
+    except Exception:
+        return []
+
+
+def build_afdb_rsa(data_dir, con, species_list):
+    """Per-residue relative solvent accessibility from the AlphaFold DB proteome
+    tars (same source as build_afdb), stored in afdb_rsa. Opt-in: Shrake-Rupley is
+    ~0.1 s/structure, so this is slower than the pLDDT pass and is run explicitly."""
+    total = 0
+    for sp in species_list:
+        dataset = download.SPECIES[sp]["afdb"]
+        raw = os.path.join(data_dir, "afdb", dataset + ".tar")
+        if not os.path.exists(raw):
+            print(f"  [afdb_rsa] {sp}: missing {raw} - run -download afdb first; skipping")
+            continue
+        n = 0
+        with tarfile.open(raw, "r") as tar:
+            for member in tar:
+                m = _AF_NAME.search(member.name)
+                if not m:
+                    continue
+                acc = m.group(1)
+                text = gzip.decompress(tar.extractfile(member).read()).decode("latin-1")
+                vals = _rsa_from_pdb(text)
+                if not vals:
+                    continue
+                con.execute(
+                    "INSERT OR REPLACE INTO afdb_rsa(accession,length,mean_rsa,rsa) "
+                    "VALUES(?,?,?,?)",
+                    (acc, len(vals), round(sum(vals) / len(vals), 3),
+                     ",".join(str(v) for v in vals)))
+                n += 1
+                if n % 2000 == 0:
+                    con.commit(); print(f"  [afdb_rsa] {sp}: {n}...")
+        con.commit()
+        _record_meta(con, "afdb_rsa", dataset, sp, f"{download._AFDB_BASE}/{dataset}.tar",
+                     raw, n, notes="RSA from Shrake-Rupley on F1 model; Tien 2013 max-ASA")
+        total += n
+        print(f"  [afdb_rsa] {sp}: {n} proteins")
+    return total
 
 
 def build_afdb(data_dir, con, species_list):
@@ -490,6 +559,9 @@ def build_all(data_dir, db_path, species=None, only=None, delete_raw=False):
         build_uniprot(data_dir, con, species)
     if "afdb" in only:
         build_afdb(data_dir, con, species)
+    # afdb_rsa is the opt-in burial pass (Shrake-Rupley, slower); reuses the afdb tar.
+    if "afdb_rsa" in only:
+        build_afdb_rsa(data_dir, con, species)
     if "ensembl" in only:
         build_ensembl(data_dir, con, species)
     if "pfam" in only:

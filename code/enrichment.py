@@ -73,6 +73,19 @@ class Enricher:
             "SELECT plddt FROM afdb_plddt WHERE accession=?", (uniprot,)).fetchone()
         return [float(x) for x in row[0].split(',')] if row else None
 
+    def rsa(self, uniprot):
+        """Per-residue relative solvent accessibility (0=buried .. 1=exposed) for
+        a UniProt accession, from the canonical AlphaFold model. None if missing.
+        Optional table (present only if afdb_rsa was provisioned)."""
+        if not uniprot:
+            return None
+        try:
+            row = self.enr.execute(
+                "SELECT rsa FROM afdb_rsa WHERE accession=?", (uniprot,)).fetchone()
+        except sqlite3.OperationalError:
+            return None
+        return [float(x) for x in row[0].split(',')] if row else None
+
     def am_pathogenicity(self, uniprot):
         """Per-residue mean AlphaMissense pathogenicity for a UniProt accession,
         or None. The am_pathogenicity table is optional (present only if
@@ -375,7 +388,7 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
         # region-level signals over the changed span: UniProt fold-state +
         # functional sites, and mean AlphaMissense constraint (if provisioned).
         reg = Enricher.changed_region(seqs.get(canon), seqs.get(comp))
-        fold_state, sites, region_am = None, [], None
+        fold_state, sites, region_am, region_rsa = None, [], None, None
         added_label = 'none'
         if reg and reg['canon']:
             lo, hi = reg['canon']
@@ -385,6 +398,10 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
             if am_arr:
                 seg = [v for v in am_arr[lo - 1:hi] if v is not None]
                 region_am = round(sum(seg) / len(seg), 3) if seg else None
+            rsa_arr = e.rsa(uni)                 # AlphaFold burial of the changed region
+            if rsa_arr and len(rsa_arr) >= hi:
+                seg_r = rsa_arr[lo - 1:hi]
+                region_rsa = round(sum(seg_r) / len(seg_r), 3) if seg_r else None
         if reg and reg['alt']:
             # residues the alt isoform ADDS - a pure insertion, or the surplus of
             # a substitution whose alt span is longer than the canonical span -
@@ -426,7 +443,8 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
                 seg = pl[s - 1:en] if en <= len(pl) else []
                 cpl = round(sum(seg) / len(seg), 1) if seg else None
             lab = hmm_change_impact(ccov, acov, cpl, fold_state=fold_state,
-                                    hits_functional_site=hits, region_am=region_am)
+                                    hits_functional_site=hits, region_am=region_am,
+                                    region_rsa=region_rsa)
             if _IMPACT_RANK.get(lab, 0) > best_rank:
                 best_rank, best_label = _IMPACT_RANK[lab], lab
         impact[(canon, comp)] = best_label
