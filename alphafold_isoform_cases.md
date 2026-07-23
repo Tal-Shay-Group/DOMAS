@@ -413,6 +413,39 @@ only 38% pathogenic** — a maximal DOMAS score is still more likely benign. Sam
 conclusion as the categorical view, sharpened: good at flagging the benign low end,
 weak resolution across the moderate-to-high range.
 
+### Calibrated continuous score (`impact_prob`)
+
+The decile analysis showed the categorical impact throws away signal. So a
+**calibrated continuous companion** was built: a logistic model (`utils.impact_probability`,
+new `impact_prob` output column) over `region_am` + gnomAD **LOEUF** + `max_cov_loss`
++ `buried_frac`, trained on the humsavar patho-vs-benign label. Provisioning:
+gnomAD gene constraint → `gene_constraint` table (`build_gnomad`, `Enricher.loeuf`).
+Fit/eval in `alphafold_benchmark/fit_calibrated.py`, coefficients in `calib_model.json`.
+
+What was tried and what survived (`improve_proto.py`):
+- **Peak / mean-of-top-K AM: rejected.** For domain-scale regions (median 169 aa)
+  the *mean* AM beats every peak variant monotonically (mean 0.754 vs top-1..top-50
+  0.681–0.703) — pathogenicity here is about *overall* regional constraint, not a
+  hotspot.
+- **Not quantising: the big lever.** Categorical impact AUC 0.585 → continuous mean
+  AM 0.754 for patho-vs-benign — same signal, un-bucketed.
+- **gnomAD LOEUF: the useful new feature** (non-circular): 0.754 → 0.770.
+
+The shipped model: **5-fold CV AUC 0.769**, well-calibrated (predicted prob tracks
+observed rate), and the deciles are now **monotonic** with the top decile at **58%
+pathogenic** (vs the categorical score's 38%):
+
+| impact_prob decile | % pathogenic |
+|--------------------|:------------:|
+| 1 (0.02–0.07) | 4% |
+| 5 (0.19–0.24) | 19% |
+| 8 (0.35–0.44) | 38% |
+| 10 (0.58–0.90) | **58%** |
+
+`impact_prob` is a companion to (not a replacement for) the categorical `impact`;
+it stays honestly bounded (semi-circular via AM, positive-only labels), but it is
+calibrated and monotonic where the categorical score was neither.
+
 ---
 
 ## Sources

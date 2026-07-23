@@ -26,7 +26,8 @@ import pandas as pd
 
 import build  # _parse_hmmsearch_domtbl (bitscores)
 from junction_analisys import NON_COMPARISON_EVENTS
-from utils import calc_spade_score, hmm_change_impact, insertion_impact
+from utils import (calc_spade_score, hmm_change_impact, insertion_impact,
+                   impact_probability)
 
 _PRIMARY_FT_SKIP = {'CHAIN', 'SIGNAL', 'Chain', 'Signal'}
 _IMPACT_RANK = {'none': 0, 'gain': 1, 'low': 1, 'moderate': 2, 'high': 3}
@@ -85,6 +86,19 @@ class Enricher:
         except sqlite3.OperationalError:
             return None
         return [float(x) for x in row[0].split(',')] if row else None
+
+    def loeuf(self, uniprot):
+        """gnomAD LOEUF (gene loss-intolerance; lower = more constrained) for a
+        UniProt accession, or None. Optional table (present only if gnomAD was
+        provisioned)."""
+        if not uniprot:
+            return None
+        try:
+            row = self.enr.execute(
+                "SELECT loeuf FROM gene_constraint WHERE accession=?", (uniprot,)).fetchone()
+        except sqlite3.OperationalError:
+            return None
+        return row[0] if row and row[0] is not None else None
 
     def am_pathogenicity(self, uniprot):
         """Per-residue mean AlphaMissense pathogenicity for a UniProt accession,
@@ -378,7 +392,7 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
     # impact per (canonical, compared): worst severity across changed Pfam
     # families, structure-weighted by UniProt fold-state (else pLDDT) and raised
     # when the changed region hits a UniProt functional residue.
-    impact, func_col, am_col = {}, {}, {}
+    impact, func_col, am_col, prob_col = {}, {}, {}, {}
     for canon, comp in {(r['canonical_transcript_id'], r['transcript_id'])
                         for _, r in analyzable[['canonical_transcript_id', 'transcript_id']].dropna().iterrows()}:
         cm = {m[0]: m for m in matches.get(canon, [])}
@@ -388,7 +402,7 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
         # region-level signals over the changed span: UniProt fold-state +
         # functional sites, and mean AlphaMissense constraint (if provisioned).
         reg = Enricher.changed_region(seqs.get(canon), seqs.get(comp))
-        fold_state, sites, region_am, region_rsa = None, [], None, None
+        fold_state, sites, region_am, region_rsa, buried_frac = None, [], None, None, None
         added_label = 'none'
         if reg and reg['canon']:
             lo, hi = reg['canon']
@@ -401,7 +415,9 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
             rsa_arr = e.rsa(uni)                 # AlphaFold burial of the changed region
             if rsa_arr and len(rsa_arr) >= hi:
                 seg_r = rsa_arr[lo - 1:hi]
-                region_rsa = round(sum(seg_r) / len(seg_r), 3) if seg_r else None
+                if seg_r:
+                    region_rsa = round(sum(seg_r) / len(seg_r), 3)
+                    buried_frac = round(sum(x < 0.25 for x in seg_r) / len(seg_r), 3)
         if reg and reg['alt']:
             # residues the alt isoform ADDS - a pure insertion, or the surplus of
             # a substitution whose alt span is longer than the canonical span -
@@ -434,9 +450,12 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
         best_rank, best_label = (_IMPACT_RANK['moderate'], 'moderate') if hits else (0, 'none')
         if _IMPACT_RANK.get(added_label, 0) > best_rank:
             best_rank, best_label = _IMPACT_RANK[added_label], added_label
+        max_cov_loss = 0.0
         for acc in set(cm) | set(am):
             ccov = cm[acc][2] if acc in cm else None
             acov = am[acc][2] if acc in am else None
+            if ccov is not None:
+                max_cov_loss = max(max_cov_loss, ccov - (acov or 0))
             cpl = None
             if acc in cm and pl:
                 s, en = cm[acc][3], cm[acc][4]
@@ -448,6 +467,12 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
             if _IMPACT_RANK.get(lab, 0) > best_rank:
                 best_rank, best_label = _IMPACT_RANK[lab], lab
         impact[(canon, comp)] = best_label
+        # calibrated continuous companion score (pathogenicity-relevance prob);
+        # defined only where there is a canonical changed region (not pure insertions).
+        prob_col[(canon, comp)] = (
+            impact_probability(region_am=region_am, loeuf=e.loeuf(uni),
+                               max_cov_loss=max_cov_loss, buried_frac=buried_frac)
+            if reg and reg['canon'] else '')
 
     def _blank_nc(row, val):
         return '' if row['event_type'] in NON_COMPARISON_EVENTS else val
@@ -455,6 +480,7 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
     df['spade_canonical'] = df.apply(lambda r: _blank_nc(r, spade.get(r['canonical_transcript_id'], '')), axis=1)
     df['spade_compared'] = df.apply(lambda r: _blank_nc(r, spade.get(r['transcript_id'], '')), axis=1)
     df['impact'] = df.apply(lambda r: _blank_nc(r, impact.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
+    df['impact_prob'] = df.apply(lambda r: _blank_nc(r, prob_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df['functional_sites'] = df.apply(lambda r: _blank_nc(r, func_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df['region_am_mean'] = df.apply(lambda r: _blank_nc(r, am_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df.to_csv(out_csv, index=False)

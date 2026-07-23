@@ -37,6 +37,12 @@ CREATE TABLE IF NOT EXISTS afdb_rsa (
     mean_rsa    REAL,
     rsa         TEXT      -- comma-joined per-residue relative solvent accessibility (0=buried..1=exposed)
 );
+CREATE TABLE IF NOT EXISTS gene_constraint (
+    accession   TEXT PRIMARY KEY,   -- UniProt accession
+    gene        TEXT,
+    loeuf       REAL,               -- gnomAD oe_lof_upper (lower = more loss-intolerant)
+    pli         REAL
+);
 CREATE TABLE IF NOT EXISTS uniprot_feature (
     acc   TEXT,
     ftype TEXT,
@@ -548,6 +554,64 @@ def build_alphamissense(data_dir, con):
 
 
 # ------------------------------------------------------------------- driver --
+_GN_RE = re.compile(r'Name=([^;{ ]+)')
+
+
+def _acc_gene_from_dat(path):
+    """UniProt accession -> gene symbol from a reference-proteome .dat(.gz)."""
+    out = {}; acc = gene = None
+    op = gzip.open if path.endswith(".gz") else open
+    with op(path, "rt", errors="replace") as fh:
+        for ln in fh:
+            if ln.startswith("AC") and acc is None:
+                acc = ln.split()[1].rstrip(";")
+            elif ln.startswith("GN") and gene is None:
+                m = _GN_RE.search(ln)
+                if m:
+                    gene = m.group(1)
+            elif ln.startswith("//"):
+                if acc and gene:
+                    out[acc] = gene
+                acc = gene = None
+    return out
+
+
+def build_gnomad(data_dir, con, species_list):
+    """Per-gene gnomAD LoF constraint (LOEUF, pLI) keyed by UniProt accession
+    (gene symbol -> accession via the human reference proteome). Opt-in; human
+    only (gnomAD is human)."""
+    raw = os.path.join(data_dir, "gnomad", "gnomad.v2.1.1.lof_metrics.by_gene.txt.bgz")
+    if not os.path.exists(raw):
+        print(f"  [gnomad] missing {raw} - run -download gnomad first; skipping")
+        return 0
+    g2l, g2p = {}, {}
+    with gzip.open(raw, "rt") as fh:
+        h = fh.readline().rstrip("\n").split("\t")
+        gi, li, pi = h.index("gene"), h.index("oe_lof_upper"), h.index("pLI")
+        for ln in fh:
+            c = ln.rstrip("\n").split("\t")
+            try:
+                if c[li] not in ("", "NA"):
+                    g2l[c[gi]] = float(c[li])
+                if c[pi] not in ("", "NA"):
+                    g2p[c[gi]] = float(c[pi])
+            except (ValueError, IndexError):
+                pass
+    dat = os.path.join(data_dir, "uniprot", download.SPECIES["H_sapiens"]["up"] + ".dat.gz")
+    acc2gene = _acc_gene_from_dat(dat) if os.path.exists(dat) else {}
+    n = 0
+    for acc, gene in acc2gene.items():
+        if gene in g2l or gene in g2p:
+            con.execute("INSERT OR REPLACE INTO gene_constraint(accession,gene,loeuf,pli) "
+                        "VALUES(?,?,?,?)", (acc, gene, g2l.get(gene), g2p.get(gene)))
+            n += 1
+    con.commit()
+    _record_meta(con, "gnomad", "v2.1.1", "H_sapiens", download._GNOMAD_URL, raw, n,
+                 notes="LOEUF=oe_lof_upper, pLI; gene->accession via reference proteome .dat")
+    print(f"  [gnomad] {n} accessions with constraint")
+    return n
+
+
 def build_all(data_dir, db_path, species=None, only=None, delete_raw=False):
     species = species or list(download.SPECIES)
     only = only or list(download.ALL_SOURCES)
@@ -572,6 +636,8 @@ def build_all(data_dir, db_path, species=None, only=None, delete_raw=False):
         build_pfam_match(data_dir, con, species=species)
     if "alphamissense" in only:
         build_alphamissense(data_dir, con)
+    if "gnomad" in only:
+        build_gnomad(data_dir, con, species)
     con.execute("ANALYZE")
     con.commit()
     con.close()

@@ -146,6 +146,24 @@ enrichment (E16–E17) was largely region-size; conditioning on variant-presence
 balancing classes removes it. **DOMAS impact is a coarse enrichment/prioritisation
 signal, never a per-event pathogenic-vs-benign classifier.***
 
+**E21. Peak AM + gnomAD prototype.** Tried the two proposed features on
+patho-vs-benign discrimination. (`improve_proto.py`.)
+→ *Peak AM **rejected** — for domain-scale regions (median 169 aa) mean AM (0.754)
+beats peak (0.703) and every mean-of-top-K (0.681–0.703) monotonically;
+pathogenicity is about overall regional constraint, not a hotspot. gnomAD **LOEUF**
+is a real, non-circular add (0.754 → 0.770). Biggest finding: the categorical
+impact (AUC 0.585) discards most of its own signal vs the continuous mean AM
+(0.754) — **quantisation is the bug.***
+
+**E22. Build the calibrated continuous score.** Logistic over region_am + LOEUF +
+max_cov_loss + buried_frac → `impact_prob`; provisioned gnomAD (`gene_constraint`,
+`Enricher.loeuf`, `build_gnomad`), shipped constants in `utils.impact_probability`.
+(`fit_calibrated.py`, `calib_model.json`.)
+→ *5-fold CV AUC **0.769**, well-calibrated, deciles monotonic with top decile 58%
+pathogenic (vs categorical 38%). Wired into add_scores as a companion column.
+region_am dominates (+0.80 std coef), LOEUF the non-circular add (−0.42), burial
++0.24, coverage-loss ~0.*
+
 ---
 
 ## Overall conclusion

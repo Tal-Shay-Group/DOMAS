@@ -1,3 +1,4 @@
+import math
 import os
 
 import pandas as pd
@@ -409,6 +410,46 @@ def insertion_impact(inserted_len, inside_domain, junction_fold_state=None):
     elif junction_fold_state == 'disordered' and level > 0:
         level -= 1
     return {0: 'none', 1: 'low', 2: 'moderate', 3: 'high'}[level]
+
+
+# Calibrated logistic model for the continuous impact probability. Trained on
+# 3,282 isoform changed-regions labelled by UniProt humsavar variant overlap
+# (pathogenic LP/P vs benign LB/B), features standardised, missing values imputed
+# to the training median. 5-fold CV AUC 0.768 and well-calibrated (predicted prob
+# tracks observed pathogenic rate). Coefficients are on standardised features;
+# region_am dominates (+0.80), gnomAD LOEUF is the non-circular add (-0.42, lower
+# LOEUF = more constrained = more pathogenic), burial +0.24, coverage-loss ~0.
+# Regenerate with alphafold_benchmark/fit_calibrated.py.
+_IMPACT_PROB_MODEL = {
+    'features': ['region_am', 'loeuf', 'max_cov_loss', 'buried_frac'],
+    'median':   [0.482, 0.983, 41.0, 0.3402],
+    'mean':     [0.482, 0.9788, 46.071, 0.3091],
+    'std':      [0.1554, 0.4429, 41.0077, 0.2193],
+    'coef':     [0.7983, -0.423, -0.069, 0.2363],
+    'intercept': -1.19,
+}
+
+
+def impact_probability(region_am=None, loeuf=None, max_cov_loss=None, buried_frac=None):
+    """Calibrated probability (0-1) that a changed region is pathogenicity-relevant,
+    from a logistic model over mean AlphaMissense (`region_am`), gnomAD gene
+    constraint (`loeuf`), Pfam `max_cov_loss`, and AlphaFold `buried_frac`. This is
+    the *continuous* companion to the categorical `hmm_change_impact`: it does not
+    quantise, and it folds in the gene-level constraint. A missing feature is
+    imputed to the training median (a neutral value), so the score degrades
+    gracefully. See `_IMPACT_PROB_MODEL` for provenance and calibration.
+
+    Returns a float in [0, 1], or None if every feature is missing.
+    """
+    m = _IMPACT_PROB_MODEL
+    vals = [region_am, loeuf, max_cov_loss, buried_frac]
+    if all(v is None for v in vals):
+        return None
+    z = m['intercept']
+    for v, med, mean, std, coef in zip(vals, m['median'], m['mean'], m['std'], m['coef']):
+        x = med if v is None else v
+        z += coef * ((x - mean) / std)
+    return round(1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, z)))), 4)
 
 
 def calc_spade_score(domains_by_isoform):

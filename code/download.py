@@ -46,10 +46,18 @@ LICENSES = {
     "ensembl": "Ensembl terms (open, no restrictions)",
     "pfam":    "CC0 1.0",
     "alphamissense": "CC BY 4.0",
+    "gnomad":  "CC0 1.0 (gnomAD terms, freely available)",
 }
 ALL_SOURCES = ("uniprot", "afdb", "ensembl", "pfam")
 # Opt-in sources: large and/or not part of a default provision run.
-OPTIN_SOURCES = ("alphamissense",)
+OPTIN_SOURCES = ("alphamissense", "gnomad")
+
+# gnomAD v2.1.1 per-gene LoF constraint (LOEUF = oe_lof_upper, pLI). Small (~5 MB
+# bgzip); build.py maps gene symbol -> UniProt accession via the reference
+# proteome and stores gene_constraint. Gene-level loss-intolerance is an
+# orthogonal, non-circular signal for the calibrated impact probability.
+_GNOMAD_URL = ("https://storage.googleapis.com/gcp-public-data--gnomad/release/"
+               "2.1.1/constraint/gnomad.v2.1.1.lof_metrics.by_gene.txt.bgz")
 
 # AlphaMissense per-variant pathogenicity predictions (human canonical UniProt
 # isoforms; ~1.2 GB gzipped, 216M variant rows). build.py aggregates them to a
@@ -138,6 +146,11 @@ def download_alphamissense(data_dir, force=False):
     _download(_ALPHAMISSENSE_URL, os.path.join(out, "AlphaMissense_aa_substitutions.tsv.gz"), force)
 
 
+def download_gnomad(data_dir, force=False):
+    out = _subdir(data_dir, "gnomad")
+    _download(_GNOMAD_URL, os.path.join(out, "gnomad.v2.1.1.lof_metrics.by_gene.txt.bgz"), force)
+
+
 def download_all(data_dir, species=None, only=None, force=False):
     """Download every requested source for every requested species.
     `species` limits to a subset of SPECIES (default all); `only` limits to a
@@ -157,6 +170,9 @@ def download_all(data_dir, species=None, only=None, force=False):
     if "alphamissense" in only:
         print("[alphamissense] (human canonical, ~1.2 GB; CC BY 4.0)")
         download_alphamissense(data_dir, force)
+    if "gnomad" in only:
+        print("[gnomad] (per-gene LoF constraint, ~5 MB)")
+        download_gnomad(data_dir, force)
     for sp in species:
         for src in only:
             if src == "pfam":
