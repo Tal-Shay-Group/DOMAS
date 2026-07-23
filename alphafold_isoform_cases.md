@@ -207,6 +207,27 @@ real, identity-orthogonal predictive power for fold change (impact did not). The
 remaining ceiling (does the *remainder* refold — the SRP9 class) still needs the
 isoform actually folded, which is what the TM ground truth already encodes.
 
+**Predictive performance (5-fold CV, `predict_eval.py`).** Predicting the change
+verdict (TM<0.5; base rate 33.8%, so majority-class accuracy 66.2%) on the 10,232
+non-insertion pairs:
+
+| model | AUC | accuracy | R²(TM) |
+|-------|:---:|:--------:|:------:|
+| DOMAS impact rank (current) | 0.568 | 0.662 | — |
+| identity + impact *(control)* | 0.696 | 0.722 | — |
+| sequence identity | 0.697 | 0.722 | 0.239 |
+| burial alone (buried_frac) | 0.586 | 0.662 | 0.027 |
+| **identity + burial** | **0.755** | **0.738** | **0.307** |
+| identity + burial + SS + RSA | 0.757 | 0.738 | 0.306 |
+
+Reads: (1) DOMAS impact alone is a near-useless structural classifier — AUC 0.568,
+accuracy = the majority baseline; "identity + impact" (0.696) equals identity
+alone (0.697), so impact adds nothing. (2) Burial alone is weak (AUC 0.586, R²
+0.03) because identity dominates absolute variance, but as an orthogonal add-on it
+lifts identity 0.697 → **0.755** AUC / 0.239 → **0.307** R². (3) The cheap ceiling
+is AUC ≈ 0.755 / ~74%: whether the remainder *refolds* needs the isoform folded,
+which is the TM label itself.
+
 **Contact modularity is redundant with burial** (`extract_contacts.py`,
 `contact_features.csv`). Contacts from the changed region to the rest of the fold
 (Cβ<8Å) correlate with TM on their own (Spearman +0.46–0.48) and survive identity
