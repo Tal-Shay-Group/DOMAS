@@ -189,6 +189,20 @@ ensembles and NNs add nothing; logistic kept for interpretability + native
 calibration. The ceiling is set by features/labels, not the algorithm. (Bayesian
 would add per-prediction uncertainty, not accuracy.)*
 
+**E26. Exhaust the feature space (length + all pairwise + squares, L1-pruned).**
+Expanded both models to degree-2 (main effects + length + squares + all pairwise
+products), L1-pruned, gene-grouped CV.
+→ *Length adds ~0. Full expansion: no gain functional (0.763→0.759), +0.007
+structural (0.788→0.795). **L1 pruned almost nothing** (19/20, 33/35 terms survive
+with tiny coefficients) — no clean sparse improvement hiding, no dead parameters.
+phyloP conservation (the one untested cheap feature) assessed as **very likely
+redundant** (AlphaMissense is trained on conservation; feature space saturated;
+constraint axis already covered by region_am + LOEUF) and **not built** — the
+protein→genome→bigWig pipeline (Ensembl REST down, remote phyloP slow) was not
+justified. **Feature question closed: the ceiling ~0.76 functional / ~0.79
+structural is set by the information in the features, not the model or feature
+engineering.** The only way up is orthogonal data — folding + better labels.*
+
 ---
 
 ## Overall conclusion
