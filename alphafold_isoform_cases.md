@@ -591,6 +591,29 @@ helps (+0.035), whereas scalar VEP scores (EVE etc.) are redundant with AlphaMis
 The end-game is **ESMFold** — folding the isoform directly from the same pLM — for the
 routed uncertain cases.
 
+**Combined model — regression, calibration, and the fold band**
+(`esm_combined_analysis.py`, gene-grouped CV, PCA fit per fold). The joint fit
+(our 6 features + ESM region + difference PCA-50, one model) also lifts the
+*continuous* TM prediction — Ridge R² **0.360 → 0.461** (+0.10, RMSE 0.178→0.164) —
+a bigger relative gain than the AUC, and it stays well-calibrated (predicted prob ≈
+observed change rate in every decile, monotone 4%→85%).
+
+**Recommended fold band for real folding (route P(fold change) inside the band):**
+
+| route-band | % routed → fold | acc *in* band | % called | acc called |
+|------------|:---:|:---:|:---:|:---:|
+| 0.45–0.55 (screening) | 8% | 52% | 92% | 79% |
+| **0.40–0.60 (default)** | **16%** | **54%** | **84%** | **81%** |
+| 0.30–0.70 (high-stakes) | 32% | 58% | 68% | 85% |
+
+Default = **0.40–0.60**: the rationale is principled — the majority-class baseline is
+66% accuracy, and *within this band the model only reaches 54%* (worse than a naive
+guess), so those cases genuinely need structure; 16% is a manageable fold budget and
+84% of events are still called at 81%. In-band accuracy stays below the 66% baseline
+out to ~0.30–0.70, so wider bands are defensible for higher stakes. Pair the band
+with the high-id+exposed widened trigger to also catch the confidently-wrong
+high-id/low-TM outliers (which sit *outside* the band).
+
 - **Cases 1–7:** *Predicting the structural impact of human alternative
   splicing*, **Genome Biology 2025**, doi:10.1186/s13059-025-03744-x —
   <https://pmc.ncbi.nlm.nih.gov/articles/PMC12442299/> (local copy:
