@@ -542,6 +542,31 @@ loss** (cov-loss 43 vs 26) — a big, exposed change whose refolding cheap featu
 can't judge. Those are the cases to fold (ColabFold) or inspect; the confident 41%
 (prob <0.2 or >0.8) can be reported directly.
 
+**Accuracy/AUC by abstention band** (route-band = probability range sent to
+folding; the rest is "called"). Structural (`fold_change_prob`, base 34%):
+
+| route-band | % routed | acc in band | acc called | AUC called |
+|------------|:---:|:---:|:---:|:---:|
+| none (call all) | 0% | — | 75.1% | 0.787 |
+| 40–60 | 17% | 54% | 79.4% | 0.801 |
+| 35–65 | 26% | 58% | 81.1% | 0.805 |
+| 30–70 | 36% | 61% | 83.1% | 0.814 |
+| 20–80 | 59% | 66% | 88.3% | 0.822 |
+
+Functional (`impact_prob`, base 28%): 40–60 routes 16% → acc called 78.8%; 20–80
+routes 55% → 89.0% — but AUC-on-called *falls* (0.769→0.709), since removing the
+middle leaves confident-but-internally-less-rankable extremes. The `acc in band` ≈
+coin flip everywhere confirms the routed cases are the genuinely hard ones.
+
+**Widening the trigger for the confidently-wrong outliers** (`selective_prediction`
+follow-up). The high-identity / low-TM outliers (identity ≥80% AND TM<0.5; 1,035
+pairs = 10%) are *confidently* mis-called `preserved`, so the confidence gate
+catches only **17%** of them. Domain-loss widening barely helps (~30%), but
+**"high identity AND exposed changed region" (mean_rsa ≥0.5) catches ~73%** — the
+outliers are exposed changes that flip the fold (the burial signal). Cost: fold
+budget doubles (17%→39%), precision ~19%. A real fix for the blind spot, but one
+for **high-stakes/clinical** use, not casual screening.
+
 ---
 
 ## Sources
