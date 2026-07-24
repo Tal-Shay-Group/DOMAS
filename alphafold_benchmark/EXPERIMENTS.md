@@ -232,6 +232,30 @@ global model *is* effectively the specialist, and E26 already showed no
 identity×burial interaction to exploit. The high-id regime tops out at AUC ~0.73
 because the **signal is weak, not the model**. Only folding breaks it.*
 
+## Phase 9 — protein language model embeddings (the first ceiling break)
+
+**E30. ESM-2 embeddings of the changed region.** After hand-crafted features,
+feature engineering, model families, cascades and specialists all stalled at ~0.79,
+tested the one orthogonal data type: pLM embeddings. Mean-pooled ESM-2 (150M) over
+the changed region (canonical) and the canonical−alt difference; PCA-50; gene-grouped
+CV. (`esm_embedding_test.py`, `esm_embedding_full.py`.)
+→ *Full 11k: baseline 0.787 → **+region-embed 0.816** → **+region+difference 0.822**
+(+0.035) — the **first feature to exceed the ceiling**. Nuances: ESM *alone* (0.730)
+is weaker than our features (they're good); raw 640-dim overfits (0.782) — must
+PCA-compress; the fold-change-targeted canonical−alt difference helps on top of the
+region embedding. Confirms the literature: pLM embeddings carry information our
+scalars don't. The ceiling was information, and pLMs supply more of it.*
+
+**E31. VEP comparison — we are a region-level meta-model.** Compared to the three
+leading variant-effect predictors (AlphaMissense, ESM1v, EVE).
+→ *DOMAS operates one level up: VEPs score single missense variants; we score whole
+splicing events (regions), on two axes (function + fold change). We **consume the #1
+VEP** — AlphaMissense is our top feature (`region_am`). "Running our model on their
+data" = already done for AM; done for ESM (E30, embeddings add +0.035); EVE declined
+(scalar conservation VEP, worse than & correlated with AM, ~half coverage, gated
+behind a JS app). Scalar VEP scores are redundant with AM; only the rich ESM
+**embedding** adds.*
+
 ---
 
 ## Overall conclusion

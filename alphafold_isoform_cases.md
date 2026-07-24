@@ -567,9 +567,29 @@ outliers are exposed changes that flip the fold (the burial signal). Cost: fold
 budget doubles (17%→39%), precision ~19%. A real fix for the blind spot, but one
 for **high-stakes/clinical** use, not casual screening.
 
----
+### Breaking the ceiling — protein language model embeddings
 
-## Sources
+Every hand-crafted feature, interaction, model family, cascade and specialist stalled
+at ~AUC 0.79 (the information ceiling). The one orthogonal data type — **pLM
+embeddings** — broke it. Mean-pooled **ESM-2 (150M)** over the changed region, PCA-50,
+gene-grouped CV, full 11k (`esm_embedding_full.py`):
+
+| model | AUC |
+|-------|:---:|
+| baseline (our 6 features) | 0.787 |
+| + ESM region embedding (PCA-50) | 0.816 |
+| + canonical−alt **difference** embedding | 0.794 |
+| **+ region + difference** | **0.822** (+0.035) |
+
+Nuances: ESM *alone* (0.730) is weaker than our features (they're genuinely good);
+the raw 640-dim vector *overfits* (0.782) and must be PCA-compressed; the
+fold-change-targeted canonical−alt difference adds on top. This is the first thing
+to exceed the ceiling — confirming that the limit was **information**, and pLMs carry
+more of it than any scalar. It also answers "run our model on the VEPs' data": DOMAS
+already consumes the #1 VEP (AlphaMissense = `region_am`); adding ESM **embeddings**
+helps (+0.035), whereas scalar VEP scores (EVE etc.) are redundant with AlphaMissense.
+The end-game is **ESMFold** — folding the isoform directly from the same pLM — for the
+routed uncertain cases.
 
 - **Cases 1–7:** *Predicting the structural impact of human alternative
   splicing*, **Genome Biology 2025**, doi:10.1186/s13059-025-03744-x —
