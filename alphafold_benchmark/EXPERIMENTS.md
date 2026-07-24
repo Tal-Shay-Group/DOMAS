@@ -277,6 +277,92 @@ lever is closed**: the ceiling is the information in the changed-region sequence
 labels, not embedding capacity — the residual is still "does the remainder refold,"
 which only folding resolves. 150M is the cost/benefit operating point.*
 
+## Phase 10 — a second sweep for missed signal (algorithms / data / sources)
+
+Prompted by "did we miss anything?" — nine follow-ups. All report AUC + accuracy@0.5 +
+R² for **both** targets (structural R² = continuous TM; functional R² = label-variance).
+Shared harness: `exp_common.py` (master table, gene-grouped CV). Structural baseline is
+the 6 features (AUC ≈ 0.777 / acc 0.743 / R² 0.323).
+
+**E34. Position of the changed region (N-/C-term vs internal).** Free from
+canon_lo/canon_hi/L. (`exp1_position.py`.)
+→ *Structural **+0.017 AUC → 0.794**, acc 0.749, **R² 0.323 → 0.355**, driven by
+`dist_term` (distance to nearest terminus): internal changes preserve fold, terminal
+changes flip it (72% of AS changes are terminal). Functional: negligible (+0.002).
+A free structural feature, candidate for `fold_change_prob`.*
+
+**E35. Table S4 columns that were dropped on extraction.** `table_s4_all.csv` kept only
+7 of 28 columns; recovered the rest to `table_s4_full.csv`. (`exp2_tables4.py`.)
+→ *Isoform secondary-structure / Rg / charge / IDR% predict TM at **AUC 0.922** but are
+**CIRCULAR** (derived from the isoform's own AF2 fold — a prospective tool would have to
+fold it, i.e. already have TM). Non-circular charge/radius deltas add **0**. PTM-change
+counts (added/missed/buried↔exposed) add only **+0.002** functional (ptm_missed tracks
+pathogenic overlap 3.84 vs 1.66 but is redundant with region length + region_am).*
+
+**E36. Multi-task joint model.** Shared trunk + 3 heads (TM-class, patho-class, TM-reg),
+masked losses, torch. (`exp3_multitask.py`.)
+→ *No transfer benefit. Structural 0.777 → 0.789 = just NN capacity (E25 single-task MLP
+already 0.794). Functional **HURT**: 0.855 → 0.833 AUC, R² 0.372 → 0.313. Logistic-per-task
+stays best; joint training degrades the task logistic already wins.*
+
+**E37. ESM pooling that keeps positional structure.** Multi-pool (mean+max+std+first+last
+token) vs mean-pool of the same 150M per-residue embeddings, 3k subset. (`exp4_esmhead.py`.)
+→ *Dead even: structural **0.819 vs 0.818** AUC, R² 0.445 vs 0.446. Richer pooling adds
+nothing, so a heavier attention/CNN head would hit the same E32 information ceiling.
+Embeddings don't help the functional axis (a fold-axis signal).*
+
+**E38. PAE — the assumption from E13, finally measured. THE result.** Downloaded canonical
+AFDB PAE (`predicted_aligned_error_v6.json`) for all 5,557 benchmark proteins; computed
+region↔rest PAE and whole-structure mean PAE. (`exp5_pae.py`, `exp5b_pae_rigor.py`,
+`exp5_pae_full.py`.)
+→ *PAE is **not** redundant — it is the single strongest fold-change signal found, and it
+was sitting unused. Full 10,227 pairs: structural baseline 0.778 → **+PAE 0.895** →
+**+PAE+protL 0.904 AUC**, acc 0.744 → **0.830**, **R² 0.324 → 0.693**. `pae_global`
+dominates (alone → 0.891). **Survives every control**: partial Spearman(pae_reg2rest,
+TM | identity+reglen+burial+protL) = **−0.44**; partial(pae_global, …) = **−0.77**.
+Protein length itself is a non-confound (corr +0.03 with TM, adds 0). **Leakage-free**:
+pae_global is constant within a gene (gene-grouped CV holds whole genes out); pae_reg2rest
+is region-specific and correlates −0.428 with TM even **within** multi-isoform proteins
+(1,038 genes). **Overturns E13's "PAE likely redundant with burial."** Functional:
+negligible (0.855 → 0.854). Honest caveat: part of the effect is that TM between two
+**low-confidence** AF2 models is low by construction, so high canonical PAE flags "this
+TM is unreliable" as much as "real fold change" — but it is canonical-only, non-circular,
+and prospectively available, so it is a legitimate large signal.*
+
+**E39. Cross-species conservation (phyloP) — E26's "redundant with AM" assumption.**
+Built the pipeline E26 skipped: EBI proteins coordinates API (protein→genome) → UCSC hg38
+100-way phyloP bigWig (remote pyBigWig). (`exp6_conservation.py`.)
+→ *Modest positive on 363 pairs: phyloP correlates 0.66 with region_am (related, not
+redundant) and adds beyond it structurally — baseline 0.752 → **+phyloP 0.789 AUC**,
+**R² 0.331 → 0.427**. **Partially contradicts E26.** Functional: negligible (n=70 too
+small). Small, AM-correlated sample → a "worth scaling up" signal, not a confirmed win
+like PAE.*
+
+**E40. ASpdb as an independent (non-TM) structural label — blocked.** Downloaded the bulk
+`AS_event_info.txt` (14,645 events). (Analysis in commit notes.)
+→ *The bulk file is only the AS catalog (event type + sequences); its binary flag is NOT
+a structural-alteration call (tracks identity/quality; 28 negatives among 6,354 overlap).
+The real comparative structural calls are per-entry web content, not bulk-downloadable —
+a clean independent-label test would need scraping + decoding ~14k pages. Not run.*
+
+**E41. GTEx isoform expression — scoped out.** Expression measures isoform reality/abundance,
+which is **orthogonal** to both evaluable labels (fold change; pathogenic overlap), and
+isoform reality is already partly controlled (DoChaP NMD filter; UniProt-curated isoforms).
+No isoform-relevance ground truth exists in this benchmark to test it against, so there is
+no meaningful incremental-prediction test — it would be a downstream prioritisation filter,
+not a feature for these two models. Not run (deliberate).
+
+**E42. ESMFold the isoform — the crown-jewel folding test.** Installed HF `transformers`
+ESMFold + `tmtools`; folded 43 short pairs (both isoforms, method-matched) and TM-aligned.
+(`esmfold_run.py`.)
+→ *ESMFold-TM **reproduces** the paper's AF2-TM: **Pearson 0.897 / Spearman 0.887**,
+change-call agreement 0.86 — validating "fold it yourself" as a prospective pipeline
+(no AFDB entry needed). **But** on the hard high-identity/low-TM outliers (the SRP9 class
+that motivated folding) it recovers only **5/10** — ESMFold is systematically *optimistic*
+(e.g. paper 0.36 → ESMFold 0.69), over-preserving subtle changes. The fast single-sequence
+folder isn't sensitive enough; those cases need MSA-based AF2. Folding is the right idea
+and works broadly, but the cheap folder does not crack the exact band cheap features miss.*
+
 ---
 
 ## Overall conclusion
@@ -290,23 +376,52 @@ which only folding resolves. 150M is the cost/benefit operating point.*
 - **AlphaFold burial is the one structural feature worth adding** — identity-orthogonal
   for fold change (partial +0.30; AUC 0.697 → 0.755) and non-circular for the
   functional axis (+0.022, pathogenicity-specific).
-- **Ceilings.** Cheap features predict fold change to ~AUC 0.79 (calibrated model) /
-  R² 0.31; the residual ("does the remainder refold" — the SRP9 class) needs the
-  isoform actually folded, which is what the TM label already encodes. Functional
-  truth is positive-only, so these are recall/enrichment results, not specificity.
+- **The ceiling was wrong — PAE breaks it (Phase 10, E38).** The investigation had
+  concluded cheap features top out at ~AUC 0.79 / R² 0.31 and "only folding breaks it."
+  That was because **PAE was assumed redundant (E13) and never measured.** Adding
+  canonical-structure PAE lifts fold-change prediction to **AUC 0.904 / R² 0.69** —
+  a far bigger jump than ESM embeddings (0.822), from a cheap AFDB file that was
+  available all along. So substantial identity- and burial-orthogonal *structural*
+  signal was left on the table; the "information ceiling" applied only to the feature
+  set we happened to use. Smaller honest adds from the same sweep: **position of the
+  change** (terminal vs internal, +0.017 AUC, free) and **phyloP conservation**
+  (+0.037 on a 363-pair sample, partially contradicting E26).
+- **Folding works but the cheap folder isn't enough (E42).** ESMFold-TM reproduces
+  AF2-TM (Pearson 0.90), validating self-folding as a prospective pipeline, yet it is
+  too optimistic on the hard high-id/low-TM band (5/10) — that residual needs MSA-based
+  AF2, so the SRP9 class is still the true limit.
+- **Functional axis unchanged.** None of PAE, position, phyloP, multi-task, ESM pooling
+  or PTM-change moved the functional (pathogenic-overlap) model beyond its ~0.855 AUC;
+  it remains region_am + LOEUF + length + burial driven. Functional truth is
+  positive-only, so these stay recall/enrichment results, not specificity.
 - **Two shipped calibrated scores.** DOMAS now emits `impact_prob` (functional /
   pathogenicity, gene-grouped AUC 0.765) and `fold_change_prob` (structural /
   P(TM<0.5), 0.777) alongside the categorical `impact`, both logistic (chosen
   empirically over trees/NN) and well-calibrated. Burial enters them with opposite
   signs — the core duality (buried = fold-preserving but pathogenic-variant-rich).
-- **The improvement lever is features/labels, not the model.** Un-quantising
-  recovered the biggest gain (0.585 → 0.75); gnomAD LOEUF and burial add small
-  orthogonal signal; peak-AM and fancier ML add ~nothing. Next real gains need
-  cross-species conservation and/or better functional labels.
+- **The improvement lever is features/data, not the model — emphatically confirmed.**
+  Un-quantising recovered the first big gain (0.585 → 0.75); **PAE the second and
+  largest (0.78 → 0.90)**; ESM embeddings, position and phyloP add on top; fancier ML
+  (trees/NN/multi-task) and bigger embeddings (650M) and richer pooling add ~nothing.
+  Every gain came from new *information*, never from the algorithm.
+
+## Deliberately excluded
+
+- **NMD (nonsense-mediated decay) is not an available axis.** DoChaP filters
+  NMD-targeted transcripts at DB-build time, so isoforms predicted to be degraded
+  before translation never reach the benchmark — the pairs here are protein-coding
+  isoforms only. NMD is therefore neither a usable feature nor a confound in this
+  work, and the 50-nt-rule idea was dropped for that reason.
 
 ## Open threads (not done)
 
-- Cross-species conservation (phyloP via DoChaP CDS→genome mapping) — scoped, not run.
+- **Ship PAE into `fold_change_prob`** (E38): add `pae_global` + `pae_reg2rest` (+ the
+  free `dist_term` position feature) — takes fold-change prediction 0.78 → ~0.90 AUC.
+  Needs an `afdb_pae` provisioning step (per-residue/summary PAE) in enrichment.sqlite.
+- **Scale up phyloP** (E39): confirm the +0.037 structural add beyond a 363-pair sample.
+- **MSA-based folding for the hard band** (E42): ESMFold reproduces AF2-TM broadly but
+  is too optimistic on high-id/low-TM outliers; route those to ColabFold/AF2, not ESMFold.
 - Fold burial into the production scorer (mind its counter-intuitive direction / the
   function-vs-fold target distinction).
-- Integrate ASpdb as a second, independent functional label.
+- ASpdb structural-alteration calls are per-entry web content, not bulk-downloadable
+  (E40) — would need scraping to use as an independent label.

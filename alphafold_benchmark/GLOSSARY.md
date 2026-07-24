@@ -51,7 +51,11 @@ grouped by area. Definitions are scoped to how the term was used here.
 - **pLDDT** — AF's per-residue confidence (0–100); high = well-modeled/ordered,
   low = disordered/uncertain.
 - **PAE (predicted aligned error)** — AF's confidence in the *relative* position of
-  residue pairs; captures inter-domain rigidity. (Discussed, not used — large files.)
+  residue pairs; captures inter-domain rigidity. **The single strongest fold-change
+  feature (E38):** canonical-structure PAE lifts structural AUC 0.78 → 0.90. Two
+  summaries used: `pae_global` (whole-structure mean, a protein-level fold-stability
+  prior) and `pae_reg2rest` (mean PAE between the changed region and the rest,
+  region-specific). Downloaded as `predicted_aligned_error_v6.json` from AFDB.
 - **TM-score** — structural-similarity metric between two structures, 0–1; **>0.5 =
   same fold, <0.5 = different fold**. The ground-truth label in this work.
 - **RMSD / GDT-TS** — other structure-comparison metrics (seen in a literature search).
@@ -66,8 +70,16 @@ grouped by area. Definitions are scoped to how the term was used here.
   test structural "embedding" of the changed region.
 - **Radius of gyration / surface charge** — global shape/charge descriptors (columns
   in the Genome Biology Table S4).
-- **ColabFold** — accessible AF2 re-implementation (mentioned as the way to fold
-  isoforms ourselves; not done).
+- **ColabFold** — accessible AF2 (MSA-based) re-implementation; the recommended folder
+  for the hard high-id/low-TM band that ESMFold over-preserves (E42).
+- **ESMFold** — single-sequence (MSA-free) structure predictor built on ESM-2, run via
+  HuggingFace `transformers` `EsmForProteinFolding` (E42). Its TM reproduces AF2-TM
+  (Pearson 0.90) but is systematically optimistic on subtle fold changes.
+- **tmtools** — Python wrapper for US-align/TM-align; used to compute TM-score between
+  two folded structures (E42).
+- **EBI Proteins coordinates API** — `https://www.ebi.ac.uk/proteins/api/coordinates/<acc>`;
+  maps UniProt protein positions to genomic exon coordinates (protein→genome), used to
+  place the changed region on the genome for phyloP lookup (E39).
 
 ## Statistics / machine learning
 
@@ -169,8 +181,11 @@ grouped by area. Definitions are scoped to how the term was used here.
 - **APPRIS / TRIFID** — principal-isoform annotation; **SPADE** is its Pfam
   domain-integrity score.
 - **GTEx** — tissue expression (proposed as an isoform-relevance signal; not used).
-- **ConSurf / phyloP / phastCons** — per-residue / per-base conservation resources
-  (proposed for the cross-species signal; not run).
+- **ConSurf / phyloP / phastCons** — per-residue / per-base conservation resources.
+  **phyloP now run (E39)** via the UCSC hg38 100-way bigWig (remote `pyBigWig`): a
+  modest structural add (+0.037 AUC on 363 pairs), partly beyond AlphaMissense.
+- **pyBigWig** — reads bigWig tracks, including *remote* range queries over HTTP (used
+  to pull phyloP for genomic intervals without downloading the ~9 GB file).
 - **IsoformMapper / AlphaSync** — related isoform tools/DBs found in the literature search.
 - **ECOD** — structural-domain classification (deliberately excluded from enrichment).
 

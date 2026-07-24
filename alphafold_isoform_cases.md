@@ -632,6 +632,56 @@ the information in the changed-region sequence plus the labels, not embedding
 capacity. The residual is still whether the remainder *refolds*, which only actually
 folding the isoform resolves. **150M is the right cost/benefit operating point.**
 
+### Second sweep — the ceiling was an artefact of the feature set (PAE breaks it)
+
+Revisiting "did we miss any algorithm, data type, or source," nine follow-ups were run,
+each reporting AUC + accuracy@0.5 + R² for **both** targets (harness `exp_common.py`,
+scripts `exp1`–`exp6`, `exp5b`, `esmfold_run.py`). The structural baseline is the six
+calibrated features (AUC ≈ 0.78 / acc 0.74 / R² 0.32).
+
+| # | signal tested | structural AUC / acc / R² | functional | verdict |
+|---|---------------|:--------------------------:|:----------:|---------|
+| baseline | 6 features | 0.778 / 0.744 / 0.324 | 0.855 AUC | — |
+| E38 | **canonical PAE** | **0.904 / 0.830 / 0.693** | +0.00 | **breaks the ceiling** |
+| E34 | position (terminal vs internal) | 0.794 / 0.749 / 0.355 | +0.00 | small free win |
+| E39 | phyloP conservation (n=363) | 0.789 / 0.741 / 0.427 | ~0 (n=70) | modest; scale up |
+| E37 | ESM multi-pool vs mean-pool | 0.819 = 0.818 | — | no gain |
+| E36 | multi-task joint net | 0.789 (=NN capacity) | 0.833 (**hurt**) | no benefit |
+| E35 | Table S4 isoform SS/Rg/IDR | 0.922 **but circular** | +0.00 | unusable (needs the fold) |
+| E40 | ASpdb non-TM label | — | — | blocked (not bulk-downloadable) |
+| E41 | GTEx expression | — | — | orthogonal; scoped out |
+| E42 | ESMFold self-folding | Pearson 0.90 vs AF2-TM | — | works broadly; 5/10 on hard band |
+
+**PAE (predicted aligned error) is the headline, and it is a correction.** Earlier the
+PAE track was *assumed* redundant with burial and skipped; it was never measured. It is
+the single strongest fold-change signal found. On all 10,227 pairs, adding canonical
+PAE takes the structural model from **AUC 0.778 → 0.904**, acc 0.744 → 0.830, and
+**R² 0.324 → 0.693** — a much larger jump than ESM embeddings gave (0.822), from a cheap
+AFDB JSON that was available the whole time. It survives every control (partial
+Spearman vs TM = −0.44 region-specific / −0.77 whole-structure, after identity + region
+length + burial + protein length), is leakage-free under gene-grouped CV (`pae_global`
+is constant within a gene; `pae_reg2rest` still correlates −0.43 with TM *within*
+multi-isoform proteins), and protein length alone is a non-confound. Mechanistically,
+proteins AlphaFold models as one confident rigid unit preserve fold under splicing,
+while uncertain multi-domain/flexible ones change — with the honest caveat that TM
+between two *low-confidence* AF2 models is low by construction, so high canonical PAE
+partly flags "this TM is unreliable" as much as "real fold change." Either way it is
+canonical-only, non-circular and prospectively available. **So the "information ceiling"
+of the earlier phases was an artefact of the feature set, not a real limit** — a large,
+identity- and burial-orthogonal structural signal was left unused. Position of the change
+(terminal changes flip the fold; +0.017 AUC, free) and cross-species phyloP (+0.037 on a
+small sample, partly contradicting the earlier "redundant with AlphaMissense" call) are
+smaller genuine adds. Nothing moved the **functional** axis beyond ~0.855.
+
+**Folding the isoform (ESMFold) — the right idea, but the cheap folder is not enough.**
+ESMFold-computed TM reproduces the paper's AF2-TM well (Pearson 0.90, Spearman 0.89,
+change-call agreement 0.86 on 43 short pairs, both folded), validating "fold it yourself"
+as a prospective pipeline needing no AFDB entry. But on the hard high-identity/low-TM
+outliers (the SRP9 class), it recovers only 5/10 — ESMFold is systematically optimistic
+(e.g. paper 0.36 → ESMFold 0.69), over-preserving subtle changes. That last residual
+still needs MSA-based AF2, so the SRP9 class remains the true limit — but the practical
+ceiling for cheap features is now ~0.90, not ~0.79.
+
 - **Cases 1–7:** *Predicting the structural impact of human alternative
   splicing*, **Genome Biology 2025**, doi:10.1186/s13059-025-03744-x —
   <https://pmc.ncbi.nlm.nih.gov/articles/PMC12442299/> (local copy:
@@ -666,6 +716,10 @@ These 328/53 are a ready-made "hard positive" set to test whether DOMAS's
 impact score flags structure changes that sequence identity alone misses.
 
 ## Notes / caveats
+- **NMD is not a signal here.** DoChaP filters nonsense-mediated-decay–targeted
+  transcripts when building the DB, so isoforms degraded before translation never
+  enter the benchmark — every pair is a protein-coding isoform. NMD-likelihood is
+  therefore neither a feature nor a confound (it cannot explain the false positives).
 - "No-change" examples are under-represented in the literature (papers emphasize
   changes); only SRP9 (clear) + EEF1AKMT3 (partial) here. Worth adding more
   preserved-structure cases before treating this as a balanced benchmark.

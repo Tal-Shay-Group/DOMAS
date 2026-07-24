@@ -22,7 +22,10 @@ splicing*, Genome Biology 2025, doi:10.1186/s13059-025-03744-x.
 - **MOESM5 = Table S4** (`moesm5.xlsx`): **11,161** isoforms × 28 columns — isoform
   ID, length, pLDDT, class, sequence identity, **TM-score**, helix/sheet/loop
   fractions, surface charge, radius of gyration, PTM-change and IDR-percentage
-  fields. → extracted to `table_s4_all.csv`.
+  fields. Originally only 7 of the 28 columns were kept (`table_s4_all.csv`); the
+  full 28 were later recovered to **`table_s4_full.csv`** (E35). The 21 extra columns
+  turned out either **circular** for TM (isoform SS/Rg/IDR come from the isoform's own
+  fold) or non-additive (PTM-change).
 - *Note:* the xlsx used a non-standard OOXML namespace (`purl.oclc.org/ooxml/...`);
   parsed by reading `sheet1.xml` + `sharedStrings.xml` directly.
 
@@ -56,7 +59,33 @@ Base FTP: `https://ftp.uniprot.org/pub/databases/uniprot/current_release/`
   downloaded for **5,880** canonical accessions (the benchmark proteins),
   parallel via `curl`/`xargs`. → per-residue RSA + secondary structure + contacts
   (E12–E13). Stored in scratchpad (`afstruct/`), not committed.
+- **PAE** — `https://alphafold.ebi.ac.uk/files/AF-<acc>-F1-predicted_aligned_error_v6.json`,
+  downloaded for **5,557** canonical accessions (parallel `curl`/`xargs`, scratchpad
+  `pae/`, not committed). → `pae_global` + `pae_reg2rest` (E38, the strongest fold-change
+  feature) in `pae_features_full.csv`. NxN predicted-aligned-error matrix per protein.
 - License: AlphaFold DB CC-BY 4.0.
+
+## 3b. UCSC phyloP + EBI coordinates — cross-species conservation (E39)
+
+- **EBI Proteins coordinates API** — `https://www.ebi.ac.uk/proteins/api/coordinates/<acc>`
+  (JSON via `Accept: application/json`): per-exon protein→genome mapping (chromosome,
+  strand, exon protein/genome spans). Maps the changed region onto hg38.
+- **UCSC hg38 100-way phyloP** — `http://hgdownload.soe.ucsc.edu/goldenPath/hg38/phyloP100way/hg38.phyloP100way.bw`
+  (~9 GB), queried **remotely** with `pyBigWig` range requests (no full download). → mean
+  phyloP over the changed region / whole protein (`phylop_features.csv`). License: UCSC free.
+
+## 3c. ESMFold + tmtools — self-folding the isoform (E42)
+
+- **ESMFold** via HuggingFace `transformers` `EsmForProteinFolding` (`facebook/esmfold_v1`,
+  ~2.7 GB weights + wrapped ESM-2 LM, HF cache). CPU folding ~20 s per short pair.
+- **tmtools** (pip; wraps US-align) for TM-score between folded structures. → `esmfold_results.csv`.
+
+## 3d. ASpdb — attempted independent structural label (E40, blocked)
+
+- **Bulk file** — `https://biodataai.uth.edu/ASpdb/tables/AS_event_info.txt` (14,645 AS
+  events: acc, gene, isoform pair, lengths, event type, changed sequences). Contains **no
+  usable structural-alteration call** — the comparative structural verdicts are per-entry
+  web content only. Not usable as a bulk label. (Website: `https://biodataai.uth.edu/ASpdb/`.)
 
 ## 4. DoChaP — transcript / domain database (local)
 
@@ -132,3 +161,12 @@ Via web search; catalogued for context / future work:
 | `ml_compare.py` | model-family comparison (logistic chosen over trees/NN) |
 | `variant_impact_contingency.py` / `variant_impact_by_score_decile.py` | pathogenic/benign × impact tables |
 | `domas_vs_tm.png` / `pred_vs_tm.png` | the two scatter figures |
+| `esm650_compare.py` / `esm650_accuracy.py` | ESM-2 650M vs 150M (E33) |
+| `exp_common.py` | Phase-10 shared harness (master table + gene-grouped CV, all 3 metrics) |
+| `exp1_position.py` | position of changed region (E34) |
+| `exp2_tables4.py` | recovered Table S4 columns (E35) |
+| `exp3_multitask.py` | multi-task joint model (E36) |
+| `exp4_esmhead.py` | ESM multi-pool vs mean-pool (E37) |
+| `exp5_pae.py` / `exp5b_pae_rigor.py` / `exp5_pae_full.py` | **PAE — the ceiling-break (E38)** |
+| `exp6_conservation.py` | phyloP conservation pipeline (E39) |
+| `esmfold_probe.py` / `esmfold_run.py` | ESMFold feasibility + self-folding test (E42) |
