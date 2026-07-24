@@ -614,6 +614,14 @@ out to ~0.30–0.70, so wider bands are defensible for higher stakes. Pair the b
 with the high-id+exposed widened trigger to also catch the confidently-wrong
 high-id/low-TM outliers (which sit *outside* the band).
 
+**Hyperparameter sweep — no meaningful headroom.** Grid over PCA dim {20,50,100,150}
+× logistic C {0.05…1.0} × Ridge α {1…50}, gene-grouped CV. The classifier AUC is
+**dead flat at 0.822** regardless of regularization or PCA dim; regression R² is
+**insensitive to α** and gains only from *more* PCA components (0.461 at PCA-50 →
+**0.472 at PCA-150**, +0.011, adopted). The total insensitivity to regularization
+means the model is neither over- nor under-fitting — we're at the information limit
+again, so the remaining lever is a **richer embedding** (ESM-2 650M), not tuning.
+
 - **Cases 1–7:** *Predicting the structural impact of human alternative
   splicing*, **Genome Biology 2025**, doi:10.1186/s13059-025-03744-x —
   <https://pmc.ncbi.nlm.nih.gov/articles/PMC12442299/> (local copy:

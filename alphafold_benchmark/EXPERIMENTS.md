@@ -256,6 +256,14 @@ data" = already done for AM; done for ESM (E30, embeddings add +0.035); EVE decl
 behind a JS app). Scalar VEP scores are redundant with AM; only the rich ESM
 **embedding** adds.*
 
+**E32. Hyperparameter sweep on the combined model — no headroom.** Grid PCA dim
+{20,50,100,150} × logistic C {0.05–1.0} × Ridge α {1–50}, gene-grouped CV.
+→ *Classifier AUC **flat at 0.822** across everything; regression R² insensitive to
+α, gains only from more PCA components (0.461@50 → **0.472@150**, +0.011). Total
+insensitivity to regularization = neither over- nor under-fitting = information
+limit again. Remaining lever is a richer embedding (ESM-2 650M, in progress), not
+tuning. (650M vs 150M comparison on a 3k subset: `esm650.py`.)*
+
 ---
 
 ## Overall conclusion
