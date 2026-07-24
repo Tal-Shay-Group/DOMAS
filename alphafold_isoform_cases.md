@@ -522,6 +522,26 @@ ensembles and NNs have nothing extra to exploit — the ceiling is set by the
 features/labels, not the algorithm. (A Bayesian logistic would give the same
 point AUC and add only per-prediction uncertainty, not accuracy.)
 
+### Uncertainty routing (`fold_change_call`)
+
+Since the cheap-feature ceiling (~AUC 0.79) is set by the "does the remainder
+refold?" residual that only actual folding resolves, the honest output is a
+**triage**, not a forced call. `utils.fold_change_call` maps `fold_change_prob` →
+`change` (≥0.6), `preserved` (≤0.4), or `uncertain` (route to folding/inspection);
+wired into add_scores as a `fold_change_call` column. `selective_prediction.py`.
+
+**Selective prediction** (gene-grouped OOF, structural model): abstaining on the
+least-confident cases lifts accuracy on the *called* set from **75% (call all) →
+80% at 80% coverage → 86% at 50% coverage**.
+
+The **uncertain band (prob 0.4–0.6) is 17% of pairs** and has an observed change
+rate of **0.47** — a genuine coin-flip, i.e. the model correctly expresses "don't
+know," not error. Its feature signature is exactly the SRP9 class: more **divergent**
+(identity 64 vs 80), more **exposed** (buried_frac 0.20 vs 0.34), more **domain
+loss** (cov-loss 43 vs 26) — a big, exposed change whose refolding cheap features
+can't judge. Those are the cases to fold (ColabFold) or inspect; the confident 41%
+(prob <0.2 or >0.8) can be reported directly.
+
 ---
 
 ## Sources

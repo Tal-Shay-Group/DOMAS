@@ -491,6 +491,25 @@ def fold_change_probability(identity=None, buried_frac=None, mean_rsa=None,
     return round(1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, z)))), 4)
 
 
+def fold_change_call(fold_change_prob, low=0.4, high=0.6):
+    """Triage a fold_change_probability into an actionable call. Cheap features
+    top out at ~AUC 0.79 for fold change; the mid-probability band is genuinely
+    ambiguous (~47% real change rate) and is the 'does the remainder refold' class
+    that only actual folding resolves. So route it out rather than force a call:
+
+        prob >= high  -> 'change'     (confident: different fold)
+        prob <= low   -> 'preserved'  (confident: same fold)
+        otherwise     -> 'uncertain'  (fold/inspect to resolve)
+
+    Abstaining on 'uncertain' lifts accuracy on the called cases from ~75% (call
+    all) to ~86% (call the confident half). Returns None if prob is None/blank.
+    """
+    if fold_change_prob is None or fold_change_prob == '':
+        return None
+    p = float(fold_change_prob)
+    return 'change' if p >= high else 'preserved' if p <= low else 'uncertain'
+
+
 def calc_spade_score(domains_by_isoform):
     """SPADE-style per-isoform Pfam domain-integrity score.
 

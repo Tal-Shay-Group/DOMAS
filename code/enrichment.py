@@ -27,7 +27,7 @@ import pandas as pd
 import build  # _parse_hmmsearch_domtbl (bitscores)
 from junction_analisys import NON_COMPARISON_EVENTS
 from utils import (calc_spade_score, hmm_change_impact, insertion_impact,
-                   impact_probability, fold_change_probability)
+                   impact_probability, fold_change_probability, fold_change_call)
 
 _PRIMARY_FT_SKIP = {'CHAIN', 'SIGNAL', 'Chain', 'Signal'}
 _IMPACT_RANK = {'none': 0, 'gain': 1, 'low': 1, 'moderate': 2, 'high': 3}
@@ -492,6 +492,7 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
     df['impact'] = df.apply(lambda r: _blank_nc(r, impact.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df['impact_prob'] = df.apply(lambda r: _blank_nc(r, prob_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df['fold_change_prob'] = df.apply(lambda r: _blank_nc(r, fold_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
+    df['fold_change_call'] = df['fold_change_prob'].apply(lambda v: fold_change_call(v) or '')
     df['functional_sites'] = df.apply(lambda r: _blank_nc(r, func_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df['region_am_mean'] = df.apply(lambda r: _blank_nc(r, am_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df.to_csv(out_csv, index=False)
