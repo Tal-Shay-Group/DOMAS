@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS afdb_rsa (
     mean_rsa    REAL,
     rsa         TEXT      -- comma-joined per-residue relative solvent accessibility (0=buried..1=exposed)
 );
+CREATE TABLE IF NOT EXISTS afdb_pae (
+    accession   TEXT PRIMARY KEY,
+    length      INTEGER,
+    pae_global  REAL      -- mean predicted-aligned-error over the whole canonical structure
+);
 CREATE TABLE IF NOT EXISTS gene_constraint (
     accession   TEXT PRIMARY KEY,   -- UniProt accession
     gene        TEXT,
@@ -261,6 +266,64 @@ def build_afdb_rsa(data_dir, con, species_list):
                      raw, n, notes="RSA from Shrake-Rupley on F1 model; Tien 2013 max-ASA")
         total += n
         print(f"  [afdb_rsa] {sp}: {n} proteins")
+    return total
+
+
+_AF_PAE_NAME = re.compile(r"AF-([A-Z0-9]+)-F1-predicted_aligned_error_v\d+\.json\.gz$")
+
+
+def _pae_global_from_json(text):
+    """Mean predicted-aligned-error over the whole matrix, from an AFDB PAE JSON
+    (both the {'predicted_aligned_error': [[...]]} and legacy list forms)."""
+    import json
+    try:
+        j = json.loads(text)
+        if isinstance(j, list):
+            j = j[0]
+        M = j.get("predicted_aligned_error") or j.get("pae")
+        if not M:
+            return None, 0
+        n = len(M)
+        tot = sum(sum(row) for row in M)
+        return round(tot / (n * n), 4), n
+    except Exception:
+        return None, 0
+
+
+def build_afdb_pae(data_dir, con, species_list):
+    """Whole-structure mean PAE (predicted aligned error) from the AlphaFold DB
+    proteome tars (same source as build_afdb; the tars carry a
+    `-predicted_aligned_error_v*.json.gz` per protein), stored in afdb_pae.
+    `pae_global` is the dominant feature of fold_change_probability (E38). Opt-in."""
+    total = 0
+    for sp in species_list:
+        dataset = download.SPECIES[sp]["afdb"]
+        raw = os.path.join(data_dir, "afdb", dataset + ".tar")
+        if not os.path.exists(raw):
+            print(f"  [afdb_pae] {sp}: missing {raw} - run -download afdb first; skipping")
+            continue
+        n = 0
+        with tarfile.open(raw, "r") as tar:
+            for member in tar:
+                m = _AF_PAE_NAME.search(member.name)
+                if not m:
+                    continue
+                acc = m.group(1)
+                text = gzip.decompress(tar.extractfile(member).read()).decode("latin-1")
+                pae_global, length = _pae_global_from_json(text)
+                if pae_global is None:
+                    continue
+                con.execute(
+                    "INSERT OR REPLACE INTO afdb_pae(accession,length,pae_global) VALUES(?,?,?)",
+                    (acc, length, pae_global))
+                n += 1
+                if n % 2000 == 0:
+                    con.commit(); print(f"  [afdb_pae] {sp}: {n}...")
+        con.commit()
+        _record_meta(con, "afdb_pae", dataset, sp, f"{download._AFDB_BASE}/{dataset}.tar",
+                     raw, n, notes="mean PAE over the F1 predicted_aligned_error matrix")
+        total += n
+        print(f"  [afdb_pae] {sp}: {n} proteins")
     return total
 
 
@@ -626,6 +689,9 @@ def build_all(data_dir, db_path, species=None, only=None, delete_raw=False):
     # afdb_rsa is the opt-in burial pass (Shrake-Rupley, slower); reuses the afdb tar.
     if "afdb_rsa" in only:
         build_afdb_rsa(data_dir, con, species)
+    # afdb_pae is the opt-in PAE pass (whole-structure mean); reuses the afdb tar.
+    if "afdb_pae" in only:
+        build_afdb_pae(data_dir, con, species)
     if "ensembl" in only:
         build_ensembl(data_dir, con, species)
     if "pfam" in only:

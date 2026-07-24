@@ -454,34 +454,47 @@ def impact_probability(region_am=None, loeuf=None, max_cov_loss=None, buried_fra
 
 # Calibrated logistic model for the fold-change probability (structural axis):
 # P(the alternative isoform has a different fold, TM-score < 0.5). Trained on
-# 10,232 changed-regions labelled by the Genome Biology 2025 AlphaFold TM-scores,
-# features standardised, missing imputed to the training median. Gene-grouped
-# 5-fold CV AUC 0.777, accuracy 74% (@0.5), well-calibrated. This is a DIFFERENT
-# question from impact_probability: burial flips sign - a buried changed region
-# PRESERVES the fold here (coef -0.93) but harbours pathogenic variants there
-# (+0.24). Regenerate with alphafold_benchmark/fit_foldchange.py.
+# 10,227 changed-regions labelled by the Genome Biology 2025 AlphaFold TM-scores,
+# features standardised, missing imputed to the training median.
+#
+# Feature set rebuilt around AlphaFold **PAE** (E38): `pae_global` (whole canonical
+# structure mean predicted-aligned-error) is by far the strongest fold-change signal
+# and dominates the model (std coef ~ +2). It lifts gene-grouped 5-fold CV from the
+# old 6-feature AUC 0.777 to **AUC 0.894 / accuracy 0.815 / R2 0.659** (the full
+# 10-feature model reaches 0.906; these four capture ~95% of the gain for a fraction
+# of the provisioning). `identity` (trimmed-region sequence identity %) is the #2 term;
+# `max_cov_loss` (max Pfam coverage lost) and `protL` (canonical protein length) add
+# small real signal. Burial / region_am / loeuf were dropped: ~0 marginal here once
+# PAE is in (they drive impact_probability, the functional axis - the fold-vs-function
+# duality). Regenerate with alphafold_benchmark/fit_foldchange_pae.py.
 _FOLD_CHANGE_MODEL = {
-    'features': ['identity', 'buried_frac', 'mean_rsa', 'region_am', 'loeuf', 'max_cov_loss'],
-    'median':   [75.0, 0.236, 0.4509, 0.483, 0.884, 11.0],
-    'mean':     [66.3421, 0.2584, 0.4678, 0.481, 0.9085, 33.2563],
-    'std':      [28.0247, 0.2339, 0.1819, 0.1855, 0.4535, 39.2996],
-    'coef':     [-0.6662, -0.9294, 0.1828, 0.4646, 0.114, 0.537],
-    'intercept': -0.8508,
+    'features': ['pae_global', 'identity', 'max_cov_loss', 'protL'],
+    'median':   [17.1268, 75.0, 11.0, 388.0],
+    'mean':     [16.5883, 66.3577, 33.2236, 379.1839],
+    'std':      [7.1173, 28.0213, 39.2834, 134.3642],
+    'coef':     [1.9553, -0.6826, 0.6514, -0.5351],
+    'intercept': -1.2597,
 }
 
 
-def fold_change_probability(identity=None, buried_frac=None, mean_rsa=None,
-                            region_am=None, loeuf=None, max_cov_loss=None):
+def fold_change_probability(pae_global=None, identity=None, max_cov_loss=None, protL=None):
     """Calibrated probability (0-1) that the alternative isoform adopts a DIFFERENT
     fold (AlphaFold TM-score < 0.5) - the structural companion to
-    impact_probability (which is functional/pathogenicity). `identity` is the
-    sequence identity (%) between the canonical and alternative protein. A missing
-    feature is imputed to the training median. See `_FOLD_CHANGE_MODEL`.
+    impact_probability (which is functional/pathogenicity).
+
+    Features (see `_FOLD_CHANGE_MODEL`):
+      pae_global   - mean predicted-aligned-error over the canonical AlphaFold
+                     structure (higher = floppier/multi-domain -> more fold change).
+                     The dominant signal; provisioned via the afdb_pae table.
+      identity     - sequence identity (%) between canonical and alternative protein.
+      max_cov_loss - max Pfam coverage (%) lost in the changed region.
+      protL        - canonical protein length (aa).
+    A missing feature is imputed to the training median.
 
     Returns a float in [0, 1], or None if every feature is missing.
     """
     m = _FOLD_CHANGE_MODEL
-    vals = [identity, buried_frac, mean_rsa, region_am, loeuf, max_cov_loss]
+    vals = [pae_global, identity, max_cov_loss, protL]
     if all(v is None for v in vals):
         return None
     z = m['intercept']

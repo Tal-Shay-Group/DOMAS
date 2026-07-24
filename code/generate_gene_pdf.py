@@ -1321,10 +1321,11 @@ class GeneVisualization:
                 if self.fold_change_by_transcript:
                     fig.text(
                         0.02, 0.004,
-                        "Note on P(fold change): AlphaFold burial enters this structural score with the "
-                        "OPPOSITE sign to the functional/pathogenicity score — a buried changed region "
-                        "PRESERVES the fold (structural) yet is where pathogenic variants concentrate "
-                        "(functional). The two are different questions.",
+                        "Note on P(fold change): this structural score is driven by AlphaFold PAE "
+                        "(predicted aligned error) of the canonical structure — a well-defined, rigid "
+                        "fold (low PAE) tends to be PRESERVED under splicing, an uncertain/multi-domain "
+                        "one (high PAE) tends to change. It is a different question from the "
+                        "functional/pathogenicity score (impact), which is region_am/constraint-driven.",
                         fontsize=5.6, style='italic', color='#555555', va='bottom', wrap=True,
                     )
                 pdf.savefig(fig, bbox_inches='tight', dpi=PDF_RASTER_DPI)

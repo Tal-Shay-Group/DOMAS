@@ -87,6 +87,20 @@ class Enricher:
             return None
         return [float(x) for x in row[0].split(',')] if row else None
 
+    def pae_global(self, uniprot):
+        """Whole-structure mean PAE (predicted aligned error) of the canonical
+        AlphaFold model for a UniProt accession, or None. Higher = floppier /
+        multi-domain (relative positions uncertain); the dominant fold-change
+        feature. Optional table (present only if afdb_pae was provisioned)."""
+        if not uniprot:
+            return None
+        try:
+            row = self.enr.execute(
+                "SELECT pae_global FROM afdb_pae WHERE accession=?", (uniprot,)).fetchone()
+        except sqlite3.OperationalError:
+            return None
+        return row[0] if row and row[0] is not None else None
+
     def loeuf(self, uniprot):
         """gnomAD LOEUF (gene loss-intolerance; lower = more constrained) for a
         UniProt accession, or None. Optional table (present only if gnomAD was
@@ -478,9 +492,13 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
         if reg and reg['canon']:
             prob_col[(canon, comp)] = impact_probability(
                 region_am=region_am, loeuf=loeuf, max_cov_loss=max_cov_loss, buried_frac=buried_frac)
+            # fold_change_prob is now PAE-driven (E38): pae_global (whole canonical
+            # structure) dominates, with identity, max_cov_loss and protein length.
+            pae_global = e.pae_global(uni)
+            protL = len(seqs.get(canon) or '') or None
             fold_col[(canon, comp)] = fold_change_probability(
-                identity=identity, buried_frac=buried_frac, mean_rsa=region_rsa,
-                region_am=region_am, loeuf=loeuf, max_cov_loss=max_cov_loss)
+                pae_global=pae_global, identity=identity,
+                max_cov_loss=max_cov_loss, protL=protL)
         else:
             prob_col[(canon, comp)] = fold_col[(canon, comp)] = ''
 
