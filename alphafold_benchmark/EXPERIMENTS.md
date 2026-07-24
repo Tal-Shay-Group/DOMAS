@@ -261,8 +261,10 @@ behind a JS app). Scalar VEP scores are redundant with AM; only the rich ESM
 → *Classifier AUC **flat at 0.822** across everything; regression R² insensitive to
 α, gains only from more PCA components (0.461@50 → **0.472@150**, +0.011). Total
 insensitivity to regularization = neither over- nor under-fitting = information
-limit again. Remaining lever is a richer embedding (ESM-2 650M, in progress), not
-tuning. (650M vs 150M comparison on a 3k subset: `esm650.py`.)*
+limit again. Remaining lever is a richer embedding (ESM-2 650M), not tuning.
+**ESM-2 650M NOT tested — the 2.5 GB weight download from `dl.fbaipublicfiles.com`
+stalled dead (~423 MB, 0 KB/s).** Retry in a fresh session via `esm650.py` (3k-subset
+150M-vs-650M comparison; needs the model download to succeed).*
 
 ---
 
