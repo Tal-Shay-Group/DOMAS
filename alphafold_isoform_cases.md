@@ -622,6 +622,16 @@ high-id/low-TM outliers (which sit *outside* the band).
 means the model is neither over- nor under-fitting — we're at the information limit
 again, so the remaining lever is a **richer embedding** (ESM-2 650M), not tuning.
 
+**Richer embedding tested — ESM-2 650M ≈ 150M.** The 650M model was run on the
+identical 3,000-pair subset (gene-grouped CV, region+difference PCA-50) against the
+150M embeddings. It adds essentially nothing: **AUC 0.820 → 0.827** (+0.007),
+**R² 0.445 → 0.454** (+0.009), **accuracy@0.5 0.757 → 0.765** (+0.008). The
+meaningful gain remains baseline → 150M (+0.024 AUC); a 4.3× larger model buys <1 pt
+on every metric. So the "richer embedding" lever is now closed too — the ceiling is
+the information in the changed-region sequence plus the labels, not embedding
+capacity. The residual is still whether the remainder *refolds*, which only actually
+folding the isoform resolves. **150M is the right cost/benefit operating point.**
+
 - **Cases 1–7:** *Predicting the structural impact of human alternative
   splicing*, **Genome Biology 2025**, doi:10.1186/s13059-025-03744-x —
   <https://pmc.ncbi.nlm.nih.gov/articles/PMC12442299/> (local copy:

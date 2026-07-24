@@ -261,10 +261,21 @@ behind a JS app). Scalar VEP scores are redundant with AM; only the rich ESM
 → *Classifier AUC **flat at 0.822** across everything; regression R² insensitive to
 α, gains only from more PCA components (0.461@50 → **0.472@150**, +0.011). Total
 insensitivity to regularization = neither over- nor under-fitting = information
-limit again. Remaining lever is a richer embedding (ESM-2 650M), not tuning.
-**ESM-2 650M NOT tested — the 2.5 GB weight download from `dl.fbaipublicfiles.com`
-stalled dead (~423 MB, 0 KB/s).** Retry in a fresh session via `esm650.py` (3k-subset
-150M-vs-650M comparison; needs the model download to succeed).*
+limit again. Remaining lever posited: a richer embedding (ESM-2 650M), not tuning —
+tested in E33.*
+
+**E33. ESM-2 650M vs 150M — the "richer embedding" lever tested, and it isn't one.**
+Downloaded the 2.6 GB ESM-2 650M weights (the E32 stall cleared — 45 MB/s this
+session), embedded the **identical** 3,000-row subset (2,351 proteins), gene-grouped
+CV, region+difference PCA-50, compared head-to-head with the saved 150M embeddings.
+(`esm650_compare.py`; accuracy via `esm650_accuracy.py`.)
+→ *650M barely beats 150M — **AUC 0.820 → 0.827** (+0.007), **R² 0.445 → 0.454**
+(+0.009), **acc@0.5 0.757 → 0.765** (+0.008). The real jump is still baseline→150M
+(+0.024 AUC); a 4.3× larger model (33 layers/1280-dim vs 30/640) adds <1 pt on every
+metric. Both clear the majority baseline (0.641) by ~11–12 pts. **The richer-embedding
+lever is closed**: the ceiling is the information in the changed-region sequence +
+labels, not embedding capacity — the residual is still "does the remainder refold,"
+which only folding resolves. 150M is the cost/benefit operating point.*
 
 ---
 
