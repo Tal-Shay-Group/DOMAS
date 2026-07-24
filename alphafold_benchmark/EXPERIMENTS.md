@@ -203,6 +203,35 @@ justified. **Feature question closed: the ceiling ~0.76 functional / ~0.79
 structural is set by the information in the features, not the model or feature
 engineering.** The only way up is orthogonal data — folding + better labels.*
 
+## Phase 8 — uncertainty routing (b) and its limits
+
+**E27. Uncertainty routing / selective prediction.** `utils.fold_change_call` maps
+`fold_change_prob` → change / preserved / **uncertain**; abstain on uncertain and
+route to folding. (`selective_prediction.py`.)
+→ *Abstaining lifts accuracy on the called set 75%→86% (structural, 50% coverage).
+The routed middle is a **coin flip** (acc ~53-66% in-band, observed change rate
+0.47) — genuinely ambiguous, not error. Uncertain cases (17% at 0.4-0.6) have the
+SRP9 signature: divergent, exposed, high cov-loss. Band tables for both models
+recorded.*
+
+**E28. Widened trigger for the confidently-wrong outliers.** The high-id/low-TM
+outliers (identity≥80 AND TM<0.5; 1,035 = 10%) are *confidently* mis-called
+`preserved`, so the confidence gate catches only 17%.
+→ *Domain-loss widening barely helps (~30%); **"high identity AND exposed"
+(mean_rsa≥0.5) catches ~73%** (the outliers are exposed fold-flipping changes — the
+burial signal), but doubles the fold budget (17%→39%), precision ~19%. A fix for
+high-stakes use only.*
+
+**E29. Specialist model on the high-id regime — redundant.** Tried a second model
+trained only on high-identity pairs (identity dropped, since ~constant there) to
+crack the outlier regime.
+→ *No gain: specialist AUC **0.730** vs global **0.731** on the same subset. Within
+high-id, burial is the signal (single-feature ~0.65) but the **global logistic
+already uses it** — a near-constant feature doesn't corrupt the others, so the
+global model *is* effectively the specialist, and E26 already showed no
+identity×burial interaction to exploit. The high-id regime tops out at AUC ~0.73
+because the **signal is weak, not the model**. Only folding breaks it.*
+
 ---
 
 ## Overall conclusion
