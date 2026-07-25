@@ -18,6 +18,17 @@ fold, so no protein appears in both train and test — no leakage).
 Everything below is reproduced end-to-end by [`reproduce_models.py`](reproduce_models.py)
 (see §5).
 
+**Contents**
+
+1. Shared benchmark, labels, and methodology — *incl. 1.1 the two training/evaluation methods*
+2. `fold_change_prob` — structural axis
+3. `impact_prob` — functional axis
+4. Why these features and not others (audit trail)
+5. Reproduction
+6. Review checklist / essentials
+- Appendix A — Every feature evaluated, and where it comes from
+- Appendix B — Comparable published methods
+
 ---
 
 ## 1. Shared benchmark, labels, and methodology
