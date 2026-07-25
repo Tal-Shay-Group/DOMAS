@@ -23,7 +23,7 @@ DATA SOURCES
 
 Run:  python3 reproduce_models.py
 """
-import os, sys, gzip, re, io, urllib.request, collections, json
+import os, sys, gzip, re, io, urllib.request, collections, json, argparse
 import numpy as np, pandas as pd
 import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 from sklearn.model_selection import GroupKFold
@@ -140,6 +140,30 @@ def evaluate(d, feats, bin_t, cont_t=None, sub=None):
     r2 = r2_score(yc, oofr) if cont_t else r2_score(yb, oof)
     return dict(df=df, oof=oof, oofr=oofr, yb=yb, yc=yc, coef=coef, intercept=wf[0], auc=auc, acc=acc, r2=r2)
 
+def holdout_eval(d, feats, bin_t, cont_t=None, sub=None, seed=0, test_frac=0.2):
+    """Second training/eval method: a single random `test_frac` hold-out at the PAIR
+    level (NOT gene-grouped). Fit on the train split, report on the held-out test split.
+    Standardisation stats + median imputation are learned on TRAIN only (no test peeking)."""
+    df = d if sub is None else d[sub].reset_index(drop=True)
+    rng = np.random.default_rng(seed)
+    idx = rng.permutation(len(df)); ntest = int(round(len(df) * test_frac))
+    te_idx, tr_idx = idx[:ntest], idx[ntest:]
+    X = df[feats]; med = X.iloc[tr_idx].median()
+    Xf = X.fillna(med)
+    mu = Xf.iloc[tr_idx].mean().values; sd = Xf.iloc[tr_idx].std().values + 1e-9
+    Xs = np.nan_to_num(((Xf - mu) / sd).values)
+    yb = df[bin_t].values.astype(float); yc = df[cont_t].values.astype(float) if cont_t else None
+    Xtr = np.column_stack([np.ones(len(tr_idx)), Xs[tr_idx]]); Xte = np.column_stack([np.ones(len(te_idx)), Xs[te_idx]])
+    w = _fit_logistic(Xtr, yb[tr_idx]); p_te = 1 / (1 + np.exp(-np.clip(Xte @ w, -30, 30)))
+    auc = roc_auc_score(yb[te_idx], p_te); acc = accuracy_score(yb[te_idx], (p_te >= 0.5))
+    if cont_t:
+        b, *_ = np.linalg.lstsq(Xtr.T @ Xtr + 5 * np.eye(Xtr.shape[1]), Xtr.T @ yc[tr_idx], rcond=None)
+        r2 = r2_score(yc[te_idx], Xte @ b)
+    else:
+        r2 = r2_score(yb[te_idx], p_te)
+    return dict(n_train=len(tr_idx), n_test=len(te_idx), auc=auc, acc=acc, r2=r2,
+                coef=dict(zip(feats, w[1:])), intercept=w[0])
+
 def decile_table(oof, yb, yc):
     order = np.argsort(oof); bins = np.array_split(order, 10)
     rows = []
@@ -160,56 +184,79 @@ def banded(oof, oofr, yb, yc, lo, hi):
                r2=(r2_score(yc[called], oofr[called]) if yc is not None else r2_score(y, p)))
     return out
 
-def main():
-    d = build_table()
-    print(f"\nAssembled {len(d)} pairs, {d['acc'].nunique()} proteins.\n")
-    report = {}
+MODELS = {
+    "fold_change": dict(title="fold_change_prob (STRUCTURAL, P(TM<0.5))", tag="foldchange",
+                        feats=["pae_global", "identity", "max_cov_loss", "protL"],
+                        bin_t="y_tm", cont_t="tm", sub=None, band=(0.40, 0.60), band_verb="routed to folding"),
+    "impact": dict(title="impact_prob (FUNCTIONAL, P(pathogenic | region overlaps a variant))", tag="impact",
+                   feats=["region_am", "loeuf", "max_cov_loss", "buried_frac"],
+                   bin_t="y_disc", cont_t=None, sub="variant_overlap", band=(0.40, 0.60), band_verb="abstain"),
+}
 
-    # ---------- STRUCTURAL: fold_change_prob ----------
-    F_STRUCT = ["pae_global", "identity", "max_cov_loss", "protL"]
-    S = evaluate(d, F_STRUCT, "y_tm", cont_t="tm")
-    print("=" * 70)
-    print("fold_change_prob (STRUCTURAL, P(TM<0.5))")
-    print(f"  n={len(S['df'])}  base rate(TM<0.5)={S['yb'].mean():.3f}  majority acc={max(S['yb'].mean(),1-S['yb'].mean()):.3f}")
+def run_model(d, key, methods, make_graph, seed):
+    m = MODELS[key]; sub = None
+    if m["sub"] == "variant_overlap":
+        d["y_disc"] = d["pat"].astype(int)
+        sub = ((d["pat"] == 1) | (d["ben"] == 1)).values
+    print("\n" + "=" * 72 + f"\n{m['title']}")
+    S = evaluate(d, m["feats"], m["bin_t"], cont_t=m["cont_t"], sub=sub)   # always need grouped for cards/graphs
+    base = S["yb"].mean(); print(f"  n={len(S['df'])}  base rate={base:.3f}  majority acc={max(base,1-base):.3f}")
     print(f"  coefficients (standardized): intercept={S['intercept']:+.3f}  " +
           "  ".join(f"{k}={v:+.3f}" for k, v in S["coef"].items()))
-    print(f"  OVERALL (no band):  AUC={S['auc']:.3f}  acc={S['acc']:.3f}  R2={S['r2']:.3f}")
-    b = banded(S["oof"], S["oofr"], S["yb"], S["yc"], 0.40, 0.60)
-    print(f"  BAND 0.40-0.60 routed to folding -> CALLED set ({b['pct_called']*100:.0f}%): AUC={b['auc']:.3f}  acc={b['acc']:.3f}  R2={b['r2']:.3f}")
-    dt = decile_table(S["oof"], S["yb"], S["yc"]); report["struct_decile"] = dt
+
+    results = {}
+    if "grouped" in methods:
+        b = banded(S["oof"], S["oofr"], S["yb"], S["yc"], *m["band"])
+        results["grouped"] = dict(auc=S["auc"], acc=S["acc"], r2=S["r2"], band=b)
+        print(f"  [Method 1: gene-grouped 5-fold CV]  AUC={S['auc']:.3f}  acc={S['acc']:.3f}  R2={S['r2']:.3f}")
+        print(f"      + band {m['band']} {m['band_verb']} -> called {b['pct_called']*100:.0f}%: "
+              f"AUC={b['auc']:.3f}  acc={b['acc']:.3f}  R2={b['r2']:.3f}")
+    if "holdout" in methods:
+        H = holdout_eval(d, m["feats"], m["bin_t"], cont_t=m["cont_t"], sub=sub, seed=seed)
+        results["holdout"] = H
+        print(f"  [Method 2: random 80/20 hold-out, seed={seed}]  train={H['n_train']} test={H['n_test']}  "
+              f"AUC={H['auc']:.3f}  acc={H['acc']:.3f}  R2={H['r2']:.3f}")
+    if "grouped" in methods and "holdout" in methods:
+        g, h = results["grouped"], results["holdout"]
+        print(f"  [difference holdout-grouped]  dAUC={h['auc']-g['auc']:+.3f}  dacc={h['acc']-g['acc']:+.3f}  dR2={h['r2']-g['r2']:+.3f}")
+
+    dt = decile_table(S["oof"], S["yb"], S["yc"])
     print(dt.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
-
-    # ---------- FUNCTIONAL: impact_prob (pathogenic-vs-benign, matches fit_calibrated.py) ----------
-    F_FUNC = ["region_am", "loeuf", "max_cov_loss", "buried_frac"]
-    d["y_disc"] = d["pat"].astype(int)
-    sub = ((d["pat"] == 1) | (d["ben"] == 1)).values     # regions overlapping SOME variant
-    Fm = evaluate(d, F_FUNC, "y_disc", cont_t=None, sub=sub)
-    print("\n" + "=" * 70)
-    print("impact_prob (FUNCTIONAL, P(pathogenic | region overlaps a variant))")
-    print(f"  n={len(Fm['df'])}  base rate={Fm['yb'].mean():.3f}  majority acc={max(Fm['yb'].mean(),1-Fm['yb'].mean()):.3f}")
-    print(f"  coefficients (standardized): intercept={Fm['intercept']:+.3f}  " +
-          "  ".join(f"{k}={v:+.3f}" for k, v in Fm["coef"].items()))
-    print(f"  OVERALL (no band):  AUC={Fm['auc']:.3f}  acc={Fm['acc']:.3f}  R2={Fm['r2']:.3f}")
-    bf = banded(Fm["oof"], Fm["oofr"], Fm["yb"], Fm["yc"], 0.40, 0.60)
-    print(f"  BAND 0.40-0.60 abstain -> CALLED set ({bf['pct_called']*100:.0f}%): AUC={bf['auc']:.3f}  acc={bf['acc']:.3f}  R2={bf['r2']:.3f}")
-    dtf = decile_table(Fm["oof"], Fm["yb"], None); report["func_decile"] = dtf
-    print(dtf.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
-
-    # ---------- graphs ----------
-    for tag, res, dtab, title in [("foldchange", S, report["struct_decile"], "fold_change_prob (structural)"),
-                                  ("impact", Fm, report["func_decile"], "impact_prob (functional)")]:
+    if make_graph:
         fig, ax = plt.subplots(1, 2, figsize=(11, 4.2))
         ax[0].plot([0, 1], [0, 1], "--", color="#999", lw=1)
-        ax[0].plot(dtab["mean_pred"], dtab["observed"], "o-", color="#2b6cb0")
+        ax[0].plot(dt["mean_pred"], dt["observed"], "o-", color="#2b6cb0")
         ax[0].set_xlabel("mean predicted probability (decile)"); ax[0].set_ylabel("observed rate")
-        ax[0].set_title(f"{title}\ncalibration"); ax[0].set_xlim(0, 1); ax[0].set_ylim(0, 1)
-        ax[1].bar(dtab["decile"], dtab["in_bin_acc"], color="#2b6cb0", alpha=0.85)
-        ax[1].axhline(max(res["yb"].mean(), 1 - res["yb"].mean()), ls="--", color="#e53e3e",
-                      label="majority baseline")
+        ax[0].set_title(f"{m['tag']}\ncalibration"); ax[0].set_xlim(0, 1); ax[0].set_ylim(0, 1)
+        ax[1].bar(dt["decile"], dt["in_bin_acc"], color="#2b6cb0", alpha=0.85)
+        ax[1].axhline(max(base, 1 - base), ls="--", color="#e53e3e", label="majority baseline")
         ax[1].set_xlabel("predicted-probability decile (1=lowest)"); ax[1].set_ylabel("in-bin accuracy @0.5")
         ax[1].set_title("per-decile accuracy"); ax[1].set_ylim(0, 1); ax[1].legend(fontsize=8)
-        fig.tight_layout(); out = os.path.join(HERE, f"model_card_{tag}.png")
-        fig.savefig(out, dpi=130); plt.close(fig); print(f"\nsaved {out}")
+        fig.tight_layout(); out = os.path.join(HERE, f"model_card_{m['tag']}.png")
+        fig.savefig(out, dpi=130); plt.close(fig); print(f"  saved {out}")
+    return results
+
+def main():
+    ap = argparse.ArgumentParser(description="Reproduce/train/evaluate the two DOMAS calibrated scores.")
+    ap.add_argument("--models", default="both", choices=["fold_change", "impact", "both"],
+                    help="which model(s) to run (default both)")
+    ap.add_argument("--methods", default="both", choices=["grouped", "holdout", "both"],
+                    help="grouped = gene-grouped 5-fold CV; holdout = random 80/20; both (default)")
+    ap.add_argument("--download-only", action="store_true", help="fetch all inputs into repro_data/ and exit")
+    ap.add_argument("--no-graphs", action="store_true", help="skip writing the PNG figures")
+    ap.add_argument("--seed", type=int, default=0, help="random seed for the 80/20 hold-out split")
+    args = ap.parse_args()
+
+    if args.download_only:
+        for n in URLS: fetch(n)
+        print("all inputs downloaded to", DATA); return
+
+    d = build_table()
+    print(f"\nAssembled {len(d)} pairs, {d['acc'].nunique()} proteins.")
+    models = ["fold_change", "impact"] if args.models == "both" else [args.models]
+    methods = ["grouped", "holdout"] if args.methods == "both" else [args.methods]
+    for k in models:
+        run_model(d, k, methods, make_graph=not args.no_graphs, seed=args.seed)
 
 if __name__ == "__main__":
     main()

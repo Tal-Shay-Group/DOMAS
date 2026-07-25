@@ -56,6 +56,37 @@ proteins**.
 | `loeuf` | gnomAD **LOEUF** gene loss-intolerance (lower = more constrained) | gnomAD v2.1.1 by-gene → `gene_constraint` |
 | `buried_frac` | fraction of the changed region **buried** (RSA < 0.25) in the canonical structure | AlphaFold DB model → Shrake–Rupley RSA → `afdb_rsa` |
 
+### 1.1 Two training / evaluation methods (and their agreement)
+
+The script evaluates each model two ways so the honesty of the headline numbers can be
+checked:
+
+- **Method 1 — gene-grouped 5-fold CV** (the reported/shipped method). All isoforms of
+  a gene are confined to a single fold, so no protein appears in both train and test.
+  This is the leakage-free estimate and matters because a gene-level feature (`loeuf`)
+  and correlated same-gene isoforms could otherwise leak.
+- **Method 2 — random 80/20 hold-out** (pair-level). A single random 80% train / 20%
+  test split, ignoring gene membership. This is the naive method; if it scored much
+  higher than Method 1 it would reveal same-gene leakage.
+
+**They agree closely — the small gap confirms leakage is minimal:**
+
+| model | metric | Method 1 (gene-grouped CV) | Method 2 (random 80/20) | Δ (holdout − grouped) |
+|-------|--------|:--------------------------:|:-----------------------:|:---------------------:|
+| `fold_change_prob` | AUC | 0.894 | 0.898 | +0.005 |
+| | accuracy | 0.815 | 0.816 | +0.001 |
+| | R² | 0.659 | 0.677 | +0.018 |
+| `impact_prob` | AUC | 0.766 | 0.778 | +0.012 |
+| | accuracy | 0.750 | 0.730 | −0.020 |
+| | R² | 0.175 | 0.189 | +0.014 |
+
+The random split is *slightly* optimistic on AUC/R² (≤ +0.018), the expected mild effect
+of same-gene pairs landing in both train and test; accuracy even drops for `impact_prob`
+(single-split noise on 655 test rows). All gaps are ≤ 0.02, so the two methods give
+essentially the same answer — **the gene-grouped numbers are honest, not inflated by
+leakage.** They are reported as the headline because they are the conservative estimate;
+Method 2 is a single-split point estimate (higher variance) shown only for contrast.
+
 ---
 
 ## 2. `fold_change_prob` — structural axis
@@ -239,13 +270,21 @@ this document. It:
    `full_pairs.csv` (TM label + changed region), `pae_features_full.csv` (`pae_global`),
    `bench_rich_results.csv` (`region_am`, `max_cov_loss`), `full_features.csv`
    (`buried_frac`).
-3. Refits both models under gene-grouped 5-fold CV (coefficients match the shipped
-   `utils` models), prints overall + banded metrics and decile tables, and writes
+3. **Trains + tests** both models by both methods of §1.1 (gene-grouped CV and random
+   80/20), prints coefficients (which match the shipped `utils` models), overall +
+   banded metrics, the method comparison, and the decile tables, and writes
    `model_card_foldchange.png` / `model_card_impact.png`.
 
 ```
-cd alphafold_benchmark && python3 reproduce_models.py
+cd alphafold_benchmark && python3 reproduce_models.py            # everything, both models, both methods
+python3 reproduce_models.py --download-only                      # just fetch inputs into repro_data/ and exit
+python3 reproduce_models.py --models fold_change --methods grouped   # one model, one method
+python3 reproduce_models.py --methods holdout --seed 7            # only the random 80/20 split, seed 7
+python3 reproduce_models.py --no-graphs                           # skip the PNGs
 ```
+
+Flags: `--models {fold_change,impact,both}`, `--methods {grouped,holdout,both}`,
+`--download-only`, `--no-graphs`, `--seed N` (hold-out split seed).
 
 ---
 
@@ -274,3 +313,130 @@ cd alphafold_benchmark && python3 reproduce_models.py
 - **Provisioning dependency.** `fold_change_prob` needs the `afdb_pae` table
   (`build.py -source afdb_pae`); if absent, `pae_global` imputes to the training median and
   the score degrades gracefully toward an identity/coverage-only prediction.
+
+---
+
+## Appendix A — Every feature evaluated, and where it comes from
+
+The two shipped feature sets are the survivors of the full investigation (EXPERIMENTS.md,
+E1–E44). This appendix catalogues **all** features that were built and tested — shipped
+and rejected — grouped by data source, with what each is and why it did or didn't make
+the cut. "S" = in `fold_change_prob` (structural); "F" = in `impact_prob` (functional).
+
+**Sequence-derived** (UniProt reference proteome + `uniprot_sprot_varsplic`):
+
+| feature | what it is | status |
+|---------|-----------|--------|
+| `identity` | % sequence identity between canonical and alternative protein, from the trimmed changed region | **shipped (S)** — #2 structural feature |
+| `protL` | canonical protein length (aa) | **shipped (S)** — small real add |
+| `reglen` | length (aa) of the changed region | dropped — it is the region-length confound; deliberately excluded (would measure size, not function) |
+
+**Canonical-AlphaFold-structure-derived** (AlphaFold DB model + its confidence files):
+
+| feature | what it is | source | status |
+|---------|-----------|--------|--------|
+| `pae_global` | mean Predicted Aligned Error over the whole canonical structure (fold rigidity/confidence) | AFDB `predicted_aligned_error_v6.json` → `afdb_pae` | **shipped (S)** — dominant feature (the biggest lever, AUC 0.78→0.90) |
+| `buried_frac` | fraction of the changed region buried (RSA < 0.25) | AFDB model → Shrake–Rupley RSA → `afdb_rsa` | **shipped (F)** — functional (buried → pathogenic-rich) |
+| `mean_rsa` | mean relative solvent accessibility of the changed region | same as above | dropped — near-duplicate of `buried_frac` |
+| `pae_reg2rest` | mean PAE between the changed region and the rest of the fold (region-specific rigidity) | AFDB PAE | dropped — strong alone (AUC 0.73) but redundant with `pae_global` in the full model |
+| `region_plddt` | mean per-residue pLDDT of the changed region (local order/confidence) | AFDB model b-factors → `afdb_plddt` | dropped — 0.79-correlated with `buried_frac`; +0.001 functional / +0.002 structural |
+| `helix_frac` / `strand_frac` / `structured_frac` | DSSP secondary-structure fractions of the changed region | AFDB model → pydssp | dropped — small, subsumed by burial/PAE |
+| contact density | Cβ<8 Å contacts from the changed region to the rest of the fold | AFDB model coordinates | dropped — redundant with burial (partial corr collapses after burial) |
+| `dist_term` / `rel_center` / `frac_before` / `is_terminal` | position of the changed region relative to the protein termini | changed-region coords + `protL` | dropped — +0.017 structural *before* PAE, but PAE absorbs it (+0.002 after) |
+
+**Isoform-AlphaFold-structure-derived** (from Miller et al. Genome Biology 2025 Table S4 —
+computed from the *isoform's own* AF2 fold, hence **circular** for predicting TM):
+
+| feature | what it is | status |
+|---------|-----------|--------|
+| iso helix/sheet/loop, radius of gyration, surface charge, IDR % | global structural descriptors of the alternative isoform's predicted fold | dropped — predict TM at AUC 0.92 but **circular** (need the isoform folded, i.e. already have TM) |
+| PTM-change counts (`ptm_added`, buried↔exposed, `ptm_missed`) | how the isoform gains/loses/relocates canonical PTM sites | dropped — non-circular but +0.002 functional (redundant with `region_am`/length) |
+| charge / radius deltas | canonical-vs-isoform change in charge / radius of gyration | dropped — ~0 contribution |
+
+**Protein language model** (ESM-2, run over the sequences):
+
+| feature | what it is | status |
+|---------|-----------|--------|
+| ESM-2 150M / 650M region + (canonical−alt) difference embeddings (mean-pooled, PCA-50) | learned sequence representation of the changed region | tested — *breaks the structural ceiling* (AUC 0.79→0.82) but heavy to provision; **not shipped**. 650M ≈ 150M. |
+| ESM multi-pool (mean+max+std+first+last token) | positional pooling of per-residue embeddings | dropped — equal to mean-pooling |
+
+**Variant / constraint databases:**
+
+| feature | what it is | source | status |
+|---------|-----------|--------|--------|
+| `region_am` | mean AlphaMissense pathogenicity over the changed region | AlphaMissense → `am_pathogenicity` | **shipped (F)** — dominant functional feature |
+| `loeuf` | gnomAD gene loss-intolerance (lower = more constrained) | gnomAD v2.1.1 by-gene → `gene_constraint` | **shipped (F)** — non-circular constraint signal |
+| `pLI` | gnomAD probability of LoF-intolerance | gnomAD | dropped — weaker than LOEUF |
+| peak-AM / mean-of-top-K AM | hotspot AlphaMissense instead of regional mean | AlphaMissense | dropped — regional mean beats every peak (domain-scale regions) |
+| `func_site` | whether the region overlaps a curated UniProt functional residue | UniProt features | used in the *categorical* `impact` only (semi-circular for the probability) |
+
+**Domain / coverage:**
+
+| feature | what it is | source | status |
+|---------|-----------|--------|--------|
+| `max_cov_loss` | maximum Pfam domain coverage (%) lost in the changed region | HMMER `hmmsearch --cut_ga` vs Pfam-A → `pfam_match` | **shipped (S and F)** — the one feature in both models (opposite signs) |
+| `fold_state` | folded / disordered, from UniProt HELIX/STRAND/disorder annotation | UniProt features | used upstream in the categorical `impact` |
+
+**Cross-species conservation:**
+
+| feature | what it is | source | status |
+|---------|-----------|--------|--------|
+| phyloP (region / whole-protein mean) | evolutionary conservation of the changed region | UCSC hg38 100-way phyloP bigWig + EBI coordinates API | tested — a small structural add (+0.037 AUC on a 363-pair sample); not shipped pending scale-up |
+
+**Not available:** **NMD (nonsense-mediated decay)** — DoChaP filters NMD-targeted
+transcripts at DB-build time, so degraded isoforms never reach the benchmark; NMD is
+neither a feature nor a confound here.
+
+---
+
+## Appendix B — Comparable published methods
+
+We looked for published methods attempting each task and compare them below. A recurring
+theme: for the **structural** axis the prior work *folds every isoform* (expensive) and
+*catalogues* the result, whereas DOMAS *predicts* the fold-change label from cheap
+canonical-only features; for the **functional** axis the closest analogues score exon /
+isoform importance from protein + conservation + expression features, on labels that are
+related but not identical to ours (so AUCs are not head-to-head).
+
+### B.1 Structural axis — `fold_change_prob`
+
+| method | approach | reported result | relation to ours |
+|--------|----------|-----------------|-------------------|
+| **Miller et al., *Genome Biology* 2025** (our label source) | Fold all 11,161 human isoforms with **AlphaFold2**; compare each to its canonical with TM-score + 5 other metrics (secondary structure, surface charge, radius of gyration, PTM SASA, IDR). | Structural similarity largely tracks sequence identity; flags **328 high-identity / low-TM** outliers (53 with clear domain alterations). A *characterisation*, not a predictor. | This is exactly the TM ground truth we predict. We reproduce their label from **4 cheap canonical features (no isoform folding)** at **AUC 0.90 / R² 0.66**, and quantify the high-id/low-TM blind spot they identified. |
+| **Yang et al., bioRxiv 2024.01.30.578053** | AF2 structures of AS isoforms; statistical characterisation of where AS falls. | AS regions are **enriched in loops / exposed / disordered residues**; qualitative case studies (Septin-9, Tau). No TM predictor, no isoform-vs-isoform structural score. | Supports our finding that exposed/peripheral changes drive low TM; provides no quantitative predictor to compare against. |
+| **ASpdb** (Nucleic Acids Research, Database issue 2025) | Knowledgebase of >3,400 canonical + >7,200 alternative-isoform AF2 models with **comparative structural-alteration calls** and visualisation. | A resource, not a predictive model; provides a second, **non-TM** structural-alteration label. | Complementary independent label source (flagged in our EXPERIMENTS E40 as a future cross-check; its calls are per-entry web content, not bulk-downloadable). |
+| **DIGGER / DIGGER 2.0** (Louadi et al., NAR 2021 / 2025) | Augment the protein–protein interaction network with **domain–domain interactions** + splicing; identify which interactions/domains an AS event disrupts (interaction rewiring). | Network/rule-based (no AUC); maps exon → lost domain → lost interactions. | Different structural readout — *interaction* consequence, not global fold. Closest in spirit to our `max_cov_loss` (domain loss) feature; complementary to a fold-change probability. |
+
+**Bottom line (structural).** No prior method offers a cheap *predictor* of the
+fold-change (TM) label — they fold the isoform or catalogue outcomes. DOMAS's contribution
+is a calibrated ~AUC-0.90 predictor from canonical-only features, with **`pae_global`
+(PAE)** as the dominant signal — to our knowledge not previously used for this task.
+
+### B.2 Functional axis — `impact_prob`
+
+| method | approach | reported result | relation to ours |
+|--------|----------|-----------------|-------------------|
+| **ExonImpact** (2017, [PMC5390777](https://pmc.ncbi.nlm.nih.gov/articles/PMC5390777)) | **Random forest** on protein-level features of the spliced exon: predicted disorder (SPINE-D), ASA + secondary structure (SPINE-X), Pfam-domain overlap, PTM sites (dbPTM), conservation, exon length. | **10-fold CV AUC 0.83–0.835.** Positives = 4,211 HGMD splice-disrupting exons; negatives = 2,664 1000-Genomes in-frame indel exons. | The closest analogue. Higher AUC, but on an **easier, different label** (disease-exon vs benign-indel-exon, with exon length as a feature) and using *predicted* disorder/ASA where we use AlphaFold-derived burial. Our label (pathogenic-vs-benign among variant-overlapping regions, length-controlled, gene-grouped) is harder — AUCs are not head-to-head. |
+| **TRIFID** (Pozo et al., *NAR Genomics & Bioinformatics* 2021) | Gradient-boosted trees scoring the **functional relevance of each splice isoform** (0–1) from cross-species conservation, expression, and APPRIS/Pfam-integrity features. | Conservation is the top predictor; high-scoring isoforms' exons are under purifying selection, low-scoring ones neutral. Bimodal scores. Integrated into APPRIS. | Isoform-level (not region-level) and no single AUC against a variant label. Its top signal (conservation) is the axis we tested as phyloP (small add). Complementary; different granularity. |
+| **pext** (Cummings et al., *Nature* 2020) | Not ML: **GTEx transcript-expression**-based per-base annotation (proportion expressed across transcripts) — is the region actually expressed? | Low-pext filtering removes **22.8%** of pLoF in haploinsufficient genes but only **3.8%** of ClinVar pathogenic variants. | Orthogonal axis (expression) to ours (constraint + structure). We *considered but did not use* GTEx (E41); pext is the strong published version of that idea and is complementary to `impact_prob`. |
+
+**Not direct comparators.** SpliceAI / MMSplice / AbSplice predict *whether a variant
+alters splicing* (the upstream event), not the functional consequence of the resulting
+spliced region — a different task one level up. AlphaMissense scores single missense
+variants; we *consume* it as `region_am` and operate at the region level.
+
+**Bottom line (functional).** DOMAS's `impact_prob` sits in the same family as ExonImpact
+and TRIFID (protein/constraint features → functional-importance score) but is
+**region-level, calibrated, gene-grouped, and length-controlled**, and it is explicitly
+paired with the orthogonal structural score. Its AUC (0.766) is lower than ExonImpact's
+headline 0.83, but on a deliberately harder, confound-controlled label; the honest framing
+throughout is that it is an **enrichment/prioritisation** signal, not a classifier.
+
+**Sources.**
+[Miller et al., Genome Biology 2025](https://link.springer.com/article/10.1186/s13059-025-03744-x) ·
+[Yang et al., bioRxiv 578053](https://www.biorxiv.org/content/10.1101/2024.01.30.578053v2) ·
+[ASpdb, NAR 2025](https://academic.oup.com/nar/article/53/D1/D331/7893317) ·
+[DIGGER 2.0, NAR 2025](https://academic.oup.com/nar/article/53/W1/W245/8126897) ·
+[ExonImpact, PMC5390777](https://pmc.ncbi.nlm.nih.gov/articles/PMC5390777) ·
+[TRIFID, NAR Genom. Bioinform. 2021](https://academic.oup.com/nargab/article/3/2/lqab044/6281449) ·
+[pext / Cummings et al., Nature 2020](https://www.nature.com/articles/s41586-020-2329-2)
