@@ -89,7 +89,12 @@ def main():
         os.path.join(REPO, 'tests/leafcutter/leafcutter_ds_effect_sizes.txt'))
     # include the multi-gene cluster explicitly - one event, two genes
     multi = [c for c in lc.cluster_name.unique() if c.startswith('chr3:clu_10461')]
-    keep = sorted(lc.cluster_name.unique())[:4] + multi
+    # ... and the only reviewable source of `longer_domains`, the one Table S4
+    # outcome absent from every other fixture. It occurs in 83 clusters of the full
+    # leafcutter run, none with fewer than 11 transcripts; this one has just a single
+    # comparable transcript, so there is one comparison to follow.
+    longer_domains = [c for c in lc.cluster_name.unique() if c.startswith('chr5:clu_3349')]
+    keep = sorted(lc.cluster_name.unique())[:4] + multi + longer_domains
     run('leafcutter', lc[lc.cluster_name.isin(keep)].copy(), con)
 
     con.close()

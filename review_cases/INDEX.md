@@ -90,7 +90,7 @@ the broken behaviour. They now yield 7 domain calls.
 | hadas | human/mouse comparison | `REF/hadas_xlsx__…/` |
 | rMATS | SE, A5SS, A3SS, MXE, RI — **one + and one − strand each** | `review_cases/rmats/` (10) |
 | MAJIQ | per-LSV classification | `review_cases/majiq/` (4) |
-| LeafCutter | incl. the multi-gene pair | `review_cases/leafcutter/` (6) |
+| LeafCutter | incl. the multi-gene pair and the `longer_domains` case | `review_cases/leafcutter/` (7) |
 
 The rMATS ten, paired by strand so the strand-dependent construction can be compared:
 
@@ -132,13 +132,26 @@ The rMATS ten, paired by strand so the strand-dependent construction can be comp
 | increased_domain_number | 2 | ZNF141 |
 | reduced_domain_number | 2 | DAZ4 |
 | shorter_domains | 1 | PCDH7 |
-| **longer_domains** | **0** | **missing** |
+| longer_domains | 83 (in `leafcutter_full`) | DHX29 |
+
+`longer_domains` is the one outcome absent from `category_examples`, so a reviewable
+case was generated for it:
+
+| # | What it shows | Gene | Cluster | Where |
+| :-- | :--- | :--- | :--- | :--- |
+| E1 | Equal counts >1 on both sides, compared side longer — 2 domains each, 429 aa against 426 | DHX29 | `chr5:clu_3349` | `review_cases/leafcutter/human_DHX29_7_*.pdf` |
 
 ---
 
 ## Gaps
 
-1. **`longer_domains`** — the only S4 outcome with no example anywhere.
+1. ~~`longer_domains` has no example~~ — **corrected**. It occurs in 114 rows across
+   83 clusters of `leafcutter_full__representative_True`; the earlier claim came from
+   searching only `category_examples`, the fixture built to hold one of each outcome.
+   None of the 83 has fewer than 11 transcripts, so `review_cases/leafcutter/
+   human_DHX29_7_*.pdf` was generated as the readable one: 12 transcripts but a single
+   comparable transcript, giving one comparison to follow. Two domains on each side,
+   429 aa against 426.
 2. **Site/PTM removal (B4) has no reviewable PDF**, though it is now tested. The
    database holds 3,041 such entries (Conserved_site 2,702, Binding_site 326, PTM 13;
    no Active_site) on 1,007 human transcripts, so this is an accident of which 35
