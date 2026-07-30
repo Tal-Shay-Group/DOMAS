@@ -12,6 +12,17 @@ in PDF scope and representative-domain source.
 > re-derived after that change; earlier drafts of this file named clusters that no
 > longer exist.
 
+> **The PDFs are not in git.** `.gitignore` excludes `*.pdf` across the repository,
+> and the generated set is ~5 MB of reproducible output. Rebuild the three generated
+> format directories with:
+>
+> ```
+> python3 tests/generate_review_pdfs.py
+> ```
+>
+> The reference PDFs under `tests/reference_outputs/` are produced by the test suite
+> itself — run `pytest tests/ -q` (add `--keep-test-output` to retain them).
+
 ---
 
 ## A. Choosing the comparable transcript
