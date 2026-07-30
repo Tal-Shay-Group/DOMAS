@@ -17,6 +17,8 @@ These are the cross-transcript-stable signals the InterPro type filter can't
 give (HMM family is uniform across transcripts; pLDDT/features are per residue).
 Everything is read from local disk - no network.
 """
+import argparse
+import logging
 import os
 import subprocess
 import sqlite3
@@ -515,3 +517,132 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
     df['region_am_mean'] = df.apply(lambda r: _blank_nc(r, am_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df.to_csv(out_csv, index=False)
     return df
+
+
+# ---------------------------------------------------------------------------
+# Provisioning CLI.
+#
+# Building the enrichment database has nothing to do with analysing junctions,
+# but it used to live in domas.py as a "setup mode" that short-circuited the
+# analysis CLI: eight arguments, a branch that returned from argument validation
+# before any of it ran, and a dispatch in main() that exited early. It belongs
+# with the enrichment code it provisions.
+#
+#   python3 enrichment.py -download -build -data_dir enrichment_data
+# ---------------------------------------------------------------------------
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Provision the local enrichment database (afdb_plddt / "
+                    "uniprot_feature / uniprot_alias / ensembl_sequence + Pfam), "
+                    "used to enrich a DOMAS results.csv with sequence-derived evidence.")
+    parser.add_argument("-download", action="store_true",
+                        help="Download the raw enrichment sources into -data_dir.")
+    parser.add_argument("-build", action="store_true",
+                        help="Build -enrichment_db from the raw files in -data_dir "
+                             "(may be combined with -download to do both).")
+    parser.add_argument("-data_dir", type=str, default="enrichment_data",
+                        help="Directory for the raw source files (default: ./enrichment_data).")
+    parser.add_argument("-enrichment_db", type=str, default=None,
+                        help="Output sqlite path for -build (default: <data_dir>/enrichment.sqlite).")
+    parser.add_argument("-species", type=str, default=None,
+                        help="Comma-separated species subset for -download/-build "
+                             "(default: all; choices: H_sapiens,M_musculus,R_norvegicus,D_rerio).")
+    parser.add_argument("-only", type=str, default=None,
+                        help="Comma-separated source subset for -download/-build "
+                             "(default: all; choices: uniprot,afdb,ensembl,pfam).")
+    parser.add_argument("-delete_raw", action="store_true",
+                        help="After -build, delete the large raw downloads (keeps Pfam-A.hmm).")
+    parser.add_argument("-force_download", action="store_true",
+                        help="Re-download sources even if already present in -data_dir.")
+
+    parser.add_argument("-enrich", type=str, default=None, metavar="RESULTS_CSV",
+                        help="Enrich a DOMAS results.csv with sequence-derived evidence "
+                             "(HMM coverage, changed region, AlphaFold pLDDT, UniProt "
+                             "features) and write -out. Requires -dochap and a built "
+                             "-enrichment_db.")
+    parser.add_argument("-scores", action="store_true",
+                        help="With -enrich, also add the analysis-level score columns "
+                             "(SPADE-style domain integrity, change impact, fold-change "
+                             "probability). Run as a second pass over the enriched table.")
+    parser.add_argument("-out", type=str, default=None,
+                        help="Output CSV for -enrich (default: the input with a "
+                             "'.enriched.csv' suffix).")
+    parser.add_argument("-dochap", type=str, default=None,
+                        help="Path to the DoChaP sqlite db (required with -enrich).")
+    parser.add_argument("-pfam_hmm", type=str, default=None,
+                        help="Path to Pfam-A.hmm (default: <data_dir>/pfam/Pfam-A.hmm, "
+                             "where -build leaves it).")
+
+    args = parser.parse_args(argv)
+    if not args.download and not args.build and not args.enrich:
+        parser.error("nothing to do: give -download, -build and/or -enrich")
+    if args.enrichment_db is None:
+        args.enrichment_db = os.path.join(args.data_dir, "enrichment.sqlite")
+    if args.pfam_hmm is None:
+        args.pfam_hmm = os.path.join(args.data_dir, "pfam", "Pfam-A.hmm")
+
+    if args.enrich:
+        if not args.dochap:
+            parser.error("-enrich requires -dochap")
+        for label, path in (("-enrich input", args.enrich), ("-dochap", args.dochap),
+                            ("-enrichment_db", args.enrichment_db), ("-pfam_hmm", args.pfam_hmm)):
+            # Checked up front rather than failing partway through an hmmsearch that
+            # can take minutes before it touches the missing file.
+            if not os.path.exists(path):
+                parser.error(f"{label} not found at {path}"
+                             + ("  (run -download -build first)"
+                                if label in ("-enrichment_db", "-pfam_hmm") else ""))
+        if args.out is None:
+            base = args.enrich[:-4] if args.enrich.endswith(".csv") else args.enrich
+            args.out = f"{base}.enriched.csv"
+    elif args.scores:
+        parser.error("-scores only applies together with -enrich")
+    return args
+
+
+def run_setup(args):
+    """Provision the enrichment database: -download fetches raw sources,
+    -build parses them into -enrichment_db. Both may be given together."""
+    import download
+
+    species = [s.strip() for s in args.species.split(",")] if args.species else None
+    only = [s.strip() for s in args.only.split(",")] if args.only else None
+    if args.download:
+        download.download_all(args.data_dir, species=species, only=only, force=args.force_download)
+    if args.build:
+        build.build_all(args.data_dir, args.enrichment_db, species=species, only=only,
+                        delete_raw=args.delete_raw)
+
+
+def run_enrich(args):
+    """Enrich a results.csv, optionally following it with the score pass.
+
+    The two passes are separate functions over the same table: enrich_results()
+    adds the sequence-derived evidence columns, add_scores() the analysis-level
+    scores derived from them. Chained here so -scores reads the enriched table
+    rather than the raw one.
+    """
+    dochap_con = sqlite3.connect(args.dochap)
+    try:
+        logging.info("enriching %s -> %s", args.enrich, args.out)
+        enrich_results(args.enrich, args.out, args.enrichment_db, args.pfam_hmm, dochap_con)
+        if args.scores:
+            logging.info("adding score columns to %s", args.out)
+            add_scores(args.out, args.out, args.enrichment_db, args.pfam_hmm, dochap_con)
+    finally:
+        dochap_con.close()
+    logging.info("wrote %s", args.out)
+
+
+def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    args = parse_args()
+    if args.download or args.build:
+        run_setup(args)
+    if args.enrich:
+        run_enrich(args)
+
+
+if __name__ == "__main__":
+    main()

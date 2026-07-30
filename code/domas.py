@@ -89,43 +89,10 @@ def parse_args():
                               "event). By default the output CSV holds only transcripts "
                               "that were actually compared to the canonical transcript.")
 
-    # --- enrichment-DB setup mode (does not run an analysis) ---
-    setup = parser.add_argument_group(
-        "enrichment setup",
-        "Provision the local enrichment database (afdb_plddt / uniprot_feature / "
-        "uniprot_alias / ensembl_sequence + Pfam). -download and -build run in "
-        "setup mode and exit; -format/-dochap/-input are not needed.")
-    setup.add_argument("-download", action="store_true",
-                       help="Download the raw enrichment sources into -data_dir, then exit.")
-    setup.add_argument("-build", action="store_true",
-                       help="Build -enrichment_db from the raw files in -data_dir, then exit "
-                            "(may be combined with -download to do both).")
-    setup.add_argument("-data_dir", type=str, default="enrichment_data",
-                       help="Directory for the raw source files (default: ./enrichment_data).")
-    setup.add_argument("-enrichment_db", type=str, default=None,
-                       help="Output sqlite path for -build (default: <data_dir>/enrichment.sqlite).")
-    setup.add_argument("-species", type=str, default=None,
-                       help="Comma-separated species subset for -download/-build "
-                            "(default: all; choices: H_sapiens,M_musculus,R_norvegicus,D_rerio).")
-    setup.add_argument("-only", type=str, default=None,
-                       help="Comma-separated source subset for -download/-build "
-                            "(default: all; choices: uniprot,afdb,ensembl,pfam).")
-    setup.add_argument("-delete_raw", action="store_true",
-                       help="After -build, delete the large raw downloads (keeps Pfam-A.hmm).")
-    setup.add_argument("-force_download", action="store_true",
-                       help="Re-download sources even if already present in -data_dir.")
-
     args = parser.parse_args()
 
-    # In setup mode we skip all analysis-input validation and return early;
-    # main() dispatches to download.py / build.py and exits.
-    if args.download or args.build:
-        if args.enrichment_db is None:
-            args.enrichment_db = os.path.join(args.data_dir, "enrichment.sqlite")
-        return args
-
     if not args.format:
-        parser.error("-format is required (or use -download/-build for enrichment setup)")
+        parser.error("-format is required")
 
     # hadas is a human/mouse comparison and states the species per row, so a single
     # -specie cannot describe it. Every other format needs it stated: three of them
@@ -179,21 +146,6 @@ def parse_args():
     return args
 
 
-def run_setup(args):
-    """Provision the enrichment database: -download fetches raw sources,
-    -build parses them into -enrichment_db. Both may be given together."""
-    import build
-    import download
-
-    species = [s.strip() for s in args.species.split(",")] if args.species else None
-    only = [s.strip() for s in args.only.split(",")] if args.only else None
-    if args.download:
-        download.download_all(args.data_dir, species=species, only=only, force=args.force_download)
-    if args.build:
-        build.build_all(args.data_dir, args.enrichment_db, species=species, only=only,
-                        delete_raw=args.delete_raw)
-
-
 def main():
     # junction_analisys.py's JunctionsAnalysis already logs progress every
     # 10,000 clusters (with an ETA) via self.logger.info(...) - but nothing
@@ -207,11 +159,6 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     args = parse_args()
-
-    # Enrichment setup mode: provision the local DB and exit, no analysis run.
-    if args.download or args.build:
-        run_setup(args)
-        return
 
     con = sqlite3.connect(args.dochap)
     try:
