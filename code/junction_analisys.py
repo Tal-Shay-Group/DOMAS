@@ -1230,12 +1230,12 @@ class JunctionsAnalysis:
 
     def _load_database_data(self, gene_ids, use_ensembl_only=False, use_representative_domains=False):
         """Load genes, transcripts, domains, and exons from database."""
-        placeholders = ','.join('?' * len(gene_ids))
+        clause, params = utils.gene_id_clause(gene_ids)
         df_genes = pd.read_sql_query(
-            f"SELECT gene_ensembl_id, strand FROM Genes WHERE gene_ensembl_id IN ({placeholders})",
-            self.con, params=gene_ids
+            f"SELECT gene_ensembl_id, gene_GeneID_id, strand FROM Genes WHERE {clause}",
+            self.con, params=params
         )
-        gene_strand = dict(zip(df_genes['gene_ensembl_id'], df_genes['strand']))
+        gene_strand = dict(zip(utils.combined_gene_ids(df_genes), df_genes['strand']))
 
         df_transcripts = utils.get_genes_df_transcripts(self.con, gene_ids)
 
@@ -1266,7 +1266,14 @@ class JunctionsAnalysis:
         valid_mask = all_transcript_ids.notna() & ~all_transcript_ids.isin(invalid_ids)
         canonical_transcript_ids = set(all_transcript_ids[valid_mask & (df_transcripts.canonical != 0)])
 
-        transcripts_by_gene = {gid: g for gid, g in df_transcripts.groupby('gene_ensembl_id')}
+        # Grouped by the combined gene id, so a gene carrying only a GeneID is
+        # reachable under the id the junctions frame holds for it. Grouping on
+        # gene_ensembl_id alone dropped those genes: groupby() skips NaN keys, so
+        # every one of their transcripts vanished and the cluster reported
+        # gene_not_in_db.
+        transcripts_by_gene = {
+            gid: g for gid, g in df_transcripts.groupby(utils.combined_gene_ids(df_transcripts))
+        }
 
         return canonical_transcript_ids, transcripts_by_gene
 

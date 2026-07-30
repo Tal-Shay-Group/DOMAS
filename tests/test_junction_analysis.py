@@ -1040,3 +1040,53 @@ def test_cds_length_is_coding_length_not_genomic_span():
     assert (df.cds_end - df.cds_start).nunique() == 1, "fixture: genomic spans are equal"
     longest, _ = _run_selection(df, exons)
     assert longest == 'ENST_B', f"expected the longer coding length, got {longest}"
+
+
+# ---------------------------------------------------------------------------
+# Gene identity: gene_ensembl_id OR gene_GeneID_id
+# ---------------------------------------------------------------------------
+
+def test_combined_gene_ids_falls_back_to_geneid():
+    """13% of DoChaP genes carry no gene_ensembl_id, only a gene_GeneID_id. The key
+    a lookup uses must fall back to it, mirroring the transcript_ensembl_id /
+    transcript_refseq_id fallback already used for transcripts."""
+    import utils
+    df = pd.DataFrame({'gene_ensembl_id': ['ENSG1', None, 'ENSG3'],
+                       'gene_GeneID_id': ['111', '222', None]})
+    assert list(utils.combined_gene_ids(df)) == ['ENSG1', '222', 'ENSG3']
+
+
+def test_combined_gene_ids_without_geneid_column():
+    """A frame carrying only gene_ensembl_id must pass through unchanged."""
+    import utils
+    df = pd.DataFrame({'gene_ensembl_id': ['ENSG1', 'ENSG2']})
+    assert list(utils.combined_gene_ids(df)) == ['ENSG1', 'ENSG2']
+
+
+def test_gene_id_clause_matches_either_column():
+    import utils
+    clause, params = utils.gene_id_clause(['ENSG1', '222'])
+    for column in utils.GENE_ID_COLUMNS:
+        assert f'{column} IN (?,?)' in clause, clause
+    assert ' OR ' in clause
+    # ids repeated once per column, so the same params bind both IN lists
+    assert params == ['ENSG1', '222', 'ENSG1', '222']
+
+
+def test_transcripts_grouped_by_combined_gene_id_keeps_geneid_only_genes():
+    """The regression this fixes: grouping on gene_ensembl_id alone silently drops
+    every gene without one, because groupby() skips NaN keys - so the cluster
+    reported gene_not_in_db even though the gene is present in the database."""
+    import utils
+    df_transcripts = pd.DataFrame({
+        'transcript_ensembl_id': ['ENST1', None, 'ENST3'],
+        'transcript_refseq_id': [None, 'NM_2', None],
+        'gene_ensembl_id': ['ENSG_A', None, None],
+        'gene_GeneID_id': ['111', '222', '222'],
+    })
+    dropped = {gid: g for gid, g in df_transcripts.groupby('gene_ensembl_id')}
+    kept = {gid: g for gid, g in df_transcripts.groupby(utils.combined_gene_ids(df_transcripts))}
+
+    assert '222' not in dropped, "precondition: the old grouping loses the GeneID-only gene"
+    assert set(kept) == {'ENSG_A', '222'}
+    assert len(kept['222']) == 2, "both transcripts of the GeneID-only gene are reachable"

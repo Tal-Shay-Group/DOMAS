@@ -453,9 +453,13 @@ def hadas_read_input_file(con, input_path):
         df_m = df_m[(df_m.start_position >= 0) & (df_m.end_position >= 0)]
         df_m['specie'] = 'mouse'
         # get gene ensembl id from genes column, which is in the format "gene_symbol (gene_ensembl_id)"
-        query = "SELECT gene_ensembl_id, gene_symbol FROM Genes WHERE specie = 'M_musculus' AND UPPER(gene_symbol) IN ({gene_symbols})"
+        # gene_GeneID_id is the fallback for the 13% of genes with no
+        # gene_ensembl_id, which otherwise resolve to NaN and are dropped.
+        query = "SELECT gene_ensembl_id, gene_GeneID_id, gene_symbol FROM Genes WHERE specie = 'M_musculus' AND UPPER(gene_symbol) IN ({gene_symbols})"
         gene_symbols = df_m['genes'].unique().tolist()
         df_mouse_genes = pd.read_sql_query(query.format(gene_symbols=','.join(['?']*len(gene_symbols))), con, params=gene_symbols)
+        df_mouse_genes['gene_ensembl_id'] = utils.combined_gene_ids(df_mouse_genes)
+        df_mouse_genes = df_mouse_genes.drop(columns=['gene_GeneID_id'])
         df_mouse_genes['gene_symbol'] = df_mouse_genes['gene_symbol'].str.upper()
         df_m = pd.merge(df_m, df_mouse_genes, left_on='genes', right_on='gene_symbol', how='left')
         df_m.drop(columns=['genes'], inplace=True)
@@ -574,11 +578,15 @@ def leafcutter_read_input_files(con, significance_file, effect_sizes_file, speci
     symbol_to_ensembl = {}
     if symbols:
         placeholders = ','.join(['?'] * len(symbols))
-        query = (f"SELECT gene_ensembl_id, gene_symbol FROM Genes "
+        # gene_GeneID_id is selected as a fallback: 13% of DoChaP genes carry no
+        # gene_ensembl_id, so resolving a symbol to that column alone yielded NaN
+        # and the gene was dropped before analysis (see utils.combined_gene_ids).
+        query = (f"SELECT gene_ensembl_id, gene_GeneID_id, gene_symbol FROM Genes "
                  f"WHERE specie = ? AND UPPER(gene_symbol) IN ({placeholders})")
         df_genes = pd.read_sql_query(query, con, params=[db_specie] + [s.upper() for s in symbols])
-        symbol_to_ensembl = {sym.upper(): ens
-                             for ens, sym in zip(df_genes['gene_ensembl_id'], df_genes['gene_symbol'])}
+        symbol_to_ensembl = {sym.upper(): gid
+                             for gid, sym in zip(utils.combined_gene_ids(df_genes),
+                                                 df_genes['gene_symbol'])}
     df['gene_ensembl_id'] = df['gene_symbol'].apply(
         lambda s: symbol_to_ensembl.get(str(s).upper()) if pd.notna(s) else None)
 

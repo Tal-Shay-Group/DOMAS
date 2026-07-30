@@ -26,6 +26,41 @@ _RMATS_EVENT_FILES = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Gene identity.
+#
+# DoChaP identifies a gene by gene_ensembl_id OR gene_GeneID_id (the NCBI/RefSeq
+# side). 16,672 of 128,454 genes - 13%, and over 20% in D_rerio and X_tropicalis -
+# carry ONLY a GeneID, so a lookup keyed on gene_ensembl_id alone silently drops
+# them along with all 36,441 of their transcripts. Absent ids are stored as NULL,
+# never as an empty string.
+#
+# The junctions frame keeps one 'gene_ensembl_id' column holding whichever id the
+# input supplied; these helpers let a lookup accept either kind, mirroring the
+# transcript_ensembl_id/transcript_refseq_id fallback already used for transcripts.
+# ---------------------------------------------------------------------------
+
+GENE_ID_COLUMNS = ('gene_ensembl_id', 'gene_GeneID_id')
+
+
+def combined_gene_ids(df):
+    """The gene id to key on per row: gene_ensembl_id where present, else
+    gene_GeneID_id - matching what the readers put in the junctions frame."""
+    if 'gene_GeneID_id' not in df.columns:
+        return df['gene_ensembl_id']
+    return df['gene_ensembl_id'].fillna(df['gene_GeneID_id'])
+
+
+def gene_id_clause(gene_ids):
+    """(sql_fragment, params) matching `gene_ids` against either gene id column,
+    e.g. "(gene_ensembl_id IN (?,?) OR gene_GeneID_id IN (?,?))" with the ids
+    repeated once per column."""
+    ids = [str(g) for g in gene_ids]
+    placeholders = ','.join(['?'] * len(ids))
+    fragment = ' OR '.join(f'{column} IN ({placeholders})' for column in GENE_ID_COLUMNS)
+    return f'({fragment})', ids * len(GENE_ID_COLUMNS)
+
+
 def _clean_ensembl_id(gene_id):
     """rMATS GeneID like '"ENSG00000156256.15"' -> 'ENSG00000156256'."""
     gid = str(gene_id).strip().strip('"').strip("'")
@@ -314,17 +349,18 @@ def ioe2junctions(file_path):
 
 def get_gene_symbols(con, gene_ensembl_ids):
     """
-    Retrieves gene symbols for a list of Ensembl gene IDs.
+    Retrieves gene symbols for a list of gene IDs, each either an Ensembl gene id
+    or a GeneID (see GENE_ID_COLUMNS).
 
     Args:
-        gene_ensembl_ids (list): A list of Ensembl gene IDs.
+        gene_ensembl_ids (list): A list of gene IDs of either kind.
     Returns:
-        dict: A dictionary mapping Ensembl gene IDs to gene symbols.
+        dict: A dictionary mapping gene IDs to gene symbols.
     """
-    placeholders = ', '.join(['?'] * len(gene_ensembl_ids))
-    query = f"SELECT gene_ensembl_id, gene_symbol FROM genes WHERE gene_ensembl_id IN ({placeholders})"
-    df = pd.read_sql_query(query, con, params=gene_ensembl_ids)
-    gene_symbol_dict = dict(zip(df['gene_ensembl_id'], df['gene_symbol']))
+    clause, params = gene_id_clause(gene_ensembl_ids)
+    query = f"SELECT gene_ensembl_id, gene_GeneID_id, gene_symbol FROM genes WHERE {clause}"
+    df = pd.read_sql_query(query, con, params=params)
+    gene_symbol_dict = dict(zip(combined_gene_ids(df), df['gene_symbol']))
     return gene_symbol_dict
 
 
@@ -337,10 +373,13 @@ def get_genes_number_of_transcripts(con, gene_ensembl_ids):
     Returns:
         dict: A dictionary mapping Ensembl gene IDs to the number of transcripts.
     """
-    placeholders = ', '.join(['?'] * len(gene_ensembl_ids))
-    query = f"SELECT gene_ensembl_id, COUNT(COALESCE(transcript_ensembl_id, transcript_refseq_id)) AS num_transcripts FROM transcripts WHERE gene_ensembl_id IN ({placeholders}) GROUP BY gene_ensembl_id"
-    df = pd.read_sql_query(query, con, params=gene_ensembl_ids)
-    num_transcripts_dict = dict(zip(df['gene_ensembl_id'], df['num_transcripts']))
+    clause, params = gene_id_clause(gene_ensembl_ids)
+    query = (f"SELECT gene_ensembl_id, gene_GeneID_id, "
+             f"COUNT(COALESCE(transcript_ensembl_id, transcript_refseq_id)) AS num_transcripts "
+             f"FROM transcripts WHERE {clause} "
+             f"GROUP BY COALESCE(gene_ensembl_id, gene_GeneID_id)")
+    df = pd.read_sql_query(query, con, params=params)
+    num_transcripts_dict = dict(zip(combined_gene_ids(df), df['num_transcripts']))
     return num_transcripts_dict
 
 
@@ -358,16 +397,16 @@ def get_canonical_exon_counts(con, gene_ensembl_ids):
     result = {gid: None for gid in gene_ensembl_ids}
 
     cur = con.cursor()
-    placeholders = ','.join('?' * len(gene_ensembl_ids))
+    clause, params = gene_id_clause(gene_ensembl_ids)
     query = f'''
-        SELECT gene_ensembl_id, exon_count
+        SELECT COALESCE(gene_ensembl_id, gene_GeneID_id), exon_count
             FROM Transcripts
-            WHERE gene_ensembl_id IN ({placeholders})
+            WHERE {clause}
               AND canonical != 0
         '''
-    cur.execute(query, list(gene_ensembl_ids))
-    for gene_ensembl_id, exon_count in cur.fetchall():
-        result[gene_ensembl_id] = exon_count
+    cur.execute(query, params)
+    for gene_id, exon_count in cur.fetchall():
+        result[gene_id] = exon_count
 
     return result
 
@@ -814,19 +853,22 @@ def get_genes_df_transcripts(con, gene_ids):
 
     Args:
         con: Database connection
-        gene_ids: List of gene Ensembl IDs
+        gene_ids: List of gene IDs, each either an Ensembl gene id or a GeneID
 
     Returns:
         DataFrame with one row per transcript, including transcript_ensembl_id,
-        transcript_refseq_id, gene_ensembl_id and canonical columns.
+        transcript_refseq_id, gene_ensembl_id, gene_GeneID_id and canonical columns.
     """
     dfs = []
-    batch_size = 500
+    # 450, not 500: gene_id_clause() binds each id once per gene id column, so a
+    # batch costs 2 parameters per gene. The same arithmetic as
+    # get_exons_for_transcripts() - 450 * 2 = 900, under SQLite's 999 limit.
+    batch_size = 450
     for i in range(0, len(gene_ids), batch_size):
         batch = gene_ids[i:i + batch_size]
-        placeholders = ','.join(['?' for _ in batch])
-        query = f'SELECT * FROM Transcripts WHERE gene_ensembl_id IN ({placeholders})'
-        dfs.append(pd.read_sql_query(query, con, params=batch))
+        clause, params = gene_id_clause(batch)
+        query = f'SELECT * FROM Transcripts WHERE {clause}'
+        dfs.append(pd.read_sql_query(query, con, params=params))
     if not dfs:
         return pd.DataFrame()
     return pd.concat(dfs, ignore_index=True)
