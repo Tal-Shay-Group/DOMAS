@@ -50,9 +50,10 @@ LEAFCUTTER_EFFECT = os.path.join(LEAFCUTTER_DIR, 'leafcutter_ds_effect_sizes.txt
 LEAFCUTTER_SUBSET_CLUSTERS = 200
 
 RMATS_DIR = os.path.join(TESTS_DIR, 'rmats')
-# Same subset size as leafcutter (200 clusters), but spread evenly across the five
+# Same subset size as leafcutter (200 clusters), but spread evenly across the
 # rMATS event types: a plain sorted-first-N slice would be all A3SS (it sorts first)
-# and would never exercise the SE/A5SS/MXE/RI junction conversion.
+# and would never exercise the SE/A5SS/MXE junction conversion. RI is not read at
+# all (see utils._RMATS_EVENT_FILES), so the spread is over four types.
 RMATS_SUBSET_CLUSTERS = LEAFCUTTER_SUBSET_CLUSTERS
 
 MAJIQ_TSV = os.path.join(TESTS_DIR, 'majiq', 'NveB_Mono_voila.txt')
@@ -299,7 +300,7 @@ def _load_leafcutter_junctions(con, subset):
     When `subset` is None (the full test) every cluster is kept. Otherwise the
     subset is the leafcutter clusters whose gene appears in the rMATS subset
     (`_rmats_subset_df(subset)`): this way the leafcutter and rMATS subset tests
-    analyze the *same genes* - genes that in rMATS span all five event types - so
+    analyze the *same genes* - genes that in rMATS span all event types read - so
     their domain-analysis outputs can be compared tool-to-tool. `subset` sets the
     size of that rMATS subset."""
     df = leafcutter_read_input_files(con, LEAFCUTTER_SIG, LEAFCUTTER_EFFECT)
@@ -396,8 +397,10 @@ def test_leafcutter_full_compare_against_reference(con, keep_test_output):
 
 def _rmats_subset_df(subset):
     """The deterministic rMATS subset used by the rMATS test: `subset` clusters
-    spread evenly across the five event types (sorted within each type). `subset`
-    None returns every event. Also drives the leafcutter subset's gene set."""
+    spread evenly across the event types read from the fixture (sorted within each
+    type; RI is not read, so that is four types). `subset` None returns every event.
+    Also drives the leafcutter and MAJIQ subsets' gene sets - changing which event
+    types are read therefore changes those tests' gene set too."""
     df = rmats2junctions(RMATS_DIR)
     if subset is None:
         return df
@@ -556,7 +559,7 @@ def test_gene_not_in_database():
     cluster_result = ClusterAnalysisResult('TEST_1', 'ENSG99999999', 'FAKEGENE', specie='H_sapiens')
     empty_df = pd.DataFrame(columns=['transcript_ensembl_id', 'transcript_refseq_id', 'cds_start', 'cds_end'])
 
-    cluster_result.analyze_junction(
+    cluster_result.analyze(
         df_gene_transcripts=empty_df,
         canonical_transcript_ids=set(),
         exon_lookup=lambda x: pd.DataFrame(),
@@ -580,7 +583,7 @@ def test_no_canonical_transcript_when_gene_in_db():
         'cds_end': [500, 600]
     })
 
-    cluster_result.analyze_junction(
+    cluster_result.analyze(
         df_gene_transcripts=df_with_transcripts,
         canonical_transcript_ids=set(),  # Empty - no canonical transcripts available
         exon_lookup=lambda x: pd.DataFrame(),

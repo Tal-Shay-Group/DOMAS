@@ -1,17 +1,29 @@
+import logging
 import math
 import os
 
+import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 # rMATS-turbo per-event result files (junction-count variant). The JCEC files
 # carry identical coordinates, so JC is enough for DOMAS's coordinate mapping.
+#
+# RI is deliberately absent. A retained-intron event yields exactly one junction
+# (the spliced form - see _rmats_event_junctions()), and a single-junction cluster
+# can never produce a comparable transcript: either the canonical transcript
+# matches that junction, in which case every other transcript has no junction
+# unique to it, or it doesn't, in which case the cluster stops at
+# 'no_canonical_junctions'. Reading RI.MATS.JC.txt therefore only ever emitted
+# unanalysable rows (verified: 880 rows over 40 clusters, none analysed), so the
+# file is not read at all.
 _RMATS_EVENT_FILES = {
     'SE': 'SE.MATS.JC.txt',
     'A5SS': 'A5SS.MATS.JC.txt',
     'A3SS': 'A3SS.MATS.JC.txt',
     'MXE': 'MXE.MATS.JC.txt',
-    'RI': 'RI.MATS.JC.txt',
 }
 
 
@@ -34,25 +46,44 @@ def _rmats_event_junctions(event_type, r):
 
     No base adjustment is applied to the coordinates. Despite the `_0base` column
     names, these rMATS start values were verified to align *exactly* with DoChaP's
-    stored exon coordinates (626/626 exact across all five event types, zero
+    stored exon coordinates (626/626 exact across all event types, zero
     off-by-one), so adding +1 would introduce a 1bp error rather than fix one. The
     matcher's 1bp tolerance is for exon- vs intron-boundary conventions, not to
-    compensate for any base-offset here."""
+    compensate for any base-offset here.
+
+    SE and MXE name their exons by *genomic* position - rMATS reports
+    upstreamEE <= exonStart_0base and exonEnd <= downstreamES on both strands
+    (verified 100% over the fixture) - so one set of pairs is correct either way.
+
+    A5SS and A3SS instead name the long/short forms of one exon plus its flanking
+    exon, so which genomic boundary distinguishes the two forms flips with strand:
+    the alternative donor of an A5SS event is the exon's genomic END on the plus
+    strand but its genomic START on the minus strand, and the flanking exon sits
+    on the other side. Reading the plus-strand boundary regardless of strand made
+    both forms yield the *same* junction, collapsing the event to a single
+    junction - which can never produce a comparable transcript, so every
+    minus-strand A5SS/A3SS event was silently unanalysable."""
+    strand = str(r['strand']) if 'strand' in r else '+'
     if event_type == 'SE':
         return [
             _ordered_pair(r['upstreamEE'], r['exonStart_0base']),  # inclusion: upstream -> exon
             _ordered_pair(r['exonEnd'], r['downstreamES']),        # inclusion: exon -> downstream
             _ordered_pair(r['upstreamEE'], r['downstreamES']),     # skipping
         ]
-    if event_type == 'A5SS':
+    if event_type in ('A5SS', 'A3SS'):
+        # The two alternative-splice-site types exchange roles under strand
+        # reversal: a minus-strand A5SS has the same geometry as a plus-strand
+        # A3SS. Built only in this branch - MXE has no longExon*/short*/flanking*
+        # columns, and a KeyError here is swallowed by rmats2junctions().
+        varying_boundary_is_upper = (event_type == 'A5SS') == (strand != '-')
+        if varying_boundary_is_upper:
+            return [
+                _ordered_pair(r['longExonEnd'], r['flankingES']),          # long form
+                _ordered_pair(r['shortEE'], r['flankingES']),              # short form
+            ]
         return [
-            _ordered_pair(r['longExonEnd'], r['flankingES']),      # long form
-            _ordered_pair(r['shortEE'], r['flankingES']),          # short form
-        ]
-    if event_type == 'A3SS':
-        return [
-            _ordered_pair(r['flankingEE'], r['longExonStart_0base']),  # long form
-            _ordered_pair(r['flankingEE'], r['shortES']),              # short form
+            _ordered_pair(r['flankingEE'], r['longExonStart_0base']),      # long form
+            _ordered_pair(r['flankingEE'], r['shortES']),                  # short form
         ]
     if event_type == 'MXE':
         return [
@@ -61,16 +92,13 @@ def _rmats_event_junctions(event_type, r):
             _ordered_pair(r['upstreamEE'], r['2ndExonStart_0base']),
             _ordered_pair(r['2ndExonEnd'], r['downstreamES']),
         ]
-    if event_type == 'RI':
-        return [
-            _ordered_pair(r['upstreamEE'], r['downstreamES']),     # spliced (intron removed)
-        ]
     return []
 
 
 def rmats2junctions(rmats_dir):
-    """Parse an rMATS-turbo output directory (the five [Event].MATS.JC.txt files)
-    into a junctions DataFrame ready for JunctionsAnalysis.analyze_junctions().
+    """Parse an rMATS-turbo output directory (the SE/A5SS/A3SS/MXE [Event].MATS.JC.txt
+    files; RI is skipped, see _RMATS_EVENT_FILES) into a junctions DataFrame ready
+    for JunctionsAnalysis.analyze_junctions().
 
     rMATS provides the Ensembl GeneID and gene symbol directly, so no
     symbol->ensembl DB lookup is needed. ALL events are taken (no
@@ -82,6 +110,8 @@ def rmats2junctions(rmats_dir):
     for event_type, filename in _RMATS_EVENT_FILES.items():
         path = os.path.join(rmats_dir, filename)
         if not os.path.exists(path):
+            logger.warning(f"rMATS {event_type} file not found at {path} - no {event_type} "
+                           f"events will be analysed.")
             continue
         df = pd.read_csv(path, sep='\t')
         for _, r in df.iterrows():
@@ -174,12 +204,22 @@ def ioe2junctions(file_path):
     """
     Parses an IOE file and returns a DataFrame with the relevant data.
 
+    RI events are skipped, for the same reason RI.MATS.JC.txt is not read on the
+    rMATS path (see _RMATS_EVENT_FILES): SUPPA writes a retained intron as
+    `<gene>;RI:<chr>:<s1>:<e1>-<s2>:<e2>:<strand>`, in which only one token holds
+    a junction, so the event yields a single junction - and a single-junction
+    event can never produce a transcript differing from the canonical one within
+    the event, so it is structurally unanalysable. Measured on
+    events_RI_strict.ioe: 9,092 of 9,092 RI clusters had one junction, while
+    every other SUPPA event type had none.
+
     Args:
         file_path (str): The path to the IOE file.
     """
     junctions = []
     df_ioe = pd.read_csv(file_path, sep='\t')
     count = 0
+    skipped_ri = 0
     for row in df_ioe.itertuples():
         count += 1
         chromosome = row.seqname
@@ -187,6 +227,9 @@ def ioe2junctions(file_path):
         gene_ensembl_id = event_parts[0]
         event_parts2 = event_parts[1].split(':')
         event_type = event_parts2[0]
+        if event_type == 'RI':
+            skipped_ri += 1
+            continue
         cluster_name = f'{event_type}_{gene_ensembl_id}_{chromosome}_{count}'
         
         current_junctions = []   
@@ -212,6 +255,13 @@ def ioe2junctions(file_path):
             for start, end in current_junctions:
                  junctions.append([chromosome, gene_ensembl_id, event_type, start, end, cluster_name])
 
+
+    if skipped_ri:
+        logger.warning(f"{os.path.basename(file_path)}: skipped {skipped_ri} RI event(s) - a "
+                       f"retained intron yields a single junction and cannot be analysed.")
+    if not junctions:
+        logger.warning(f"No analysable events found in {file_path}"
+                       + (" (every event was RI)." if skipped_ri else "."))
 
     df_junctions = pd.DataFrame(junctions, columns=['chromosome', 'gene_ensembl_id', 'event_type', 'start_position', 'end_position', 'cluster_name'])
     return df_junctions
@@ -578,3 +628,238 @@ def calc_spade_score(domains_by_isoform):
             'intact': penalty <= 1e-9,
         }
     return result
+
+# ---------------------------------------------------------------------------
+# DoChaP database readers.
+#
+# These live here rather than in alternative_splicing.py so that
+# junction_analisys.py can import them directly: alternative_splicing.py
+# imports junction_analisys, so reaching them from there required a
+# function-local import to dodge the circular dependency.
+# ---------------------------------------------------------------------------
+
+def get_exons_for_transcripts(con, transcript_ids):
+    # Define the maximum chunk size (SQLite limit is 999, so 450 is safe since 450 * 2 = 900)
+    chunk_size = 450
+    df_list = []
+    
+    t_ids = list(transcript_ids)  # Ensure it's a list if it's a different iterable
+    # Loop through the IDs in chunks
+    for i in range(0, len(t_ids), chunk_size):
+        chunk_ids = t_ids[i:i + chunk_size]
+        
+        # Create the correct number of placeholders for this specific chunk
+        placeholders = ','.join(['?'] * len(chunk_ids))
+        
+        # Construct the query dynamically for the chunk
+        query = f'''
+            SELECT * FROM Transcript_exon 
+            WHERE transcript_ensembl_id IN ({placeholders}) 
+            OR transcript_refseq_id IN ({placeholders})
+        '''
+        
+        # Duplicate the chunk IDs to match the two IN clauses
+        params = chunk_ids * 2
+        
+        # Execute and append the DataFrame chunk
+        df_chunk = pd.read_sql_query(query, con, params=params)
+        df_list.append(df_chunk)
+
+    # Combine all chunks into one final DataFrame
+    df_exons = pd.concat(df_list, ignore_index=True)
+    return df_exons
+
+
+def get_genes_df_transcripts(con, gene_ids):
+    """
+    Load all transcripts (with their canonical flag) for a list of genes.
+
+    Args:
+        con: Database connection
+        gene_ids: List of gene Ensembl IDs
+
+    Returns:
+        DataFrame with one row per transcript, including transcript_ensembl_id,
+        transcript_refseq_id, gene_ensembl_id and canonical columns.
+    """
+    dfs = []
+    batch_size = 500
+    for i in range(0, len(gene_ids), batch_size):
+        batch = gene_ids[i:i + batch_size]
+        placeholders = ','.join(['?' for _ in batch])
+        query = f'SELECT * FROM Transcripts WHERE gene_ensembl_id IN ({placeholders})'
+        dfs.append(pd.read_sql_query(query, con, params=batch))
+    if not dfs:
+        return pd.DataFrame()
+    return pd.concat(dfs, ignore_index=True)
+
+
+def _read_transcripts_and_proteins(con, transcript_ids):
+    """Transcripts/Proteins rows for transcript_ids, filtered to a non-empty
+    protein_ensembl_id. Shared by get_transcript_domains_db() and
+    get_representative_domains_db() so get_domains_db() reads these tables once."""
+    df_transcript = pd.read_sql_query('select * from Transcripts', con)
+    df_transcript = df_transcript[df_transcript.transcript_ensembl_id.isin(transcript_ids)]
+    df_protein = pd.read_sql_query('select * from Proteins', con)
+    df_protein = df_protein[df_protein.transcript_ensembl_id.isin(transcript_ids)]
+    # Drop rows with empty or NaN protein_ensembl_id
+    df_protein = df_protein.dropna(subset=['protein_ensembl_id'])
+    df_protein = df_protein[df_protein.protein_ensembl_id.str.strip() != '']
+    return df_transcript, df_protein
+
+
+def get_transcript_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
+    print('Starting getting domains from dochap')
+    if df_transcript is None or df_protein is None:
+        df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
+    proteins_ids = np.unique(df_protein.protein_ensembl_id.values).tolist()
+    df_domain_event = pd.read_sql_query('select * from DomainEvent', con)
+
+    df_domain_event = df_domain_event[df_domain_event.protein_ensembl_id.isin(proteins_ids)]
+    # Drop rows with NaN or empty protein_ensembl_id
+    df_domain_event = df_domain_event.dropna(subset=['protein_ensembl_id'])
+    df_domain_event = df_domain_event[df_domain_event.protein_ensembl_id.str.strip() != '']
+    df_domain_type = pd.read_sql_query('select * from DomainType', con)
+    type_ids = np.unique(df_domain_event.type_id.values).tolist()
+    df_domain_type = df_domain_type[df_domain_type.type_id.isin(type_ids)]
+
+    merged_df = pd.merge(df_protein, df_transcript, on=['protein_ensembl_id', 'transcript_ensembl_id'])
+    merged_df = merged_df.drop(columns=['gene_GeneID_id', 'synonyms'])
+    merged_df = pd.merge(merged_df, df_domain_event, on='protein_ensembl_id')
+    merged_df = merged_df.drop(columns=['protein_refseq_id_x', 'length',
+                               'protein_refseq_id_y', 'nuc_start','nuc_end',
+                               'total_length','splice_junction', 'complete_exon'])
+    merged_df = pd.merge(merged_df, df_domain_type, on='type_id')
+    merged_df = merged_df.dropna(subset=['AA_start', 'AA_end'])
+    merged_df = merged_df.astype(str)
+    merged_df = merged_df.fillna('nan')
+    merged_df['AA_start'] = merged_df['AA_start'].astype(float).astype(int)
+    merged_df['AA_end'] = merged_df['AA_end'].astype(float).astype(int)
+
+    merged_df = merged_df.rename(columns={'protein_ensembl_id': 'protein_ensembl_id_version',
+                                          'transcript_ensembl_id': 'transcript_ensembl_id_version',
+                                          'description_y': 'short_description',
+                                          'gene_ensembl_id' : 'gene_ensembl_id'})
+    merged_df = merged_df.drop(columns=['type_id', 'ext_id', 'name', 'other_name', 'description_x'])
+    merged_df = merged_df.drop(columns=['transcript_refseq_id_x', 'tx_start', 'tx_end', 'cds_start', 'cds_end', 'exon_count'])
+    merged_df = merged_df.drop(columns=['transcript_refseq_id_y','protein_refseq_id'])
+    print('Done getting domains from dochap')
+    print(f'df columns: {merged_df.columns}')
+    return merged_df
+
+
+REPRESENTATIVE_DOMAINS_COLUMNS = [
+    'protein_ensembl_id_version', 'transcript_ensembl_id_version', 'protein_interpro_id',
+    'gene_ensembl_id', 'canonical', 'AA_start', 'AA_end', 'short_description',
+    'CDD_id', 'cdd', 'pfam', 'smart', 'tigr', 'interpro',
+    # domain_id + InterPro entry `type` are carried through so
+    # junction_analisys.filter_representative_domains() can reduce the domain
+    # set by curated type (Domain/Repeat vs Family/Homologous_superfamily)
+    # instead of the geometric collapse heuristic. `type` is NULL for DBs built
+    # before RepresentativeDomains gained the column (filter then no-ops).
+    'domain_id', 'type',
+]
+
+
+def _route_domain_id_to_column(domain_id):
+    """Map an InterPro match-XML accession (RepresentativeDomains.domain_id) to the
+    DomainType-style identifier column it belongs to. Only affects which bucket the id is
+    displayed under - domain matching in junction_analisys.py checks all buckets together."""
+    if domain_id.startswith('IPR'):
+        return 'interpro'
+    if domain_id.startswith('PF'):
+        return 'pfam'
+    if domain_id.startswith('SM'):
+        return 'smart'
+    if domain_id.startswith('TIGR'):
+        return 'tigr'
+    if domain_id.lower().startswith('cd'):
+        return 'CDD_id'
+    return 'interpro'
+
+
+def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
+    """
+    Domains sourced from the RepresentativeDomains table (populated by
+    DoChaP-db/InterProRepresentativeDomains.py) instead of DomainEvent/DomainType.
+
+    Returns a DataFrame with the same columns as get_transcript_domains_db() so it's a
+    drop-in replacement for build_domain_lookup(), but only contains rows for proteins
+    that actually have a RepresentativeDomains entry - see get_domains_db() for combining
+    it with the DomainEvent/DomainType fallback for proteins that don't.
+    """
+    print('Starting getting domains from RepresentativeDomains')
+    if df_transcript is None or df_protein is None:
+        df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
+
+    if 'protein_interpro_id' not in df_protein.columns:
+        print('Proteins table has no protein_interpro_id column '
+              '(InterProRepresentativeDomains.py has not been run against this DB).')
+        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
+
+    df_protein = df_protein.dropna(subset=['protein_interpro_id'])
+    df_protein = df_protein[df_protein.protein_interpro_id.str.strip() != '']
+    if df_protein.empty:
+        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
+
+    interpro_ids = np.unique(df_protein.protein_interpro_id.values).tolist()
+    try:
+        df_rep = pd.read_sql_query('select * from RepresentativeDomains', con)
+    except (sqlite3.OperationalError, pd.errors.DatabaseError):
+        print('RepresentativeDomains table not found in this DB.')
+        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
+
+    df_rep = df_rep[df_rep.protein_interpro_id.isin(interpro_ids)]
+    df_rep = df_rep.dropna(subset=['start', 'end'])
+    if df_rep.empty:
+        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
+
+    # `type` is absent in DBs built before RepresentativeDomains gained the
+    # column; add it as NULL so downstream columns/filtering stay uniform.
+    if 'type' not in df_rep.columns:
+        df_rep['type'] = None
+
+    merged_df = pd.merge(df_protein, df_transcript, on=['protein_ensembl_id', 'transcript_ensembl_id'])
+    merged_df = pd.merge(merged_df, df_rep, on='protein_interpro_id')
+
+    domain_column = merged_df['domain_id'].map(_route_domain_id_to_column)
+    for col in ('CDD_id', 'cdd', 'pfam', 'smart', 'tigr', 'interpro'):
+        merged_df[col] = merged_df['domain_id'].where(domain_column == col)
+
+    merged_df = merged_df.rename(columns={
+        'protein_ensembl_id': 'protein_ensembl_id_version',
+        'transcript_ensembl_id': 'transcript_ensembl_id_version',
+        'start': 'AA_start',
+        'end': 'AA_end',
+        'domain_name': 'short_description',
+    })
+    merged_df['AA_start'] = merged_df['AA_start'].astype(int)
+    merged_df['AA_end'] = merged_df['AA_end'].astype(int)
+
+    print('Done getting domains from RepresentativeDomains')
+    return merged_df[REPRESENTATIVE_DOMAINS_COLUMNS]
+
+
+def get_domains_db(con, transcript_ids, use_representative_domains=False):
+    """
+    Domain source used by JunctionsAnalysis.analyze_junctions().
+
+    use_representative_domains=False (default): unchanged - domains come from
+    DomainEvent/DomainType exactly as get_transcript_domains_db() always has, so the
+    existing algorithm runs without any change.
+
+    use_representative_domains=True: domains come from RepresentativeDomains where a
+    protein has an entry there; a protein with no RepresentativeDomains entry falls back
+    to its DomainEvent/DomainType domains, so no protein silently loses domain coverage.
+    """
+    df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
+    df_event_domains = get_transcript_domains_db(con, transcript_ids, df_transcript=df_transcript, df_protein=df_protein)
+    if not use_representative_domains:
+        return df_event_domains
+
+    df_rep_domains = get_representative_domains_db(con, transcript_ids, df_transcript=df_transcript, df_protein=df_protein)
+    proteins_with_rep_domains = set(df_rep_domains['protein_ensembl_id_version'].unique())
+    df_fallback = df_event_domains[
+        ~df_event_domains['protein_ensembl_id_version'].isin(proteins_with_rep_domains)
+    ]
+    return pd.concat([df_rep_domains, df_fallback], ignore_index=True)

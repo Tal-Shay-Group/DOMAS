@@ -437,7 +437,7 @@ def select_representative_transcript(df, on_ambiguous="raise"):
            "drop": exclude the cluster's rows from the result entirely, and
              print a warning with the count dropped.
 
-    analyze_junction() always tags exactly one transcript is_longest_cds for
+    analyze() always tags exactly one transcript is_longest_cds for
     any cluster with >=1 comparable transcript (is_most_like_canonical goes
     unset when no transcript qualifies that rule, which is why step 2 exists),
     so the ambiguous case isn't just bad/missing input: it happens for real

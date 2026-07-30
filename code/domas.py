@@ -25,8 +25,9 @@ def parse_args():
                               "splicing Excel file, 'ioe' for a SUPPA .ioe file (or a "
                               "directory of them, see -ioe_pattern), 'leafcutter' for a pair "
                               "of leafcutter_ds output files (see -lc_sig / -lc_effect), "
-                              "'rmats' for an rMATS-turbo output directory (the five "
-                              "[Event].MATS.JC.txt files, passed via -input), 'majiq' for a "
+                              "'rmats' for an rMATS-turbo output directory (the "
+                              "SE/A5SS/A3SS/MXE [Event].MATS.JC.txt files, passed via -input; "
+                              "RI is skipped - it cannot yield a comparable transcript), 'majiq' for a "
                               "MAJIQ voila TSV file (passed via -input)")
     parser.add_argument("-input", required=False, default=None, type=str,
                          help="Path to the input for -format hadas/ioe/rmats/majiq (Excel for "
@@ -43,7 +44,8 @@ def parse_args():
     parser.add_argument("-output_csv", type=str, default="junctions_analysis.csv", help="Path to the output csv")
     parser.add_argument("-gene_ids", type=str, default=None,
                          help="Comma-separated list of gene symbols to generate PDFs for "
-                              "(only honored with -format hadas; default is all genes)")
+                              "(only honored with -format hadas together with -pdf; "
+                              "default is all genes)")
     parser.add_argument("-ioe_pattern", type=str, default=r"output_prefix_.*_strict.ioe",
                          help="Filename regex used to find .ioe files when -input is a "
                               "directory (only used with -format ioe)")
@@ -54,31 +56,31 @@ def parse_args():
     parser.add_argument("-num_workers", type=int, default=_DEFAULT_NUM_WORKERS,
                          help=f"Number of parallel worker processes (default: this machine's "
                               f"CPU count, {_DEFAULT_NUM_WORKERS})")
-    parser.add_argument("-use_representative_domains", action="store_true",
-                         help="Pull domains from the RepresentativeDomains table where "
-                              "available, falling back to DomainEvent/DomainType per "
-                              "protein (default: DomainEvent/DomainType only)")
-    parser.add_argument("-no_pdf", action="store_true",
-                         help="Skip PDF generation (only honored with -format hadas; the "
-                              "ioe path never generates PDFs regardless of this flag). "
-                              "Useful for a full-scale hadas run where a PDF per gene "
-                              "would otherwise always be produced.")
-    parser.add_argument("-run_stats", action="store_true",
-                         help="After the run, generate the results_stats.py report "
-                              "(event distribution, domain frequency, etc.) for the "
-                              "produced -output_csv.")
+    parser.add_argument("-no_representative_domains", action="store_true",
+                         help="Use DomainEvent/DomainType only. By default domains come "
+                              "from the RepresentativeDomains table where available, "
+                              "falling back to DomainEvent/DomainType per protein.")
+    parser.add_argument("-pdf", action="store_true",
+                         help="Generate a per-gene PDF (only honored with -format hadas; "
+                              "the ioe path never generates PDFs regardless of this flag). "
+                              "Off by default: a full-scale hadas run would otherwise "
+                              "produce a PDF per gene.")
+    parser.add_argument("-no_stats", action="store_true",
+                         help="Skip the results_stats.py report. By default the report "
+                              "(event distribution, domain frequency, etc.) is generated "
+                              "for the produced -output_csv after the run.")
     parser.add_argument("-stats_out_dir", type=str, default=None,
-                         help="Directory for the -run_stats report (default: same "
+                         help="Directory for the stats report (default: same "
                               "directory as -output_csv)")
     parser.add_argument("-max_clusters", type=int, default=0,
                          help="If > 0, analyze only the first N clusters (sorted). Caps the "
                               "amount of work; used by the web GUI to process the first 100 "
                               "clusters. 0 (default) means no limit.")
-    parser.add_argument("-filter_non_comparable", action="store_true",
-                         help="Keep only transcripts that were actually compared to the "
-                              "canonical transcript in the output CSV; drop rows for "
-                              "non-comparable (not chosen) transcripts, e.g. those with a "
-                              "gene_not_in_db / junction_not_mapped / no_unique_junctions event.")
+    parser.add_argument("-keep_non_comparable", action="store_true",
+                         help="Keep rows for non-comparable transcripts (e.g. those with a "
+                              "gene_not_in_db / junction_not_mapped / no_unique_junctions "
+                              "event). By default the output CSV holds only transcripts "
+                              "that were actually compared to the canonical transcript.")
 
     # --- enrichment-DB setup mode (does not run an analysis) ---
     setup = parser.add_argument_group(
@@ -196,46 +198,48 @@ def main():
     try:
         if args.format == "leafcutter":
             alternative_splicing.analyze_leafcutter_input(
-                con, args.lc_sig, args.lc_effect, args.output_csv, num_workers=args.num_workers,
-                use_representative_domains=args.use_representative_domains, max_clusters=args.max_clusters,
-                filter_non_comparable=args.filter_non_comparable,
+                con, significance_file=args.lc_sig, effect_sizes_file=args.lc_effect,
+                output_csv=args.output_csv, num_workers=args.num_workers,
+                use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
+                filter_non_comparable=not args.keep_non_comparable,
             )
         elif args.format == "rmats":
             alternative_splicing.analyze_rmats_input(
-                con, args.input, args.output_csv, num_workers=args.num_workers,
-                use_representative_domains=args.use_representative_domains, max_clusters=args.max_clusters,
-                filter_non_comparable=args.filter_non_comparable,
+                con, rmats_dir=args.input, output_csv=args.output_csv, num_workers=args.num_workers,
+                use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
+                filter_non_comparable=not args.keep_non_comparable,
             )
         elif args.format == "majiq":
             alternative_splicing.analyze_voila_input(
-                con, args.input, args.output_csv, num_workers=args.num_workers,
-                use_representative_domains=args.use_representative_domains, max_clusters=args.max_clusters,
-                filter_non_comparable=args.filter_non_comparable,
+                con, voila_tsv=args.input, output_csv=args.output_csv, num_workers=args.num_workers,
+                use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
+                filter_non_comparable=not args.keep_non_comparable,
             )
         elif args.format == "hadas":
             print_genes = [g.strip() for g in args.gene_ids.split(',')] if args.gene_ids else None
             alternative_splicing.analyze_hadas_input(
-                con, args.input, args.output_csv, print_genes=print_genes, num_workers=args.num_workers,
-                use_representative_domains=args.use_representative_domains, create_pdf=not args.no_pdf,
-                max_clusters=args.max_clusters, filter_non_comparable=args.filter_non_comparable,
+                con, input_file=args.input, output_csv=args.output_csv,
+                print_genes=print_genes, num_workers=args.num_workers,
+                use_representative_domains=not args.no_representative_domains, create_pdf=args.pdf,
+                max_clusters=args.max_clusters, filter_non_comparable=not args.keep_non_comparable,
             )
         elif os.path.isdir(args.input):
             alternative_splicing.analyze_ioe_files(
-                con, args.input, args.ioe_pattern, args.output_csv,
+                con, input_path=args.input, pattern=args.ioe_pattern, output_csv=args.output_csv,
                 examples_per_event=args.examples_per_event, num_workers=args.num_workers,
-                use_representative_domains=args.use_representative_domains, max_clusters=args.max_clusters,
-                filter_non_comparable=args.filter_non_comparable,
+                use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
+                filter_non_comparable=not args.keep_non_comparable,
             )
         else:
             alternative_splicing.analyze_ioe_file(
-                con, args.input, args.output_csv, num_workers=args.num_workers,
-                use_representative_domains=args.use_representative_domains, max_clusters=args.max_clusters,
-                filter_non_comparable=args.filter_non_comparable,
+                con, ioe_file=args.input, output_csv=args.output_csv, num_workers=args.num_workers,
+                use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
+                filter_non_comparable=not args.keep_non_comparable,
             )
     finally:
         con.close()
 
-    if args.run_stats:
+    if not args.no_stats:
         import results_stats
         stats_out_dir = args.stats_out_dir or os.path.dirname(os.path.abspath(args.output_csv))
         if args.format == "hadas":

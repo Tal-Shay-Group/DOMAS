@@ -104,7 +104,6 @@ def test_worker_handles_cluster_error_gracefully():
         'ENSG00002': df_transcripts[df_transcripts['gene_ensembl_id'] == 'ENSG00002'],
         'ENSG00003': df_transcripts[df_transcripts['gene_ensembl_id'] == 'ENSG00003'],
     }
-    empty_transcripts = df_transcripts.iloc[0:0]
     gene_strand = {'ENSG00001': '+', 'ENSG00002': '+', 'ENSG00003': '+'}
 
     # Mock _analyze_single_cluster to fail on the bad cluster
@@ -133,7 +132,7 @@ def test_worker_handles_cluster_error_gracefully():
                 # Populate the per-worker-process state _process_cluster_chunk reads,
                 # the same way ProcessPoolExecutor's initializer does in a real run.
                 _init_worker(df_exons, df_domains, canonical_transcript_ids, gene_strand,
-                             transcripts_by_gene, empty_transcripts)
+                             transcripts_by_gene)
 
                 # Call the worker
                 results = _process_cluster_chunk(chunk_info)
@@ -490,7 +489,7 @@ def test_select_most_like_canonical_tiebreak_is_deterministic():
 
 
 # ---------------------------------------------------------------------------
-# analyze_junction: every comparable transcript is compared, tagged with
+# analyze: every comparable transcript is compared, tagged with
 # is_longest_cds / is_most_like_canonical
 # ---------------------------------------------------------------------------
 
@@ -527,7 +526,7 @@ def test_analyze_junction_compares_all_and_tags_longest_cds_deterministically():
     cluster_result = ClusterAnalysisResult('cluster_1', 'ENSG_TEST', 'TESTGENE')
     cluster_result.junctions = [(100, 200), (300, 400)]
 
-    cluster_result.analyze_junction(
+    cluster_result.analyze(
         df_gene_transcripts, canonical_transcript_ids={'CANON'},
         exon_lookup=exon_lookup, domain_lookup=domain_lookup,
     )
@@ -572,7 +571,7 @@ def test_analyze_junction_leaves_most_like_canonical_unset_when_none_qualify():
     cluster_result = ClusterAnalysisResult('cluster_1', 'ENSG_TEST', 'TESTGENE')
     cluster_result.junctions = [(100, 200), (300, 400)]
 
-    cluster_result.analyze_junction(
+    cluster_result.analyze(
         df_gene_transcripts, canonical_transcript_ids={'CANON'},
         exon_lookup=exon_lookup, domain_lookup=domain_lookup,
     )
@@ -612,7 +611,7 @@ def test_analyze_junction_tags_sole_comparable_transcript_as_both():
     cluster_result = ClusterAnalysisResult('cluster_1', 'ENSG_TEST', 'TESTGENE')
     cluster_result.junctions = [(100, 200), (300, 400)]
 
-    cluster_result.analyze_junction(
+    cluster_result.analyze(
         df_gene_transcripts, canonical_transcript_ids={'CANON'},
         exon_lookup=exon_lookup, domain_lookup=domain_lookup,
     )
@@ -626,3 +625,141 @@ def test_analyze_junction_tags_sole_comparable_transcript_as_both():
 if __name__ == '__main__':
     import sys
     sys.exit(pytest.main([__file__, '-v']))
+
+
+# ---------------------------------------------------------------------------
+# utils.ioe2junctions - SUPPA .ioe parsing (previously untested)
+# ---------------------------------------------------------------------------
+
+def _write_ioe(tmp_path, event_ids):
+    """Minimal SUPPA .ioe file: one row per event_id, seqname taken from the id."""
+    lines = ['seqname\tgene_id\tevent_id\talternative_transcripts\ttotal_transcripts']
+    for event_id in event_ids:
+        gene = event_id.split(';')[0]
+        seqname = event_id.split(':')[1]
+        lines.append(f'{seqname}\t{gene}\t{event_id}\tENSMUST1\tENSMUST1,ENSMUST2')
+    path = tmp_path / 'events_strict.ioe'
+    path.write_text('\n'.join(lines) + '\n')
+    return str(path)
+
+
+def test_ioe2junctions_skips_ri_events(tmp_path):
+    """A SUPPA retained intron is written as RI:<chr>:<s1>:<e1>-<s2>:<e2>:<strand>,
+    which holds a single junction - it can never yield a transcript differing from
+    canonical within the event, so the event is skipped rather than emitted as an
+    unanalysable cluster."""
+    import utils
+    ioe = _write_ioe(tmp_path, [
+        'ENSMUSG1;SE:1:100-200:300-400:+',
+        'ENSMUSG2;RI:1:500:600-700:800:+',
+    ])
+    df = utils.ioe2junctions(ioe)
+
+    assert set(df['event_type']) == {'SE'}, "RI events must not reach the junction frame"
+    assert not df['cluster_name'].str.startswith('RI_').any()
+    # The SE event still produces both its own junctions plus the skipping junction.
+    assert len(df) == 2
+
+
+def test_ioe2junctions_ri_only_file_returns_empty_frame_with_columns(tmp_path):
+    """An all-RI file yields no junctions. It must still return a frame carrying the
+    expected columns: analyze_ioe_files() concatenates per-file frames and then reads
+    .gene_ensembl_id, which a bare empty DataFrame would break."""
+    import utils
+    ioe = _write_ioe(tmp_path, ['ENSMUSG2;RI:1:500:600-700:800:+'])
+    df = utils.ioe2junctions(ioe)
+
+    assert df.empty
+    assert list(df.columns) == ['chromosome', 'gene_ensembl_id', 'event_type',
+                                'start_position', 'end_position', 'cluster_name']
+
+
+def test_ioe2junctions_keeps_both_forms_of_alt_splice_site_events(tmp_path):
+    """A3/A5 events carry two explicit junctions, so - unlike the rMATS path, which
+    names exons by transcript role - they need no strand handling and must not
+    collapse to one junction."""
+    import utils
+    ioe = _write_ioe(tmp_path, [
+        'ENSMUSG3;A3:1:100-200:100-250:-',
+        'ENSMUSG4;A5:1:300-500:400-500:-',
+    ])
+    df = utils.ioe2junctions(ioe)
+
+    for cluster, rows in df.groupby('cluster_name'):
+        distinct = rows[['start_position', 'end_position']].drop_duplicates()
+        assert len(distinct) == 2, f"{cluster} collapsed to {len(distinct)} junction(s)"
+
+
+# ---------------------------------------------------------------------------
+# utils._rmats_event_junctions - strand handling for the alt-splice-site types
+# ---------------------------------------------------------------------------
+
+def _a5ss_row(strand, long_start, long_end, short_start, short_end, flank_start, flank_end):
+    return pd.Series({
+        'strand': strand,
+        'longExonStart_0base': long_start, 'longExonEnd': long_end,
+        'shortES': short_start, 'shortEE': short_end,
+        'flankingES': flank_start, 'flankingEE': flank_end,
+    })
+
+
+def test_rmats_a5ss_minus_strand_yields_two_distinct_junctions():
+    """Real minus-strand A5SS geometry: the long and short forms of the exon share
+    their genomic END and differ at their genomic START, because the alternative
+    donor of a minus-strand transcript is the genomically lower boundary. Reading
+    the plus-strand boundary here made both forms produce the same junction,
+    collapsing the event to one junction - which can never yield a comparable
+    transcript, so every minus-strand A5SS event was silently unanalysable."""
+    import utils
+    # Coordinates taken from a real fixture row (ENSG on chr7, minus strand).
+    row = _a5ss_row('-', 45283351, 45283527, 45283382, 45283527, 45282348, 45282459)
+
+    junctions = utils._rmats_event_junctions('A5SS', row)
+
+    assert len(set(junctions)) == 2, f"expected two distinct junctions, got {junctions}"
+    # Both junctions run from the flanking exon's upper boundary to the alternative
+    # donor, which is what differs between the two forms.
+    assert set(junctions) == {(45282459, 45283351), (45282459, 45283382)}
+
+
+def test_rmats_a5ss_plus_strand_unchanged():
+    """The plus-strand construction must be untouched by the minus-strand fix."""
+    import utils
+    row = _a5ss_row('+', 1000, 1500, 1000, 1400, 2000, 2100)
+
+    junctions = utils._rmats_event_junctions('A5SS', row)
+
+    assert set(junctions) == {(1500, 2000), (1400, 2000)}
+
+
+def test_rmats_a3ss_strands_are_mirror_images():
+    """A3SS is the mirror of A5SS: the varying boundary is the genomic START on the
+    plus strand and the genomic END on the minus strand. Both must give two
+    distinct junctions."""
+    import utils
+    plus = _a5ss_row('+', 1000, 1500, 1100, 1500, 500, 600)
+    minus = _a5ss_row('-', 1000, 1500, 1000, 1400, 2000, 2100)
+
+    plus_junctions = utils._rmats_event_junctions('A3SS', plus)
+    minus_junctions = utils._rmats_event_junctions('A3SS', minus)
+
+    assert set(plus_junctions) == {(600, 1000), (600, 1100)}
+    assert set(minus_junctions) == {(1500, 2000), (1400, 2000)}
+
+
+def test_rmats_mxe_does_not_require_alt_splice_site_columns():
+    """MXE rows carry none of the longExon*/short*/flanking* columns. Building those
+    coordinate pairs unconditionally raised KeyError, which rmats2junctions() swallows
+    via `except (KeyError, ValueError, TypeError): continue` - silently dropping every
+    MXE event. Guard against that regression."""
+    import utils
+    row = pd.Series({
+        'strand': '-',
+        'upstreamEE': 100, 'downstreamES': 900,
+        '1stExonStart_0base': 200, '1stExonEnd': 300,
+        '2ndExonStart_0base': 400, '2ndExonEnd': 500,
+    })
+
+    junctions = utils._rmats_event_junctions('MXE', row)
+
+    assert junctions == [(100, 200), (300, 900), (100, 400), (500, 900)]

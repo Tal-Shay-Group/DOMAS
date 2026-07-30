@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+import utils
 from generate_gene_pdf import GeneVisualization, prepare_gene_data_bulk
 
 # Suppress FutureWarning about DataFrame concatenation behavior
@@ -264,7 +265,7 @@ def build_exon_lookup(df_exons):
     """
     Precompute, once per analyze_junctions() run, a transcript_id -> exons
     lookup so per-cluster/per-transcript filtering of the full `df_exons`
-    DataFrame (the dominant cost of analyze_junction()) is replaced by O(1)
+    DataFrame (the dominant cost of analyze()) is replaced by O(1)
     dict lookups.
     """
     by_ensembl = {tid: g for tid, g in df_exons.groupby('transcript_ensembl_id')}
@@ -536,9 +537,16 @@ def _max_skip_none(values):
 def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_transcript_id, transcript_id,
                                   canonical_junctions, transcript_junctions, junctions):
     """
-    Determine the genomic window around the differing junctions (refined over
-    three rounds, per the domain-boundary algorithm) and return the domains of
-    the canonical and compared transcript that fall within it.
+    Determine the genomic window around the differing junctions and return the
+    domains of the canonical and compared transcript that fall within it.
+
+    Two rounds, not an iteration to convergence: round 1 collects the domains
+    overlapping the boundary exons of the event span; round 2 widens the window
+    to the union of the event span and those domains' own genomic span - pooled
+    across both transcripts, so each is windowed identically - and re-collects.
+    Round 2 is skipped when round 1 found no domains in either transcript.
+    Both rounds select from the already-reduced representative domain set (see
+    filter_representative_domains()).
 
     Returns (t_domains_in_region, c_domains_in_region), each with a 'length'
     column added (AA_end - AA_start + 1).
@@ -817,7 +825,7 @@ class ClusterAnalysisResult:
                             transcript_domain_length, canonical_domains_number, transcript_domains_number,
                             is_longest_cds, is_most_like_canonical))
 
-    def analyze_junction(self, df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup):
+    def analyze(self, df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup):
         """
         Run the DOMAS algorithm for this cluster:
 
@@ -835,6 +843,14 @@ class ClusterAnalysisResult:
         relevant genomic window and compare its domains against the canonical
         transcript's, recording one event per domain group.
         """
+        # Check if gene exists in the database at all. Done before any column is
+        # read, so an absent gene can be signalled with a plain empty frame (or
+        # None) rather than one carrying the DB's columns.
+        if df_gene_transcripts is None or df_gene_transcripts.empty:
+            self.add_event('gene_not_in_db')
+            logger.debug(f"Gene {self.gene_ensembl_id} ({self.gene_symbol}) not found in database for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
+            return
+
         # Use an order-preserving dedup (not `set`) so the order in which
         # transcripts are processed - and therefore the order of the output
         # rows - doesn't depend on Python's per-process string hash seed.
@@ -842,27 +858,19 @@ class ClusterAnalysisResult:
         # ensembl nor a refseq id) are dropped so they can't spuriously match
         # another gene's similarly-invalid "canonical" id.
         invalid_ids = {'', 'nan', 'None'}
+        combined_ids = df_gene_transcripts.transcript_ensembl_id.fillna(df_gene_transcripts.transcript_refseq_id)
         gene_transcript_ids = [
-            tid for tid in dict.fromkeys(
-                df_gene_transcripts.transcript_ensembl_id.fillna(df_gene_transcripts.transcript_refseq_id)
-            )
+            tid for tid in dict.fromkeys(combined_ids)
             if tid is not None and not pd.isna(tid) and tid not in invalid_ids
         ]
 
         # CDS length per transcript id, for the longest-CDS tag below. Missing
         # cds_start/cds_end yields NaN here, normalized to -1 so such transcripts
         # are deprioritized rather than breaking the max() comparison.
-        combined_ids = df_gene_transcripts.transcript_ensembl_id.fillna(df_gene_transcripts.transcript_refseq_id)
         cds_length_by_transcript = {
             tid: (length if pd.notna(length) else -1)
             for tid, length in zip(combined_ids, df_gene_transcripts.cds_end - df_gene_transcripts.cds_start)
         }
-
-        # Check if gene exists in the database at all
-        if df_gene_transcripts.empty:
-            self.add_event('gene_not_in_db')
-            logger.debug(f"Gene {self.gene_ensembl_id} ({self.gene_symbol}) not found in database for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
-            return
 
         gene_canonical_ids = canonical_transcript_ids.intersection(gene_transcript_ids)
         if not gene_canonical_ids:
@@ -970,7 +978,7 @@ class ClusterAnalysisResult:
         
 
 def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None, canonical_transcript_ids=None,
-                           gene_strand=None, transcripts_by_gene=None, empty_transcripts=None):
+                           gene_strand=None, transcripts_by_gene=None):
     """Analyze a single cluster."""
     _, cluster_df = cluster_tuple
 
@@ -986,8 +994,8 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
     )
     cluster_result.junctions = list(zip(cluster_df['start_position'], cluster_df['end_position']))
 
-    df_gene_transcripts = transcripts_by_gene.get(gene_ensembl_id, empty_transcripts)
-    cluster_result.analyze_junction(df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup)
+    df_gene_transcripts = transcripts_by_gene.get(gene_ensembl_id)
+    cluster_result.analyze(df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup)
 
     return cluster_result
 
@@ -1111,14 +1119,13 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
 _worker_state = {}
 
 
-def _init_worker(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene, empty_transcripts):
+def _init_worker(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene):
     """ProcessPoolExecutor initializer - runs once when each worker process starts."""
     _worker_state['exon_lookup'] = build_exon_lookup(df_exons)
     _worker_state['domain_lookup'] = build_domain_lookup(df_domains)
     _worker_state['canonical_transcript_ids'] = canonical_transcript_ids
     _worker_state['gene_strand'] = gene_strand
     _worker_state['transcripts_by_gene'] = transcripts_by_gene
-    _worker_state['empty_transcripts'] = empty_transcripts
 
 
 def _process_cluster_chunk(chunk_info):
@@ -1137,7 +1144,6 @@ def _process_cluster_chunk(chunk_info):
     canonical_transcript_ids = _worker_state['canonical_transcript_ids']
     gene_strand = _worker_state['gene_strand']
     transcripts_by_gene = _worker_state['transcripts_by_gene']
-    empty_transcripts = _worker_state['empty_transcripts']
 
     chunk_results = []
     processed_in_chunk = 0
@@ -1151,7 +1157,6 @@ def _process_cluster_chunk(chunk_info):
                 canonical_transcript_ids=canonical_transcript_ids,
                 gene_strand=gene_strand,
                 transcripts_by_gene=transcripts_by_gene,
-                empty_transcripts=empty_transcripts,
             )
             chunk_results.append(result)
         except (KeyError, ValueError, AttributeError, TypeError) as e:
@@ -1218,8 +1223,7 @@ class JunctionsAnalysis:
         )
         gene_strand = dict(zip(df_genes['gene_ensembl_id'], df_genes['strand']))
 
-        from alternative_splicing import get_genes_df_transcripts, get_domains_db, get_exons_for_transcripts
-        df_transcripts = get_genes_df_transcripts(self.con, gene_ids)
+        df_transcripts = utils.get_genes_df_transcripts(self.con, gene_ids)
 
         if use_ensembl_only:
             invalid_ids = {'', 'nan', 'None'}
@@ -1233,11 +1237,11 @@ class JunctionsAnalysis:
             df_transcripts.transcript_ensembl_id.fillna(df_transcripts.transcript_refseq_id)
         ) - {None} - invalid_ids
 
-        df_domains = get_domains_db(
+        df_domains = utils.get_domains_db(
             self.con, transcript_ids, use_representative_domains=use_representative_domains
         )
 
-        df_exons = get_exons_for_transcripts(self.con, transcript_ids)
+        df_exons = utils.get_exons_for_transcripts(self.con, transcript_ids)
 
         return df_genes, df_transcripts, df_domains, df_exons, gene_strand
 
@@ -1249,9 +1253,8 @@ class JunctionsAnalysis:
         canonical_transcript_ids = set(all_transcript_ids[valid_mask & (df_transcripts.canonical != 0)])
 
         transcripts_by_gene = {gid: g for gid, g in df_transcripts.groupby('gene_ensembl_id')}
-        empty_transcripts = df_transcripts.iloc[0:0]
 
-        return canonical_transcript_ids, transcripts_by_gene, empty_transcripts
+        return canonical_transcript_ids, transcripts_by_gene
 
     def _prepare_cluster_groups(self, df_junctions):
         """Group junctions into clusters."""
@@ -1260,7 +1263,7 @@ class JunctionsAnalysis:
         return cluster_groups
 
     def _run_parallel_analysis(self, cluster_groups, df_exons, df_domains, canonical_transcript_ids,
-                               gene_strand, transcripts_by_gene, empty_transcripts, num_workers, output_path,
+                               gene_strand, transcripts_by_gene, num_workers, output_path,
                                filter_non_comparable=False):
         """Execute cluster analysis in parallel with dedicated writer thread."""
         total = len(cluster_groups)
@@ -1314,8 +1317,6 @@ class JunctionsAnalysis:
             for chunk_idx, chunk in enumerate(chunks)
         ]
 
-        chunk_worker = _process_cluster_chunk
-
         all_results = []  # Collect results for PDF generation
         processed_count = 0
         last_time = time.perf_counter()
@@ -1323,11 +1324,11 @@ class JunctionsAnalysis:
         with ProcessPoolExecutor(
             max_workers=actual_workers,
             initializer=_init_worker,
-            initargs=(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene, empty_transcripts),
+            initargs=(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene),
         ) as executor:
             # Submit all tasks - df_exons/df_domains are sent once per worker via
             # initargs above, not re-pickled per chunk here.
-            futures = [executor.submit(chunk_worker, chunk_info) for chunk_info in chunks_with_info]
+            futures = [executor.submit(_process_cluster_chunk, chunk_info) for chunk_info in chunks_with_info]
 
             # Process results as they complete: send to writer AND collect for PDFs
             for future in as_completed(futures):
@@ -1499,7 +1500,7 @@ class JunctionsAnalysis:
         )
 
         # Prepare lookup structures
-        canonical_transcript_ids, transcripts_by_gene, empty_transcripts = \
+        canonical_transcript_ids, transcripts_by_gene = \
             self._prepare_lookup_structures(df_transcripts, df_exons, df_domains)
 
         # Group junctions into clusters
@@ -1508,7 +1509,7 @@ class JunctionsAnalysis:
         # Run parallel analysis (with dedicated writer thread for CSV output)
         results = self._run_parallel_analysis(
             cluster_groups, df_exons, df_domains, canonical_transcript_ids,
-            gene_strand, transcripts_by_gene, empty_transcripts, num_workers,
+            gene_strand, transcripts_by_gene, num_workers,
             output_path, filter_non_comparable=filter_non_comparable,
         )
 

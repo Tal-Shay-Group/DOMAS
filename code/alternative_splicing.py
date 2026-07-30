@@ -404,237 +404,12 @@ def find_clusters_with_n_transcripts(con, input_file, output_file, n=3):
     # get genes from clusters
     df_junctions = hadas_read_input_file(con, input_file)
     df_junctions_n = df_junctions[df_junctions['gene_ensembl_id'].isin(ids_n)]
-    analyze_junctions2(con, df_junctions=df_junctions_n, output_path=output_file)
+    analyze_junctions(con, df_junctions=df_junctions_n, output_path=output_file)
 
 def get_df_junction_columns():
     columns =['chromosome', 'start_position', 'end_position', 'gene_symbol', 'gene_ensembl_id', 'cluster_name']
     return columns
 
-def get_exons_for_transcripts(con, transcript_ids):
-    # Define the maximum chunk size (SQLite limit is 999, so 450 is safe since 450 * 2 = 900)
-    chunk_size = 450
-    df_list = []
-    
-    t_ids = list(transcript_ids)  # Ensure it's a list if it's a different iterable
-    # Loop through the IDs in chunks
-    for i in range(0, len(t_ids), chunk_size):
-        chunk_ids = t_ids[i:i + chunk_size]
-        
-        # Create the correct number of placeholders for this specific chunk
-        placeholders = ','.join(['?'] * len(chunk_ids))
-        
-        # Construct the query dynamically for the chunk
-        query = f'''
-            SELECT * FROM Transcript_exon 
-            WHERE transcript_ensembl_id IN ({placeholders}) 
-            OR transcript_refseq_id IN ({placeholders})
-        '''
-        
-        # Duplicate the chunk IDs to match the two IN clauses
-        params = chunk_ids * 2
-        
-        # Execute and append the DataFrame chunk
-        df_chunk = pd.read_sql_query(query, con, params=params)
-        df_list.append(df_chunk)
-
-    # Combine all chunks into one final DataFrame
-    df_exons = pd.concat(df_list, ignore_index=True)
-    return df_exons
-
-
-def get_genes_df_transcripts(con, gene_ids):
-    """
-    Load all transcripts (with their canonical flag) for a list of genes.
-
-    Args:
-        con: Database connection
-        gene_ids: List of gene Ensembl IDs
-
-    Returns:
-        DataFrame with one row per transcript, including transcript_ensembl_id,
-        transcript_refseq_id, gene_ensembl_id and canonical columns.
-    """
-    dfs = []
-    batch_size = 500
-    for i in range(0, len(gene_ids), batch_size):
-        batch = gene_ids[i:i + batch_size]
-        placeholders = ','.join(['?' for _ in batch])
-        query = f'SELECT * FROM Transcripts WHERE gene_ensembl_id IN ({placeholders})'
-        dfs.append(pd.read_sql_query(query, con, params=batch))
-    if not dfs:
-        return pd.DataFrame()
-    return pd.concat(dfs, ignore_index=True)
-
-
-def _read_transcripts_and_proteins(con, transcript_ids):
-    """Transcripts/Proteins rows for transcript_ids, filtered to a non-empty
-    protein_ensembl_id. Shared by get_transcript_domains_db() and
-    get_representative_domains_db() so get_domains_db() reads these tables once."""
-    df_transcript = pd.read_sql_query('select * from Transcripts', con)
-    df_transcript = df_transcript[df_transcript.transcript_ensembl_id.isin(transcript_ids)]
-    df_protein = pd.read_sql_query('select * from Proteins', con)
-    df_protein = df_protein[df_protein.transcript_ensembl_id.isin(transcript_ids)]
-    # Drop rows with empty or NaN protein_ensembl_id
-    df_protein = df_protein.dropna(subset=['protein_ensembl_id'])
-    df_protein = df_protein[df_protein.protein_ensembl_id.str.strip() != '']
-    return df_transcript, df_protein
-
-
-def get_transcript_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
-    print('Starting getting domains from dochap')
-    if df_transcript is None or df_protein is None:
-        df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
-    proteins_ids = np.unique(df_protein.protein_ensembl_id.values).tolist()
-    df_domain_event = pd.read_sql_query('select * from DomainEvent', con)
-
-    df_domain_event = df_domain_event[df_domain_event.protein_ensembl_id.isin(proteins_ids)]
-    # Drop rows with NaN or empty protein_ensembl_id
-    df_domain_event = df_domain_event.dropna(subset=['protein_ensembl_id'])
-    df_domain_event = df_domain_event[df_domain_event.protein_ensembl_id.str.strip() != '']
-    df_domain_type = pd.read_sql_query('select * from DomainType', con)
-    type_ids = np.unique(df_domain_event.type_id.values).tolist()
-    df_domain_type = df_domain_type[df_domain_type.type_id.isin(type_ids)]
-
-    merged_df = pd.merge(df_protein, df_transcript, on=['protein_ensembl_id', 'transcript_ensembl_id'])
-    merged_df = merged_df.drop(columns=['gene_GeneID_id', 'synonyms'])
-    merged_df = pd.merge(merged_df, df_domain_event, on='protein_ensembl_id')
-    merged_df = merged_df.drop(columns=['protein_refseq_id_x', 'length',
-                               'protein_refseq_id_y', 'nuc_start','nuc_end',
-                               'total_length','splice_junction', 'complete_exon'])
-    merged_df = pd.merge(merged_df, df_domain_type, on='type_id')
-    merged_df = merged_df.dropna(subset=['AA_start', 'AA_end'])
-    merged_df = merged_df.astype(str)
-    merged_df = merged_df.fillna('nan')
-    merged_df['AA_start'] = merged_df['AA_start'].astype(float).astype(int)
-    merged_df['AA_end'] = merged_df['AA_end'].astype(float).astype(int)
-
-    merged_df = merged_df.rename(columns={'protein_ensembl_id': 'protein_ensembl_id_version',
-                                          'transcript_ensembl_id': 'transcript_ensembl_id_version',
-                                          'description_y': 'short_description',
-                                          'gene_ensembl_id' : 'gene_ensembl_id'})
-    merged_df = merged_df.drop(columns=['type_id', 'ext_id', 'name', 'other_name', 'description_x'])
-    merged_df = merged_df.drop(columns=['transcript_refseq_id_x', 'tx_start', 'tx_end', 'cds_start', 'cds_end', 'exon_count'])
-    merged_df = merged_df.drop(columns=['transcript_refseq_id_y','protein_refseq_id'])
-    print('Done getting domains from dochap')
-    print(f'df columns: {merged_df.columns}')
-    return merged_df
-
-
-REPRESENTATIVE_DOMAINS_COLUMNS = [
-    'protein_ensembl_id_version', 'transcript_ensembl_id_version', 'protein_interpro_id',
-    'gene_ensembl_id', 'canonical', 'AA_start', 'AA_end', 'short_description',
-    'CDD_id', 'cdd', 'pfam', 'smart', 'tigr', 'interpro',
-    # domain_id + InterPro entry `type` are carried through so
-    # junction_analisys.filter_representative_domains() can reduce the domain
-    # set by curated type (Domain/Repeat vs Family/Homologous_superfamily)
-    # instead of the geometric collapse heuristic. `type` is NULL for DBs built
-    # before RepresentativeDomains gained the column (filter then no-ops).
-    'domain_id', 'type',
-]
-
-
-def _route_domain_id_to_column(domain_id):
-    """Map an InterPro match-XML accession (RepresentativeDomains.domain_id) to the
-    DomainType-style identifier column it belongs to. Only affects which bucket the id is
-    displayed under - domain matching in junction_analisys.py checks all buckets together."""
-    if domain_id.startswith('IPR'):
-        return 'interpro'
-    if domain_id.startswith('PF'):
-        return 'pfam'
-    if domain_id.startswith('SM'):
-        return 'smart'
-    if domain_id.startswith('TIGR'):
-        return 'tigr'
-    if domain_id.lower().startswith('cd'):
-        return 'CDD_id'
-    return 'interpro'
-
-
-def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
-    """
-    Domains sourced from the RepresentativeDomains table (populated by
-    DoChaP-db/InterProRepresentativeDomains.py) instead of DomainEvent/DomainType.
-
-    Returns a DataFrame with the same columns as get_transcript_domains_db() so it's a
-    drop-in replacement for build_domain_lookup(), but only contains rows for proteins
-    that actually have a RepresentativeDomains entry - see get_domains_db() for combining
-    it with the DomainEvent/DomainType fallback for proteins that don't.
-    """
-    print('Starting getting domains from RepresentativeDomains')
-    if df_transcript is None or df_protein is None:
-        df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
-
-    if 'protein_interpro_id' not in df_protein.columns:
-        print('Proteins table has no protein_interpro_id column '
-              '(InterProRepresentativeDomains.py has not been run against this DB).')
-        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
-
-    df_protein = df_protein.dropna(subset=['protein_interpro_id'])
-    df_protein = df_protein[df_protein.protein_interpro_id.str.strip() != '']
-    if df_protein.empty:
-        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
-
-    interpro_ids = np.unique(df_protein.protein_interpro_id.values).tolist()
-    try:
-        df_rep = pd.read_sql_query('select * from RepresentativeDomains', con)
-    except (sqlite3.OperationalError, pd.errors.DatabaseError):
-        print('RepresentativeDomains table not found in this DB.')
-        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
-
-    df_rep = df_rep[df_rep.protein_interpro_id.isin(interpro_ids)]
-    df_rep = df_rep.dropna(subset=['start', 'end'])
-    if df_rep.empty:
-        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
-
-    # `type` is absent in DBs built before RepresentativeDomains gained the
-    # column; add it as NULL so downstream columns/filtering stay uniform.
-    if 'type' not in df_rep.columns:
-        df_rep['type'] = None
-
-    merged_df = pd.merge(df_protein, df_transcript, on=['protein_ensembl_id', 'transcript_ensembl_id'])
-    merged_df = pd.merge(merged_df, df_rep, on='protein_interpro_id')
-
-    domain_column = merged_df['domain_id'].map(_route_domain_id_to_column)
-    for col in ('CDD_id', 'cdd', 'pfam', 'smart', 'tigr', 'interpro'):
-        merged_df[col] = merged_df['domain_id'].where(domain_column == col)
-
-    merged_df = merged_df.rename(columns={
-        'protein_ensembl_id': 'protein_ensembl_id_version',
-        'transcript_ensembl_id': 'transcript_ensembl_id_version',
-        'start': 'AA_start',
-        'end': 'AA_end',
-        'domain_name': 'short_description',
-    })
-    merged_df['AA_start'] = merged_df['AA_start'].astype(int)
-    merged_df['AA_end'] = merged_df['AA_end'].astype(int)
-
-    print('Done getting domains from RepresentativeDomains')
-    return merged_df[REPRESENTATIVE_DOMAINS_COLUMNS]
-
-
-def get_domains_db(con, transcript_ids, use_representative_domains=False):
-    """
-    Domain source used by JunctionsAnalysis.analyze_junctions().
-
-    use_representative_domains=False (default): unchanged - domains come from
-    DomainEvent/DomainType exactly as get_transcript_domains_db() always has, so the
-    existing algorithm runs without any change.
-
-    use_representative_domains=True: domains come from RepresentativeDomains where a
-    protein has an entry there; a protein with no RepresentativeDomains entry falls back
-    to its DomainEvent/DomainType domains, so no protein silently loses domain coverage.
-    """
-    df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
-    df_event_domains = get_transcript_domains_db(con, transcript_ids, df_transcript=df_transcript, df_protein=df_protein)
-    if not use_representative_domains:
-        return df_event_domains
-
-    df_rep_domains = get_representative_domains_db(con, transcript_ids, df_transcript=df_transcript, df_protein=df_protein)
-    proteins_with_rep_domains = set(df_rep_domains['protein_ensembl_id_version'].unique())
-    df_fallback = df_event_domains[
-        ~df_event_domains['protein_ensembl_id_version'].isin(proteins_with_rep_domains)
-    ]
-    return pd.concat([df_rep_domains, df_fallback], ignore_index=True)
 
 
 # read only relevant columns from input file and
@@ -705,7 +480,7 @@ def hadas_read_input_file(con, input_path):
 #     with a `cluster` id of the form chr:clu_<n>_<strand>, a `genes` column and
 #     `p.adjust`.
 # We reshape them into the same per-junction schema hadas_read_input_file() /
-# ioe2junctions() produce, so the frame flows straight into analyze_junctions2().
+# ioe2junctions() produce, so the frame flows straight into analyze_junctions().
 
 # Maps the specie label carried on the junctions (matching the hadas convention:
 # 'human'/'mouse') to the DoChaP Genes.specie value used for symbol lookups.
@@ -727,9 +502,9 @@ def _split_leafcutter_intron(intron):
     start = parts[1] if len(parts) > 1 else ''
     end = parts[2] if len(parts) > 2 else ''
     clu = parts[3] if len(parts) > 3 else ''
-    # clu is clu_<n>_<strand>; drop the trailing _<strand>
-    clu_no_strand = clu.rsplit('_', 1)[0] if clu.startswith('clu_') else clu
-    return chromosome, start, end, f'{chromosome}:{clu_no_strand}'
+    # clu is clu_<n>_<strand>; _leafcutter_cluster_key() drops the trailing
+    # _<strand>, so both files' ids are normalised by one function.
+    return chromosome, start, end, _leafcutter_cluster_key(f'{chromosome}:{clu}')
 
 
 def _leafcutter_cluster_key(cluster):
@@ -747,7 +522,7 @@ def leafcutter_read_input_files(con, significance_file, effect_sizes_file, speci
     """Read a pair of LeafCutter differential-splicing outputs
     (leafcutter_ds_cluster_significance.txt + leafcutter_ds_effect_sizes.txt) and
     return a per-junction DataFrame with the same columns hadas_read_input_file()
-    produces, ready for analyze_junctions2().
+    produces, ready for analyze_junctions().
 
     The effect-sizes file supplies the junction coordinates and cluster; the
     significance file supplies the gene symbol per cluster, which is resolved to a
@@ -766,19 +541,25 @@ def leafcutter_read_input_files(con, significance_file, effect_sizes_file, speci
 
     # per-junction coordinates + cluster from the effect-sizes file
     df = df_effect.copy()
-    split = df['intron'].apply(_split_leafcutter_intron)
-    df['chromosome'] = split.apply(lambda t: t[0])
-    df['start_position'] = split.apply(lambda t: t[1]).astype(int)
-    df['end_position'] = split.apply(lambda t: t[2]).astype(int)
-    df['cluster_name'] = split.apply(lambda t: t[3])
+    # Unpack the parsed intron id into named columns in one pass, rather than
+    # re-applying a positional lambda over the tuple Series four times.
+    parsed = pd.DataFrame(
+        df['intron'].map(_split_leafcutter_intron).tolist(),
+        columns=['chromosome', 'start_position', 'end_position', 'cluster_name'],
+        index=df.index,
+    )
+    df['chromosome'] = parsed['chromosome']
+    df['start_position'] = parsed['start_position'].astype(int)
+    df['end_position'] = parsed['end_position'].astype(int)
+    df['cluster_name'] = parsed['cluster_name']
     df['junction_name'] = (df['chromosome'] + ':' + df['start_position'].astype(str)
                            + ':' + df['end_position'].astype(str))
     df = df[(df.start_position >= 0) & (df.end_position >= 0)].copy()
-    # rank is only a display label downstream; keep deltapsi if present.
-    df['rank'] = df['deltapsi'] if 'deltapsi' in df.columns else ''
+    # 'rank' is carried only to match the junction schema the other readers
+    # produce; nothing downstream reads it, so deltapsi is not propagated.
+    df['rank'] = ''
 
     # cluster -> gene symbol (first gene if several) from the significance file
-    df_sig = df_sig.copy()
     df_sig['cluster_key'] = df_sig['cluster'].apply(_leafcutter_cluster_key)
     df_sig['gene_symbol_first'] = df_sig['genes'].astype(str).str.split(',').str[0].str.strip()
     cluster_to_symbol = dict(zip(df_sig['cluster_key'], df_sig['gene_symbol_first']))
@@ -814,7 +595,7 @@ def analyze_leafcutter_input(con, significance_file, effect_sizes_file, output_c
     """Read a pair of leafcutter_ds output files and run the domain analysis, the
     same way analyze_ioe_file()/analyze_hadas_input() do for their formats."""
     df_junctions = leafcutter_read_input_files(con, significance_file, effect_sizes_file, specie=specie)
-    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False,
+    analyze_junctions(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False,
                        num_workers=num_workers, use_representative_domains=use_representative_domains,
                        max_clusters=max_clusters, filter_non_comparable=filter_non_comparable)
 
@@ -829,7 +610,7 @@ def create_events_junctions(con, df_events, output_csv):
     gene_ids = df_genes.gene_GeneID_id.unique().tolist()
     df_transcripts = pd.read_sql_query(f'select * from transcripts where gene_GeneID_id in ({gene_placeholders})', con, params=gene_ids)
     transcript_ids = df_transcripts.transcript_ensembl_id.fillna(df_transcripts.transcript_refseq_id).tolist()  
-    df_exons = get_exons_for_transcripts(con, transcript_ids)
+    df_exons = utils.get_exons_for_transcripts(con, transcript_ids)
 
     # Precompute transcript -> exons and transcript -> exon-by-rank maps for O(1) lookup in the loop.
     transcript_to_rows = {}
@@ -1072,7 +853,7 @@ def _limit_clusters(df_junctions, max_clusters):
     return df_junctions[df_junctions[col].isin(keep)].copy()
 
 
-def analyze_junctions2(con, df_junctions=None, junctions_csv=None, hadas_format=False,
+def analyze_junctions(con, df_junctions=None, junctions_csv=None, hadas_format=False,
                         output_path='as_events_junctions_analysis.csv',
                         n=0, create_pdf=True, print_genes=None, num_workers=5,
                         use_representative_domains=False, max_clusters=0,
@@ -1102,19 +883,19 @@ def analyze_ioe_file(con, ioe_file, output_csv, num_workers=5, use_representativ
     gene_symbols_dict = utils.get_gene_symbols(con, df_junctions.gene_ensembl_id.unique().tolist())
     # add gene symbols to df_junctions
     df_junctions['gene_symbol'] = df_junctions['gene_ensembl_id'].map(gene_symbols_dict)
-    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False, num_workers=num_workers,
+    analyze_junctions(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False, num_workers=num_workers,
                         use_representative_domains=use_representative_domains, max_clusters=max_clusters,
                         filter_non_comparable=filter_non_comparable)
 
 
 def analyze_rmats_input(con, rmats_dir, output_csv, num_workers=5, use_representative_domains=False, max_clusters=0,
                         filter_non_comparable=False):
-    """Read an rMATS-turbo output directory (the five [Event].MATS.JC.txt files)
+    """Read an rMATS-turbo output directory (the SE/A5SS/A3SS/MXE [Event].MATS.JC.txt files)
     and run the domain analysis. rMATS embeds the Ensembl GeneID and gene symbol
     in each event, so - unlike the leafcutter path - no symbol->ensembl lookup is
     needed. All events are analyzed (no significance filtering)."""
     df_junctions = utils.rmats2junctions(rmats_dir)
-    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False,
+    analyze_junctions(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False,
                        num_workers=num_workers, use_representative_domains=use_representative_domains,
                        max_clusters=max_clusters, filter_non_comparable=filter_non_comparable)
 
@@ -1125,7 +906,7 @@ def analyze_voila_input(con, voila_tsv, output_csv, num_workers=5, use_represent
     voila embeds the Ensembl Gene ID and gene name in each LSV, so no
     symbol->ensembl lookup is needed. All LSVs are analyzed (no filtering)."""
     df_junctions = utils.voila2junctions(voila_tsv)
-    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False,
+    analyze_junctions(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False,
                        num_workers=num_workers, use_representative_domains=use_representative_domains,
                        max_clusters=max_clusters, filter_non_comparable=filter_non_comparable)
 
@@ -1180,12 +961,12 @@ def analyze_ioe_files(con, input_path, pattern, output_csv, examples_per_event=5
         # per event type, keep only examples_per_event unique cluster_name with minimum number of transcripts for the gene
         df_examples = keep_min_transcript_clusters(df_all_junctions, examples_per_event=examples_per_event)
         df_examples.to_csv('ioe_example_junctions.csv', index=False)
-        analyze_junctions2(con, df_junctions=df_examples, output_path=output_csv, create_pdf=False, num_workers=num_workers,
+        analyze_junctions(con, df_junctions=df_examples, output_path=output_csv, create_pdf=False, num_workers=num_workers,
                             use_representative_domains=use_representative_domains, max_clusters=max_clusters,
                             filter_non_comparable=filter_non_comparable)
     else:
         df_all_junctions.to_csv('ioe_all_junctions.csv', index=False)
-        analyze_junctions2(con, df_junctions=df_all_junctions, output_path=output_csv, create_pdf=False, num_workers=num_workers,
+        analyze_junctions(con, df_junctions=df_all_junctions, output_path=output_csv, create_pdf=False, num_workers=num_workers,
                             use_representative_domains=use_representative_domains, max_clusters=max_clusters,
                             filter_non_comparable=filter_non_comparable)
 
@@ -1193,7 +974,7 @@ def analyze_hadas_input(con, input_file, output_csv, print_genes=None, num_worke
                          use_representative_domains=False, create_pdf=True, max_clusters=0,
                          filter_non_comparable=False):
     df_junctions = hadas_read_input_file(con, input_file)
-    analyze_junctions2(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=create_pdf, print_genes=print_genes,
+    analyze_junctions(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=create_pdf, print_genes=print_genes,
                         num_workers=num_workers, use_representative_domains=use_representative_domains, max_clusters=max_clusters,
                         filter_non_comparable=filter_non_comparable)
     return
@@ -1203,7 +984,7 @@ def analyze_hadas_input(con, input_file, output_csv, print_genes=None, num_worke
     df_junctions.to_csv('hadas_junctions_with_transcript_counts.csv', index=False)
     df_junctions_filtered = df_junctions[df_junctions['num_transcripts'] <= 2]
     df_junctions_filtered.to_csv('hadas_junctions_filtered.csv', index=False)
-    analyze_junctions2(con, df_junctions=df_junctions_filtered, output_path=output_csv, create_pdf=True, print_genes=print_genes)
+    analyze_junctions(con, df_junctions=df_junctions_filtered, output_path=output_csv, create_pdf=True, print_genes=print_genes)
     
 
 if __name__ == "__main__":
@@ -1234,7 +1015,7 @@ if __name__ == "__main__":
     df_events = df_events[df_events['event'] != 'no_canonical_transcript'] # skip no_canonical_transcript for now since it doesn't fit well with junction analysis
     df_events = df_events.groupby('event').head(2)
     create_events_junctions(con, df_events, 'as_events_junctions2.csv')
-    analyze_junctions2(con, junctions_csv='as_events_junctions2.csv', output_path='as_events_junctions_analysis2.csv')
+    analyze_junctions(con, junctions_csv='as_events_junctions2.csv', output_path='as_events_junctions_analysis2.csv')
     exit(0)
     #get_all_as_events(con)
     #main(con, 'PUF60')
