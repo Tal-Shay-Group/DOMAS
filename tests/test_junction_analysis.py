@@ -1349,3 +1349,59 @@ def test_enrichment_cli_reports_missing_inputs_before_running(tmp_path):
     with pytest.raises(SystemExit):
         enrichment.parse_args(['-enrich', str(results), '-dochap', str(dochap),
                                '-data_dir', str(tmp_path)])  # no enrichment.sqlite built
+
+
+# ---------------------------------------------------------------------------
+# filter_representative_domains: Site/PTM removal
+#
+# This branch is reachable with real data - 3,041 Site/PTM rows in the database,
+# on 1,007 human transcripts - but no cluster in any fixture happens to sample one,
+# so it had no coverage at all. The frames below are synthetic for that reason:
+# they pin the rule rather than a particular gene.
+# ---------------------------------------------------------------------------
+
+def _typed_domain_row(domain_id, entry_type, start, end):
+    return {'domain_id': domain_id, 'type': entry_type, 'AA_start': start, 'AA_end': end,
+            **{c: None for c in DOMAIN_NAME_COLUMNS}}
+
+
+def test_site_and_ptm_entries_are_removed():
+    """Site and PTM entries are residue-level features, not structural units, so they
+    are dropped outright - not merely demoted like a redundant Family entry."""
+    from junction_analisys import filter_representative_domains
+    df = pd.DataFrame([
+        _typed_domain_row('IPR000001', 'Domain', 10, 200),
+        _typed_domain_row('IPR000002', 'Conserved_site', 50, 62),
+        _typed_domain_row('IPR000003', 'Binding_site', 70, 75),
+        _typed_domain_row('IPR000004', 'PTM', 90, 92),
+    ])
+    kept = filter_representative_domains(df)
+    assert list(kept['domain_id']) == ['IPR000001'], list(kept['domain_id'])
+
+
+def test_site_entries_removed_even_where_no_domain_covers_them():
+    """Removal is unconditional. The >50% coverage rule that spares an otherwise
+    redundant Family or member entry - 'demote, don't delete' - does not apply here:
+    a residue-level feature is never the evidence a domain comparison rests on, so a
+    Conserved_site alone in its region is still dropped rather than kept as the only
+    annotation."""
+    from junction_analisys import filter_representative_domains
+    df = pd.DataFrame([
+        _typed_domain_row('IPR000001', 'Domain', 10, 100),
+        _typed_domain_row('IPR000002', 'Conserved_site', 500, 512),   # nothing else near it
+    ])
+    kept = filter_representative_domains(df)
+    assert list(kept['domain_id']) == ['IPR000001'], list(kept['domain_id'])
+
+
+def test_non_site_tiers_survive_alongside_site_removal():
+    """Removing the sites must not disturb the tier ladder: a Family entry that no
+    Domain covers is still kept, while the sites go."""
+    from junction_analisys import filter_representative_domains
+    df = pd.DataFrame([
+        _typed_domain_row('IPR000001', 'Domain', 10, 100),
+        _typed_domain_row('IPR000002', 'Family', 400, 500),           # no Domain covers this
+        _typed_domain_row('IPR000003', 'PTM', 45, 47),
+    ])
+    kept = filter_representative_domains(df)
+    assert set(kept['domain_id']) == {'IPR000001', 'IPR000002'}, list(kept['domain_id'])

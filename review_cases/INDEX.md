@@ -55,7 +55,7 @@ Site/PTM removed outright.
 | B1 | Reduction happens, 2 annotations → 1 | CACNG3 `ENST00000005284.4` | 28 transcripts |
 | B2 | **Demote, don't delete** — a member-DB hit is kept because no InterPro Domain covers the region | CACNG3 `ENST00000005284.4` | 25 |
 | B3 | **All three tiers** in one transcript, 6 annotations → 4 | DIAPH2 `ENST00000324765.13` | 2 |
-| B4 | Site/PTM entries removed | — | **0 — see gaps** |
+| B4 | Site/PTM entries removed | no fixture cluster samples one — covered by unit test instead | 0 here, 1,007 human transcripts in the DB |
 | B5 | **Repeated accession**: same domain id more than once | BPIFB2 `ENST00000170150.4` | 12 |
 
 ---
@@ -139,9 +139,13 @@ The rMATS ten, paired by strand so the strand-dependent construction can be comp
 ## Gaps
 
 1. **`longer_domains`** — the only S4 outcome with no example anywhere.
-2. **Site/PTM removal (B4) is never exercised.** No transcript in the ioe fixture
-   carries an `Active_site` / `Binding_site` / `Conserved_site` / `PTM` InterPro entry,
-   so that branch of the ladder is not merely unreviewable — it is **untested**.
+2. **Site/PTM removal (B4) has no reviewable PDF**, though it is now tested. The
+   database holds 3,041 such entries (Conserved_site 2,702, Binding_site 326, PTM 13;
+   no Active_site) on 1,007 human transcripts, so this is an accident of which 35
+   clusters the ioe fixture samples, not a data limitation. Covered by unit tests
+   against synthetic frames, cross-checked on the real transcript
+   `ENST00000680265.1`, whose 6 Binding_site entries are dropped (38 → 28 rows). A
+   reviewable case could be built by sampling a gene that carries one.
 3. **`no_gene_specified` has no PDF** — the LeafCutter runs that produce it are the
    ones without PDF generation.
 4. The generated sets under `review_cases/` are **not** golden references and are

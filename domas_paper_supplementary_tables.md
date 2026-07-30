@@ -76,6 +76,33 @@ SUPPA `RI` events are handled the same way. MAJIQ marks the retained intron thro
 `IR coords`, which names one of the intervals already listed in `Junctions coords`;
 that interval is emitted once, as `retained_intron`.
 
+### S2c. SUPPA event types → features
+
+SUPPA states the coordinates directly in `event_id`, so each token that holds a
+`-` is a junction. The one derived feature is the skipping junction of an `SE`
+event, which the event id does not carry.
+
+| Event | `event_id` coordinate tokens | Features emitted |
+| :--- | :--- | :--- |
+| SE | `e1-s2`, `e2-s3` | both, **plus** the derived skipping junction `e1-s3` — 3 junctions |
+| A3, A5 | two junctions, one per splice site | both, as given |
+| MX | four junctions, two per mutually exclusive exon | all four, as given |
+| RI | `e1-s2` | emitted twice: `junction` + `retained_intron` |
+| AF, AL | the junctions of each alternative first/last exon | as given |
+
+The two representations of the same event agree. `tests/test_cross_format.py`
+states each event once as intron coordinates, renders it into each tool's syntax and
+asserts the readers produce the same features — for SE, RI, MXE and both
+alternative-splice-site types, on both strands.
+
+That test was written because the two disagreed. SUPPA `SE` previously emitted two
+junctions where rMATS emits three: the event id names both inclusion junctions, but
+the downstream one contributed only its right coordinate to the derived skipping
+junction and was never added in its own right. A transcript carrying only that
+downstream junction — an alternative first exon starting inside the skipped exon —
+was therefore comparable when the event came from rMATS and not when the same event
+came from SUPPA.
+
 ---
 
 ## Table S3. Labels for events and transcripts that cannot be analysed
