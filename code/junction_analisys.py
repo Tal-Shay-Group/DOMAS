@@ -12,6 +12,10 @@ import pandas as pd
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import utils
+from utils import (
+    FEATURE_JUNCTION, FEATURE_RETAINED_INTRON, FEATURE_TYPE_COLUMN,
+    find_matching_junction_indices,
+)
 from generate_gene_pdf import GeneVisualization, prepare_gene_data_bulk
 
 # Suppress FutureWarning about DataFrame concatenation behavior
@@ -32,52 +36,6 @@ DOMAIN_NAME_PREFIX_PRIORITY = ['IPR', 'pfam', 'cd', 'smart', 'tigr', 'CDD']
 # ---------------------------------------------------------------------------
 # Phase 1: junction <-> exon matching
 # ---------------------------------------------------------------------------
-
-def find_matching_junction_indices(df_transcript_exons, junctions, strand='+'):
-    """
-    Return the set of indices (into `junctions`) of junctions that match this
-    transcript's exon structure.
-
-    A junction (start_position, end_position) matches the transcript if there
-    are two exons, adjacent in transcript order, such that one exon's
-    genomic_end_tx is within 1bp of the junction's intron-left boundary and the
-    other exon's genomic_start_tx is within 1bp of the junction's intron-right
-    boundary.
-
-    On the positive strand the intron-left boundary is start_position and the
-    intron-right boundary is end_position.  On the negative strand the
-    transcript runs right-to-left in genomic coordinates, so the roles are
-    reversed: the intron-left boundary (in genomic terms) is end_position and
-    the intron-right boundary is start_position.
-    """
-    if df_transcript_exons.empty or not junctions:
-        return set()
-
-    exon_starts = df_transcript_exons['genomic_start_tx'].to_numpy()
-    exon_ends = df_transcript_exons['genomic_end_tx'].to_numpy()
-    exon_orders = df_transcript_exons['order_in_transcript'].to_numpy()
-
-    matched = set()
-    for idx, (start_position, end_position) in enumerate(junctions):
-        if strand == '-':
-            # Negative strand: transcript runs from high to low genomic coords.
-            # DB always stores genomic_start_tx < genomic_end_tx, so:
-            #   - the upstream exon's intron boundary is its genomic_start_tx (lower bound of the higher exon)
-            #   - the downstream exon's intron boundary is its genomic_end_tx (upper bound of the lower exon)
-            # Junction end_position is near the upstream exon's genomic_start_tx.
-            # Junction start_position is near the downstream exon's genomic_end_tx.
-            intron_left, intron_right = end_position, start_position
-            upstream_orders = exon_orders[np.abs(exon_starts - intron_left) <= 1]
-            downstream_orders = exon_orders[np.abs(exon_ends - intron_right) <= 1]
-        else:
-            intron_left, intron_right = start_position, end_position
-            upstream_orders = exon_orders[np.abs(exon_ends - intron_left) <= 1]
-            downstream_orders = exon_orders[np.abs(exon_starts - intron_right) <= 1]
-        if len(upstream_orders) == 1 and len(downstream_orders) == 1:
-            if abs(int(downstream_orders[0]) - int(upstream_orders[0])) == 1:
-                matched.add(idx)
-    return matched
-
 
 # ---------------------------------------------------------------------------
 # Phase 1.5: "most like canonical" transcript selection, an alternative to
@@ -817,6 +775,10 @@ class ClusterAnalysisResult:
         self.strand = strand
         self.canonical_transcript_id = None
         self.junctions = []
+        # Per-feature type, parallel to self.junctions (see FEATURE_JUNCTION /
+        # FEATURE_RETAINED_INTRON). None means "every feature is a junction",
+        # which is what a junctions frame without the column yields.
+        self.feature_types = None
         self.events = []
 
     def add_event(self, event, transcript_id=None, domain_name=None, canonical_domain_length=None, transcript_domain_length=None,
@@ -893,18 +855,19 @@ class ClusterAnalysisResult:
         }
 
         transcript_junctions = {
-            transcript_id: find_matching_junction_indices(exons, self.junctions, strand=self.strand or '+')
+            transcript_id: find_matching_junction_indices(exons, self.junctions, strand=self.strand or '+',
+                                                          feature_types=self.feature_types)
             for transcript_id, exons in transcript_exons.items()
         }
 
         for idx, junction in enumerate(self.junctions):
             if not any(idx in junction_idxs for junction_idxs in transcript_junctions.values()):
                 logger.debug(f"Junction {junction} in cluster {self.cluster_name} does not map to any transcript. ")
-                self.add_event('junction_not_mapped', None)
+                self.add_event('feature_not_mapped', None)
 
         canonical_junctions = transcript_junctions.get(self.canonical_transcript_id, set())
         if not canonical_junctions:
-            self.add_event('no_canonical_junctions')
+            self.add_event('no_canonical_features')
             logger.debug(f"No canonical junctions found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
             return
 
@@ -914,7 +877,7 @@ class ClusterAnalysisResult:
                 continue
             if not junction_idxs:
                 logger.debug(f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} does not have any junctions. ")
-                self.add_event('transcript_doesnt_have_junctions', transcript_id=transcript_id)
+                self.add_event('transcript_doesnt_have_features', transcript_id=transcript_id)
                 continue
 
             unique_junctions = junction_idxs - canonical_junctions
@@ -923,7 +886,7 @@ class ClusterAnalysisResult:
                     f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} does not have any unique junctions "
                     "compared to the canonical transcript. Skipping this transcript for comparison."
                 )
-                self.add_event('no_unique_junctions', transcript_id=transcript_id)
+                self.add_event('no_unique_features', transcript_id=transcript_id)
                 continue
 
             comparable_transcript_ids.append(transcript_id)
@@ -993,6 +956,11 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
         as_event_type=event_type, specie=specie, strand=strand
     )
     cluster_result.junctions = list(zip(cluster_df['start_position'], cluster_df['end_position']))
+    if FEATURE_TYPE_COLUMN in cluster_df.columns:
+        cluster_result.feature_types = [
+            FEATURE_JUNCTION if pd.isna(value) else str(value)
+            for value in cluster_df[FEATURE_TYPE_COLUMN]
+        ]
 
     df_gene_transcripts = transcripts_by_gene.get(gene_ensembl_id)
     cluster_result.analyze(df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup)
@@ -1007,8 +975,8 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
 # analyze_junctions(filter_non_comparable=True) drops from the output CSV.
 NON_COMPARISON_EVENTS = frozenset({
     'gene_not_in_db', 'no_canonical_transcript', 'only_one_transcript',
-    'no_canonical_junctions', 'junction_not_mapped',
-    'transcript_doesnt_have_junctions', 'no_unique_junctions',
+    'no_canonical_features', 'feature_not_mapped',
+    'transcript_doesnt_have_features', 'no_unique_features',
 })
 
 
@@ -1361,7 +1329,7 @@ class JunctionsAnalysis:
     # canonical transcript (it was skipped for lacking junctions or lacking a
     # unique junction).
     _SKIPPED_TRANSCRIPT_EVENTS = {
-        'transcript_doesnt_have_junctions', 'no_unique_junctions',
+        'transcript_doesnt_have_features', 'no_unique_features',
     }
 
     def _comparable_transcript_ids(self, cluster_result):
@@ -1408,6 +1376,18 @@ class JunctionsAnalysis:
         for count, cluster_result in enumerate(results, start=1):
             try:
                 df_cluster_junctions = pd.DataFrame(cluster_result.junctions, columns=['start', 'end'])
+                # Carry the feature type into the visualization, so a retained
+                # intron is matched there by containment too. Rebuilt from the
+                # coordinate pairs alone, the PDF treated every feature as a
+                # junction and showed the retaining transcript as not supporting it.
+                #
+                # Only when the event actually contains one: the column also lands
+                # in the first-page junction table, where a "junction" value on
+                # every row of every plain event would be noise. Present, it tells
+                # the reader which row the dotted in-exon span belongs to.
+                if (cluster_result.feature_types is not None
+                        and FEATURE_RETAINED_INTRON in cluster_result.feature_types):
+                    df_cluster_junctions[FEATURE_TYPE_COLUMN] = cluster_result.feature_types
                 cluster_gene_key = _gene_symbol_key(cluster_result.gene_symbol)
                 if print_gene_set is not None and cluster_gene_key not in print_gene_set:
                     continue

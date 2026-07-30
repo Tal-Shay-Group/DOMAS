@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import sqlite3
 
+import utils
 from utils import hmm_change_impact  # analysis-flow scoring lives in utils, not here
 
 
@@ -704,45 +705,36 @@ class GeneVisualization:
         return int(canonical_val) != 0
 
     def _filter_junctions_for_transcript(self, transcript, junction_items):
-        """Keep only junctions that are truly supported by this transcript.
+        """Keep only event features that are truly supported by this transcript.
 
-        Uses the same adjacency-aware logic as find_matching_junction_indices in
-        junction_analisys.py: intron_left must hit an exon END, intron_right must
-        hit an exon START, and those two exons must be directly adjacent in the
-        transcript (order_in_transcript differing by exactly 1).  This ensures the
-        visualization and the analysis agree on which junctions are mapped.
+        Delegates to utils.find_matching_junction_indices, the same predicate the
+        analysis uses, so the visualization and the analysis cannot disagree about
+        which features are mapped. This function previously carried its own copy of
+        the adjacency logic, kept in step by hand.
+
+        A feature carrying utils.FEATURE_RETAINED_INTRON is matched by containment
+        (one exon spanning the intron) rather than by adjacency, so a retained-intron
+        isoform is drawn against the feature it actually supports.
         """
         if not junction_items:
             return []
 
-        df_exons = transcript['exons']
-        exon_ends = df_exons['genomic_end_tx'].to_numpy()
-        exon_starts = df_exons['genomic_start_tx'].to_numpy()
-        exon_orders = df_exons['order_in_transcript'].to_numpy()
-        strand = '-' if self._is_negative_strand() else '+'
-
-        relevant = []
-        for junction in junction_items:
+        pairs, feature_types = [], []
+        keep_positions = []
+        for position, junction in enumerate(junction_items):
             if pd.isna(junction.get('start')) or pd.isna(junction.get('end')):
                 continue
-            start_pos = int(junction['start'])
-            end_pos = int(junction['end'])
+            pairs.append((int(junction['start']), int(junction['end'])))
+            feature_types.append(junction.get('feature_type') or utils.FEATURE_JUNCTION)
+            keep_positions.append(position)
 
-            if strand == '-':
-                intron_left, intron_right = end_pos, start_pos
-                upstream = exon_orders[np.abs(exon_starts - intron_left) <= 1]
-                downstream = exon_orders[np.abs(exon_ends - intron_right) <= 1]
-            else:
-                intron_left, intron_right = start_pos, end_pos
-                upstream = exon_orders[np.abs(exon_ends - intron_left) <= 1]
-                downstream = exon_orders[np.abs(exon_starts - intron_right) <= 1]
-            if (
-                len(upstream) == 1
-                and len(downstream) == 1
-                and abs(int(downstream[0]) - int(upstream[0])) == 1
-            ):
-                relevant.append(junction)
-        return relevant
+        if not pairs:
+            return []
+
+        strand = '-' if self._is_negative_strand() else '+'
+        matched = utils.find_matching_junction_indices(
+            transcript['exons'], pairs, strand=strand, feature_types=feature_types)
+        return [junction_items[keep_positions[i]] for i in sorted(matched)]
 
     def _get_matching_junctions(self, transcript, df_junction):
         """Return only transcript-relevant junctions for display."""
@@ -759,6 +751,14 @@ class GeneVisualization:
                 'end': int(junction['end']),
                 'idx': int(junction['idx']) if 'idx' in junction and pd.notna(junction['idx']) else None,
                 'color': junction['junction_color'] if 'junction_color' in junction else 'red',
+                # Carried through so _filter_junctions_for_transcript() can apply the
+                # containment predicate to a retained intron. Without it every feature
+                # defaults to a junction and the retaining transcript - the one the
+                # feature exists to identify - is drawn as not supporting it.
+                'feature_type': (str(junction[utils.FEATURE_TYPE_COLUMN])
+                                 if utils.FEATURE_TYPE_COLUMN in junction
+                                 and pd.notna(junction[utils.FEATURE_TYPE_COLUMN])
+                                 else utils.FEATURE_JUNCTION),
             })
 
         return self._filter_junctions_for_transcript(transcript, items)
@@ -992,12 +992,27 @@ class GeneVisualization:
             return
 
         baseline_top = exon_y + exon_height / 2
+        baseline_bottom = exon_y - exon_height / 2
         for index, junction in enumerate(junctions):
             left = min(junction['start'], junction['end'])
             right = max(junction['start'], junction['end'])
-            junction_top = min(0.95, baseline_top + 0.10 + index * 0.08)
             color = junction.get('color', 'red')
             linestyle = junction.get('linestyle', 'solid')
+
+            if junction.get('feature_type') == utils.FEATURE_RETAINED_INTRON:
+                # A retained intron is CONTAINED in one exon rather than spliced
+                # across: drawn as a raised bracket it would read as the excision
+                # it is the opposite of. Marked instead as a dotted span inside the
+                # exon body, bounded by dotted ticks at the intron's own edges, so
+                # it stays within the exon's height and disturbs no layout.
+                ax.plot([left, right], [exon_y, exon_y], color=color, linewidth=1.6,
+                        linestyle='dotted', zorder=6)
+                for edge in (left, right):
+                    ax.plot([edge, edge], [baseline_bottom, baseline_top], color=color,
+                            linewidth=1.0, linestyle='dotted', zorder=6)
+                continue
+
+            junction_top = min(0.95, baseline_top + 0.10 + index * 0.08)
             ax.plot([left, left], [baseline_top, junction_top], color=color, linewidth=1.4,
                     linestyle=linestyle, zorder=5)
             ax.plot([right, right], [baseline_top, junction_top], color=color, linewidth=1.4,
@@ -1121,7 +1136,7 @@ class GeneVisualization:
         num_pages = len(pages)
 
         # Cluster-level events (not tied to a specific transcript) shown once above canonical
-        _CLUSTER_EVENTS = {'junction_not_mapped', 'no_canonical_junctions',
+        _CLUSTER_EVENTS = {'feature_not_mapped', 'no_canonical_features',
                            'no_canonical_transcript', 'only_one_transcript'}
         cluster_events_df = None
         if df_results is not None and 'event' in df_results.columns:
@@ -1130,7 +1145,7 @@ class GeneVisualization:
                 _ce = df_results[_mask][['event', 'transcript_id']].copy()
                 _ce['transcript_id'] = _ce.apply(
                     lambda r: f"junction #{int(r['transcript_id'])}"
-                              if r['event'] == 'junction_not_mapped' and pd.notna(r['transcript_id'])
+                              if r['event'] == 'feature_not_mapped' and pd.notna(r['transcript_id'])
                               else '',
                     axis=1,
                 )
@@ -1552,6 +1567,13 @@ class GeneVisualization:
                     'idx': int(junction['idx']) if 'idx' in junction and pd.notna(junction['idx']) else None,
                     'color': junction['junction_color'] if 'junction_color' in junction else 'red',
                     'linestyle': 'dashed',
+                    # Needed both to match a retained intron by containment and to
+                    # draw it as a span; without it this branch silently treats
+                    # every feature on the canonical transcript as a junction.
+                    'feature_type': (str(junction[utils.FEATURE_TYPE_COLUMN])
+                                     if utils.FEATURE_TYPE_COLUMN in junction
+                                     and pd.notna(junction[utils.FEATURE_TYPE_COLUMN])
+                                     else utils.FEATURE_JUNCTION),
                 })
             relevant_junctions = self._filter_junctions_for_transcript(transcript, all_junctions)
             relevant_ids = {(item['start'], item['end']) for item in relevant_junctions}

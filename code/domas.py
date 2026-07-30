@@ -25,9 +25,8 @@ def parse_args():
                               "splicing Excel file, 'ioe' for a SUPPA .ioe file (or a "
                               "directory of them, see -ioe_pattern), 'leafcutter' for a pair "
                               "of leafcutter_ds output files (see -lc_sig / -lc_effect), "
-                              "'rmats' for an rMATS-turbo output directory (the "
-                              "SE/A5SS/A3SS/MXE [Event].MATS.JC.txt files, passed via -input; "
-                              "RI is skipped - it cannot yield a comparable transcript), 'majiq' for a "
+                              "'rmats' for an rMATS-turbo output directory (the five "
+                              "[Event].MATS.JC.txt files, passed via -input), 'majiq' for a "
                               "MAJIQ voila TSV file (passed via -input)")
     parser.add_argument("-input", required=False, default=None, type=str,
                          help="Path to the input for -format hadas/ioe/rmats/majiq (Excel for "
@@ -78,7 +77,7 @@ def parse_args():
                               "clusters. 0 (default) means no limit.")
     parser.add_argument("-keep_non_comparable", action="store_true",
                          help="Keep rows for non-comparable transcripts (e.g. those with a "
-                              "gene_not_in_db / junction_not_mapped / no_unique_junctions "
+                              "gene_not_in_db / feature_not_mapped / no_unique_features "
                               "event). By default the output CSV holds only transcripts "
                               "that were actually compared to the canonical transcript.")
 

@@ -11,19 +11,18 @@ logger = logging.getLogger(__name__)
 # rMATS-turbo per-event result files (junction-count variant). The JCEC files
 # carry identical coordinates, so JC is enough for DOMAS's coordinate mapping.
 #
-# RI is deliberately absent. A retained-intron event yields exactly one junction
-# (the spliced form - see _rmats_event_junctions()), and a single-junction cluster
-# can never produce a comparable transcript: either the canonical transcript
-# matches that junction, in which case every other transcript has no junction
-# unique to it, or it doesn't, in which case the cluster stops at
-# 'no_canonical_junctions'. Reading RI.MATS.JC.txt therefore only ever emitted
-# unanalysable rows (verified: 880 rows over 40 clusters, none analysed), so the
-# file is not read at all.
+# RI is read again. A retained intron has only one junction - the spliced form -
+# because the retained isoform is defined by that junction's ABSENCE, so the event
+# used to collapse to a single junction and no transcript could hold a feature the
+# canonical one lacked. It is now emitted as two features at the same coordinates,
+# one FEATURE_JUNCTION and one FEATURE_RETAINED_INTRON, which the matcher tells
+# apart (see _rmats_event_feature_types()).
 _RMATS_EVENT_FILES = {
     'SE': 'SE.MATS.JC.txt',
     'A5SS': 'A5SS.MATS.JC.txt',
     'A3SS': 'A3SS.MATS.JC.txt',
     'MXE': 'MXE.MATS.JC.txt',
+    'RI': 'RI.MATS.JC.txt',
 }
 
 
@@ -92,13 +91,31 @@ def _rmats_event_junctions(event_type, r):
             _ordered_pair(r['upstreamEE'], r['2ndExonStart_0base']),
             _ordered_pair(r['2ndExonEnd'], r['downstreamES']),
         ]
+    if event_type == 'RI':
+        # One interval, emitted twice: once as the junction the spliced isoform
+        # carries, once as the intron the retained isoform contains. Same
+        # coordinates - _rmats_event_feature_types() supplies the distinction.
+        intron = _ordered_pair(r['upstreamEE'], r['downstreamES'])
+        return [intron, intron]
     return []
 
 
+def _rmats_event_feature_types(event_type):
+    """Feature type per junction returned by _rmats_event_junctions(), in order.
+
+    Only RI mixes types: its two entries share coordinates and are distinguished
+    solely by type, which is what lets one event match both isoforms."""
+    if event_type == 'RI':
+        return [FEATURE_JUNCTION, FEATURE_RETAINED_INTRON]
+    return None  # all plain junctions
+
+
 def rmats2junctions(rmats_dir):
-    """Parse an rMATS-turbo output directory (the SE/A5SS/A3SS/MXE [Event].MATS.JC.txt
-    files; RI is skipped, see _RMATS_EVENT_FILES) into a junctions DataFrame ready
-    for JunctionsAnalysis.analyze_junctions().
+    """Parse an rMATS-turbo output directory (the five [Event].MATS.JC.txt files)
+    into a junctions DataFrame ready for JunctionsAnalysis.analyze_junctions().
+
+    Carries a FEATURE_TYPE_COLUMN: RI rows come in junction/retained-intron pairs,
+    every other event type is plain junctions.
 
     rMATS provides the Ensembl GeneID and gene symbol directly, so no
     symbol->ensembl DB lookup is needed. ALL events are taken (no
@@ -126,16 +143,18 @@ def rmats2junctions(rmats_dir):
                 event_junctions = _rmats_event_junctions(event_type, r)
             except (KeyError, ValueError, TypeError):
                 continue  # malformed / incomplete row - skip it
-            for start, end in event_junctions:
+            feature_types = _rmats_event_feature_types(event_type)
+            for position, (start, end) in enumerate(event_junctions):
+                feature_type = FEATURE_JUNCTION if feature_types is None else feature_types[position]
                 junctions.append([chromosome, gene_ensembl_id, gene_symbol,
-                                  event_type, start, end, cluster_name])
+                                  event_type, start, end, cluster_name, feature_type])
 
     if not junctions:
         raise ValueError(f"No rMATS MATS.JC.txt events found under {rmats_dir}")
 
     return pd.DataFrame(junctions, columns=[
         'chromosome', 'gene_ensembl_id', 'gene_symbol', 'event_type',
-        'start_position', 'end_position', 'cluster_name'])
+        'start_position', 'end_position', 'cluster_name', FEATURE_TYPE_COLUMN])
 
 
 def _parse_coord_pairs(text):
@@ -184,34 +203,51 @@ def voila2junctions(tsv_path):
             types.append('IR')
         event_type = '+'.join(types) if types else 'LSV'
 
-        event_junctions = _parse_coord_pairs(r['Junctions coords'])
-        if ir_coords:
-            event_junctions += _parse_coord_pairs(ir_coords)
+        # MAJIQ quantifies intron retention as one of the LSV's edges, so the
+        # retained intron appears in 'Junctions coords' too - and 'IR coords'
+        # names which edge it is. That edge is NOT a splice junction: the actual
+        # junction for the same intron is listed separately, either at exactly
+        # (a-1, b+1) - the same intron in the flanking-exon-boundary convention -
+        # or inside a larger junction spanning it (verified over the whole
+        # fixture: 860 and 686 of 1546, none without one).
+        #
+        # So the IR interval is emitted ONCE, as a containment feature. Emitting
+        # it as a junction as well asked the opposite question of it: matched by
+        # adjacency it finds the transcript that splices the intron out, never the
+        # one that retains it, and it merely duplicated the real junction that the
+        # 1bp tolerance already matches.
+        retained_intron_pairs = _parse_coord_pairs(ir_coords) if ir_coords else []
+        retained_intron_set = set(retained_intron_pairs)
+        event_features = [(pair, FEATURE_JUNCTION)
+                          for pair in _parse_coord_pairs(r['Junctions coords'])
+                          if pair not in retained_intron_set]
+        event_features += [(pair, FEATURE_RETAINED_INTRON) for pair in retained_intron_pairs]
 
-        for start, end in event_junctions:
+        for (start, end), feature_type in event_features:
             junctions.append([chromosome, gene_ensembl_id, gene_symbol,
-                              event_type, start, end, cluster_name])
+                              event_type, start, end, cluster_name, feature_type])
 
     if not junctions:
         raise ValueError(f"No LSV junctions found in {tsv_path}")
 
     return pd.DataFrame(junctions, columns=[
         'chromosome', 'gene_ensembl_id', 'gene_symbol', 'event_type',
-        'start_position', 'end_position', 'cluster_name'])
+        'start_position', 'end_position', 'cluster_name', FEATURE_TYPE_COLUMN])
 
 
 def ioe2junctions(file_path):
     """
     Parses an IOE file and returns a DataFrame with the relevant data.
 
-    RI events are skipped, for the same reason RI.MATS.JC.txt is not read on the
-    rMATS path (see _RMATS_EVENT_FILES): SUPPA writes a retained intron as
+    SUPPA writes a retained intron as
     `<gene>;RI:<chr>:<s1>:<e1>-<s2>:<e2>:<strand>`, in which only one token holds
-    a junction, so the event yields a single junction - and a single-junction
-    event can never produce a transcript differing from the canonical one within
-    the event, so it is structurally unanalysable. Measured on
-    events_RI_strict.ioe: 9,092 of 9,092 RI clusters had one junction, while
-    every other SUPPA event type had none.
+    a junction - the spliced form - because the retained isoform is defined by that
+    junction's absence. Such an event is emitted as two features at the same
+    coordinates, one FEATURE_JUNCTION and one FEATURE_RETAINED_INTRON, so each
+    isoform matches the feature it actually carries. Emitted as a lone junction it
+    was structurally unanalysable: 9,092 of 9,092 RI clusters in
+    events_RI_strict.ioe held a single junction, while every other SUPPA event type
+    held none.
 
     Args:
         file_path (str): The path to the IOE file.
@@ -219,7 +255,7 @@ def ioe2junctions(file_path):
     junctions = []
     df_ioe = pd.read_csv(file_path, sep='\t')
     count = 0
-    skipped_ri = 0
+    retained_intron_events = 0
     for row in df_ioe.itertuples():
         count += 1
         chromosome = row.seqname
@@ -227,9 +263,6 @@ def ioe2junctions(file_path):
         gene_ensembl_id = event_parts[0]
         event_parts2 = event_parts[1].split(':')
         event_type = event_parts2[0]
-        if event_type == 'RI':
-            skipped_ri += 1
-            continue
         cluster_name = f'{event_type}_{gene_ensembl_id}_{chromosome}_{count}'
         
         current_junctions = []   
@@ -243,27 +276,40 @@ def ioe2junctions(file_path):
             start = int(junction_parts[0])
             end = int(junction_parts[1])
             current_junctions.append((start, end))
-        if event_type == 'SE':
+        if event_type == 'RI':
+            # One interval, two features: the junction the spliced isoform carries
+            # and the intron the retained isoform contains.
+            for start, end in current_junctions:
+                junctions.append([chromosome, gene_ensembl_id, event_type, start, end,
+                                  cluster_name, FEATURE_JUNCTION])
+                junctions.append([chromosome, gene_ensembl_id, event_type, start, end,
+                                  cluster_name, FEATURE_RETAINED_INTRON])
+                retained_intron_events += 1
+        elif event_type == 'SE':
             # SE is giving the junction between the skipped exon and the flanking exons, so we need to add the junction between the flanking exons
             if len(current_junctions) != 2:
                 continue
             start_short, end_short = current_junctions[0]
             start_long, end_long = current_junctions[0][0], current_junctions[1][1]
-            junctions.append([chromosome, gene_ensembl_id, event_type, start_short, end_short, cluster_name])
-            junctions.append([chromosome, gene_ensembl_id, event_type, start_long, end_long, cluster_name])
+            junctions.append([chromosome, gene_ensembl_id, event_type, start_short, end_short,
+                              cluster_name, FEATURE_JUNCTION])
+            junctions.append([chromosome, gene_ensembl_id, event_type, start_long, end_long,
+                              cluster_name, FEATURE_JUNCTION])
         else:
             for start, end in current_junctions:
-                 junctions.append([chromosome, gene_ensembl_id, event_type, start, end, cluster_name])
+                junctions.append([chromosome, gene_ensembl_id, event_type, start, end,
+                                  cluster_name, FEATURE_JUNCTION])
 
 
-    if skipped_ri:
-        logger.warning(f"{os.path.basename(file_path)}: skipped {skipped_ri} RI event(s) - a "
-                       f"retained intron yields a single junction and cannot be analysed.")
+    if retained_intron_events:
+        logger.info(f"{os.path.basename(file_path)}: {retained_intron_events} RI event(s) "
+                    f"emitted as junction + retained-intron feature pairs.")
     if not junctions:
-        logger.warning(f"No analysable events found in {file_path}"
-                       + (" (every event was RI)." if skipped_ri else "."))
+        logger.warning(f"No analysable events found in {file_path}.")
 
-    df_junctions = pd.DataFrame(junctions, columns=['chromosome', 'gene_ensembl_id', 'event_type', 'start_position', 'end_position', 'cluster_name'])
+    df_junctions = pd.DataFrame(junctions, columns=['chromosome', 'gene_ensembl_id', 'event_type',
+                                                    'start_position', 'end_position', 'cluster_name',
+                                                    FEATURE_TYPE_COLUMN])
     return df_junctions
 
 def get_gene_symbols(con, gene_ensembl_ids):
@@ -628,6 +674,98 @@ def calc_spade_score(domains_by_isoform):
             'intact': penalty <= 1e-9,
         }
     return result
+
+# ---------------------------------------------------------------------------
+# Event feature <-> exon matching.
+#
+# Lives here so junction_analisys.py and generate_gene_pdf.py can share ONE
+# implementation: junction_analisys imports generate_gene_pdf, so the PDF layer
+# cannot import back from it. The two used to carry separate copies of this
+# predicate, with a comment asking that they be kept in step by hand.
+# ---------------------------------------------------------------------------
+
+# An event is a list of features, each a (low, high) genomic coordinate pair
+# carrying the type below. Both describe the same interval - an intron - but ask
+# opposite questions of a transcript, which is what lets one event distinguish
+# two isoforms:
+#
+#   FEATURE_JUNCTION       the intron is spliced OUT: two adjacent exons abut it
+#   FEATURE_RETAINED_INTRON the intron is retained: one exon contains it
+#
+# A retained-intron event emits both, at identical coordinates. The type is what
+# keeps them apart: matched type-blind, a spliced transcript would satisfy both
+# and no transcript could hold a feature the canonical one lacks - exactly the
+# collapse that makes intron retention unanalysable today.
+FEATURE_JUNCTION = 'junction'
+FEATURE_RETAINED_INTRON = 'retained_intron'
+
+# Optional column on the junctions DataFrame carrying the type per row. Absent
+# means every row is a plain junction, so every existing input file and every
+# reader that has not been taught to emit spans keeps working unchanged.
+FEATURE_TYPE_COLUMN = 'feature_type'
+
+
+def find_matching_junction_indices(df_transcript_exons, junctions, strand='+', feature_types=None):
+    """
+    Return the set of indices (into `junctions`) of event features that match
+    this transcript's exon structure.
+
+    A junction (start_position, end_position) matches the transcript if there
+    are two exons, adjacent in transcript order, such that one exon's
+    genomic_end_tx is within 1bp of the junction's intron-left boundary and the
+    other exon's genomic_start_tx is within 1bp of the junction's intron-right
+    boundary.
+
+    On the positive strand the intron-left boundary is start_position and the
+    intron-right boundary is end_position.  On the negative strand the
+    transcript runs right-to-left in genomic coordinates, so the roles are
+    reversed: the intron-left boundary (in genomic terms) is end_position and
+    the intron-right boundary is start_position.
+
+    `feature_types` is an optional sequence parallel to `junctions`, giving each
+    feature's type (see FEATURE_JUNCTION / FEATURE_RETAINED_INTRON). None - the
+    default - treats every feature as a junction, so existing callers and any
+    junctions frame without the column behave exactly as before.
+
+    A FEATURE_RETAINED_INTRON feature matches when a SINGLE exon contains the
+    interval, within the same 1bp tolerance. Strand is irrelevant to it:
+    containment is a genomic-coordinate test with no orientation.
+    """
+    if df_transcript_exons.empty or not junctions:
+        return set()
+
+    exon_starts = df_transcript_exons['genomic_start_tx'].to_numpy()
+    exon_ends = df_transcript_exons['genomic_end_tx'].to_numpy()
+    exon_orders = df_transcript_exons['order_in_transcript'].to_numpy()
+
+    matched = set()
+    for idx, (start_position, end_position) in enumerate(junctions):
+        if feature_types is not None and feature_types[idx] == FEATURE_RETAINED_INTRON:
+            # Retained: one exon spans the whole intron. Exons are disjoint, so
+            # at most one can, and `any` is enough.
+            low, high = min(start_position, end_position), max(start_position, end_position)
+            if ((exon_starts <= low + 1) & (exon_ends >= high - 1)).any():
+                matched.add(idx)
+            continue
+        if strand == '-':
+            # Negative strand: transcript runs from high to low genomic coords.
+            # DB always stores genomic_start_tx < genomic_end_tx, so:
+            #   - the upstream exon's intron boundary is its genomic_start_tx (lower bound of the higher exon)
+            #   - the downstream exon's intron boundary is its genomic_end_tx (upper bound of the lower exon)
+            # Junction end_position is near the upstream exon's genomic_start_tx.
+            # Junction start_position is near the downstream exon's genomic_end_tx.
+            intron_left, intron_right = end_position, start_position
+            upstream_orders = exon_orders[np.abs(exon_starts - intron_left) <= 1]
+            downstream_orders = exon_orders[np.abs(exon_ends - intron_right) <= 1]
+        else:
+            intron_left, intron_right = start_position, end_position
+            upstream_orders = exon_orders[np.abs(exon_ends - intron_left) <= 1]
+            downstream_orders = exon_orders[np.abs(exon_starts - intron_right) <= 1]
+        if len(upstream_orders) == 1 and len(downstream_orders) == 1:
+            if abs(int(downstream_orders[0]) - int(upstream_orders[0])) == 1:
+                matched.add(idx)
+    return matched
+
 
 # ---------------------------------------------------------------------------
 # DoChaP database readers.

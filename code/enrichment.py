@@ -284,8 +284,8 @@ def enrich_results(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
     e = Enricher(enrichment_db, pfam_hmm, dochap_con)
 
     # Only enrich transcripts that were actually compared to the canonical.
-    # Rows carrying a NON_COMPARISON event (no_canonical_junctions /
-    # no_unique_junctions / transcript_doesnt_have_junctions / junction_not_mapped
+    # Rows carrying a NON_COMPARISON event (no_canonical_features /
+    # no_unique_features / transcript_doesnt_have_features / feature_not_mapped
     # / gene_not_in_db / ...) never produced a domain comparison, so there is
     # nothing to HMM-scan for them - skip so we don't scan unanalyzable proteins.
     analyzable = df[~df['event_type'].isin(NON_COMPARISON_EVENTS)]

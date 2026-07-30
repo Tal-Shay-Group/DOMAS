@@ -643,11 +643,12 @@ def _write_ioe(tmp_path, event_ids):
     return str(path)
 
 
-def test_ioe2junctions_skips_ri_events(tmp_path):
+def test_ioe2junctions_emits_ri_as_a_feature_pair(tmp_path):
     """A SUPPA retained intron is written as RI:<chr>:<s1>:<e1>-<s2>:<e2>:<strand>,
-    which holds a single junction - it can never yield a transcript differing from
-    canonical within the event, so the event is skipped rather than emitted as an
-    unanalysable cluster."""
+    holding a single junction because the retained isoform is defined by that
+    junction's ABSENCE. It is emitted twice at the same coordinates - once as a
+    junction, once as a retained-intron feature - so each isoform matches the one
+    it actually carries. Emitted as a lone junction the event was unanalysable."""
     import utils
     ioe = _write_ioe(tmp_path, [
         'ENSMUSG1;SE:1:100-200:300-400:+',
@@ -655,23 +656,29 @@ def test_ioe2junctions_skips_ri_events(tmp_path):
     ])
     df = utils.ioe2junctions(ioe)
 
-    assert set(df['event_type']) == {'SE'}, "RI events must not reach the junction frame"
-    assert not df['cluster_name'].str.startswith('RI_').any()
-    # The SE event still produces both its own junctions plus the skipping junction.
-    assert len(df) == 2
+    ri = df[df['event_type'] == 'RI']
+    assert len(ri) == 2, f"RI must emit two features, got {len(ri)}"
+    assert set(ri[utils.FEATURE_TYPE_COLUMN]) == {utils.FEATURE_JUNCTION,
+                                                  utils.FEATURE_RETAINED_INTRON}
+    # Both features describe the SAME interval - only the type distinguishes them.
+    assert ri[['start_position', 'end_position']].drop_duplicates().shape[0] == 1
+    assert list(ri['start_position'])[0] == 600 and list(ri['end_position'])[0] == 700
+
+    # Non-RI events stay plain junctions.
+    se = df[df['event_type'] == 'SE']
+    assert set(se[utils.FEATURE_TYPE_COLUMN]) == {utils.FEATURE_JUNCTION}
 
 
-def test_ioe2junctions_ri_only_file_returns_empty_frame_with_columns(tmp_path):
-    """An all-RI file yields no junctions. It must still return a frame carrying the
-    expected columns: analyze_ioe_files() concatenates per-file frames and then reads
-    .gene_ensembl_id, which a bare empty DataFrame would break."""
+def test_ioe2junctions_ri_only_file_is_analysable(tmp_path):
+    """An all-RI file used to yield nothing. It must now produce a usable frame
+    carrying the feature-type column."""
     import utils
     ioe = _write_ioe(tmp_path, ['ENSMUSG2;RI:1:500:600-700:800:+'])
     df = utils.ioe2junctions(ioe)
 
-    assert df.empty
-    assert list(df.columns) == ['chromosome', 'gene_ensembl_id', 'event_type',
-                                'start_position', 'end_position', 'cluster_name']
+    assert len(df) == 2
+    assert utils.FEATURE_TYPE_COLUMN in df.columns
+    assert df['cluster_name'].nunique() == 1, "both features belong to one event"
 
 
 def test_ioe2junctions_keeps_both_forms_of_alt_splice_site_events(tmp_path):
@@ -763,3 +770,184 @@ def test_rmats_mxe_does_not_require_alt_splice_site_columns():
     junctions = utils._rmats_event_junctions('MXE', row)
 
     assert junctions == [(100, 200), (300, 900), (100, 400), (500, 900)]
+
+
+# ---------------------------------------------------------------------------
+# Retained-intron event features (FEATURE_RETAINED_INTRON)
+# ---------------------------------------------------------------------------
+
+def _spliced_exons():
+    """Two exons abutting the intron (1100, 1300) - the spliced isoform."""
+    return _two_exon_df((1, 1000, 1100), (2, 1300, 1400))
+
+
+def _retained_exons():
+    """One exon containing the intron (1100, 1300) - the retained isoform."""
+    return pd.DataFrame({'order_in_transcript': [1],
+                         'genomic_start_tx': [1000], 'genomic_end_tx': [1400]})
+
+
+INTRON = (1100, 1300)
+
+
+def test_retained_intron_feature_matrix():
+    """The four-way matrix that makes an RI event analysable: each isoform must
+    match its own feature type and only that one."""
+    from junction_analisys import FEATURE_JUNCTION, FEATURE_RETAINED_INTRON
+
+    cases = {
+        ('spliced', FEATURE_JUNCTION): {0},
+        ('spliced', FEATURE_RETAINED_INTRON): set(),
+        ('retained', FEATURE_JUNCTION): set(),
+        ('retained', FEATURE_RETAINED_INTRON): {0},
+    }
+    exons = {'spliced': _spliced_exons(), 'retained': _retained_exons()}
+    for (isoform, feature_type), expected in cases.items():
+        got = find_matching_junction_indices(
+            exons[isoform], [INTRON], feature_types=[feature_type])
+        assert got == expected, f"{isoform} vs {feature_type}: expected {expected}, got {got}"
+
+
+def test_retained_intron_event_makes_both_isoforms_comparable():
+    """An RI event emits both features at the SAME coordinates. Comparability is
+    `matched - canonical_matched`, and it must be non-empty in BOTH directions:
+    whichever isoform is canonical, the other one differs from it within the event."""
+    from junction_analisys import FEATURE_JUNCTION, FEATURE_RETAINED_INTRON
+
+    features = [INTRON, INTRON]
+    types = [FEATURE_JUNCTION, FEATURE_RETAINED_INTRON]
+    spliced = find_matching_junction_indices(_spliced_exons(), features, feature_types=types)
+    retained = find_matching_junction_indices(_retained_exons(), features, feature_types=types)
+
+    assert spliced == {0}, spliced
+    assert retained == {1}, retained
+    assert retained - spliced == {1}, "retained isoform must be comparable to a spliced canonical"
+    assert spliced - retained == {0}, "spliced isoform must be comparable to a retained canonical"
+
+
+def test_retained_intron_matching_ignores_strand():
+    """Containment is a genomic test, so a retained intron matches identically on
+    both strands - unlike the junction predicate, whose boundary roles swap."""
+    from junction_analisys import FEATURE_RETAINED_INTRON
+
+    for strand in ('+', '-'):
+        got = find_matching_junction_indices(
+            _retained_exons(), [INTRON], strand=strand,
+            feature_types=[FEATURE_RETAINED_INTRON])
+        assert got == {0}, f"strand {strand}: {got}"
+
+
+def test_retained_intron_requires_a_single_containing_exon():
+    """An exon that only partly overlaps the intron does not count - otherwise any
+    transcript whose exon merely reaches into the intron would look retained."""
+    from junction_analisys import FEATURE_RETAINED_INTRON
+
+    partial = pd.DataFrame({'order_in_transcript': [1, 2],
+                            'genomic_start_tx': [1000, 1250],
+                            'genomic_end_tx': [1200, 1400]})  # neither exon spans 1100-1300
+    got = find_matching_junction_indices(partial, [INTRON],
+                                         feature_types=[FEATURE_RETAINED_INTRON])
+    assert got == set(), got
+
+
+def test_feature_types_none_is_backward_compatible():
+    """Omitting feature_types must behave exactly as before the parameter existed -
+    every feature treated as a junction. Junctions frames on disk have no such
+    column, so this is the path all existing input takes."""
+    features = [INTRON]
+    assert find_matching_junction_indices(_spliced_exons(), features) == {0}
+    assert find_matching_junction_indices(_retained_exons(), features) == set()
+
+
+def test_analyze_treats_retained_intron_transcript_as_comparable():
+    """End-to-end: an RI event's two features make the retained-intron transcript
+    comparable to a spliced canonical. Before feature types existed this cluster
+    produced no comparable transcript at all - the spliced form satisfied both
+    identically-positioned features, so nothing held a feature canonical lacked."""
+    from junction_analisys import FEATURE_JUNCTION, FEATURE_RETAINED_INTRON
+
+    df_gene_transcripts = pd.DataFrame({
+        'transcript_ensembl_id': ['CANON', 'ENST_RETAINED'],
+        'transcript_refseq_id': [None, None],
+        'canonical': [1, 0],
+        'cds_start': [0, 0],
+        'cds_end': [1000, 900],
+    })
+    # canonical splices the intron (1100, 1300); the other retains it in one exon.
+    canonical_exons = _two_exon_df((1, 1000, 1100), (2, 1300, 1400))
+    retained_exons = pd.DataFrame({'order_in_transcript': [1],
+                                   'genomic_start_tx': [1000], 'genomic_end_tx': [1400]})
+    for df in (canonical_exons, retained_exons):
+        df['abs_start_CDS'] = [1] * len(df)
+        df['abs_end_CDS'] = [100] * len(df)
+
+    exons_by_id = {'CANON': canonical_exons, 'ENST_RETAINED': retained_exons}
+    empty_domains = pd.DataFrame(columns=['AA_start', 'AA_end'] + DOMAIN_NAME_COLUMNS)
+
+    cluster_result = ClusterAnalysisResult('cluster_ri', 'ENSG_TEST', 'TESTGENE')
+    cluster_result.junctions = [(1100, 1300), (1100, 1300)]
+    cluster_result.feature_types = [FEATURE_JUNCTION, FEATURE_RETAINED_INTRON]
+
+    cluster_result.analyze(
+        df_gene_transcripts, canonical_transcript_ids={'CANON'},
+        exon_lookup=lambda tid: exons_by_id[tid], domain_lookup=lambda tid: empty_domains,
+    )
+
+    df_results = cluster_result.get_results_df()
+    skipped = {'transcript_doesnt_have_features', 'no_unique_features',
+               'no_canonical_features', 'feature_not_mapped', 'gene_not_in_db'}
+    comparable = set(df_results.loc[~df_results['event'].isin(skipped), 'transcript_id'].dropna())
+    assert comparable == {'ENST_RETAINED'}, f"expected the retained transcript, got {comparable}"
+
+
+# ---------------------------------------------------------------------------
+# utils.voila2junctions - MAJIQ intron retention
+# ---------------------------------------------------------------------------
+
+def _write_voila(tmp_path, junctions_coords, ir_coords):
+    header = ('#Gene Name\tGene ID\tLSV ID\tchr\tstrand\tA5SS\tA3SS\tES\t'
+              'Junctions coords\tIR coords')
+    row = ('BRD9\tENSG00000028310\tENSG00000028310:s:1\tchr5\t-\tFalse\tFalse\tTrue\t'
+           f'{junctions_coords}\t{ir_coords}')
+    path = tmp_path / 'voila.tsv'
+    path.write_text(header + '\n' + row + '\n')
+    return str(path)
+
+
+def test_voila_emits_retained_intron_once_as_a_span():
+    """MAJIQ quantifies intron retention as one of the LSV's edges, so the retained
+    intron is listed in 'Junctions coords' as well, with 'IR coords' naming which
+    edge it is. That edge is not a splice junction - the real junction for the same
+    intron is listed separately, at (a-1, b+1) here - so the interval must appear
+    ONCE, as a containment feature. Emitting it as a junction too asked the opposite
+    question of it and duplicated the real junction, which the 1bp tolerance already
+    matches."""
+    import utils, tempfile, pathlib
+    with tempfile.TemporaryDirectory() as d:
+        tsv = _write_voila(pathlib.Path(d),
+                           '883450-883938;881182-883938;883451-883937',
+                           '883451-883937')
+        df = utils.voila2junctions(tsv)
+
+    ir_rows = df[(df.start_position == 883451) & (df.end_position == 883937)]
+    assert len(ir_rows) == 1, f"the IR interval must appear once, got {len(ir_rows)}"
+    assert ir_rows[utils.FEATURE_TYPE_COLUMN].iat[0] == utils.FEATURE_RETAINED_INTRON
+
+    # The real splice junction for that intron is still present, as a junction.
+    real = df[(df.start_position == 883450) & (df.end_position == 883938)]
+    assert len(real) == 1 and real[utils.FEATURE_TYPE_COLUMN].iat[0] == utils.FEATURE_JUNCTION
+
+    # No interval may carry both types.
+    assert (df.groupby(['start_position', 'end_position'])[utils.FEATURE_TYPE_COLUMN]
+            .nunique() == 1).all()
+
+
+def test_voila_lsv_without_intron_retention_is_all_junctions():
+    """An LSV with no IR coords must be unaffected by the retained-intron path."""
+    import utils, tempfile, pathlib
+    with tempfile.TemporaryDirectory() as d:
+        tsv = _write_voila(pathlib.Path(d), '100-200;300-400', '')
+        df = utils.voila2junctions(tsv)
+
+    assert len(df) == 2
+    assert set(df[utils.FEATURE_TYPE_COLUMN]) == {utils.FEATURE_JUNCTION}

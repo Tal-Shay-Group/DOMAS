@@ -103,10 +103,10 @@ UNANALYZABLE_TYPES = [
     "gene_not_in_db",
     "no_canonical_transcript",
     "only_one_transcript",
-    "junction_not_mapped",
-    "no_unique_junctions",
-    "transcript_doesnt_have_junctions",
-    "no_canonical_junctions",
+    "feature_not_mapped",
+    "no_unique_features",
+    "transcript_doesnt_have_features",
+    "no_canonical_features",
     "no_domains_in_region",
 ]
 
@@ -194,8 +194,10 @@ def event_sort_key(event_type):
 # that already says "domain" (Domain Frequency, Domain Copy-Count Change,
 # "Analyzable clusters" next to a domain-change legend, ...), so repeating
 # "domain" in every category name just adds width without adding meaning.
-# "transcript_doesnt_have_junctions" is shortened on its own merits - it's
-# nearly twice as long as any other unanalyzable reason.
+# "transcript_doesnt_have_features" is shortened on its own merits - it's
+# nearly twice as long as any other unanalyzable reason. "features" covers both
+# junctions and retained introns: an event is a set of features, each matched by
+# its own predicate (see utils.FEATURE_JUNCTION / FEATURE_RETAINED_INTRON).
 # Never used for filtering/CSV output - ANALYZED_TYPES, UNANALYZABLE_TYPES,
 # ALL_EVENT_TYPES and the "event_type"/"label" column values stay unchanged.
 SHORT_LABELS = {
@@ -210,7 +212,7 @@ SHORT_LABELS = {
     "reduced_domain_number": "fewer domains",
     "increased_domain_number": "more domains",
     "domain swap": "swap",
-    "transcript_doesnt_have_junctions": "lacks junctions",
+    "transcript_doesnt_have_features": "lacks features",
 }
 
 
@@ -374,6 +376,13 @@ def normalize_event_types(df):
         "same_domains": "same",
         "longer_domains": "longer",
         "shorter_domains": "shorter",
+        # Pre-rename labels, from before an event became a set of features rather
+        # than of junctions. Mapped so a results.csv produced by an older run still
+        # lands inside UNANALYZABLE_TYPES instead of counting as neither.
+        "junction_not_mapped": "feature_not_mapped",
+        "no_canonical_junctions": "no_canonical_features",
+        "transcript_doesnt_have_junctions": "transcript_doesnt_have_features",
+        "no_unique_junctions": "no_unique_features",
     })
     return df
 
@@ -536,7 +545,7 @@ def _cluster_event_labels(df):
     One row per (specie, cluster): whether it's "unanalyzable" or
     "analyzable", and its label - the sole event_type behind that, or
     "mixed" if more than one applies. Multiple transcript-comparison rows
-    per cluster (e.g. no_unique_junctions can fire once per non-matching
+    per cluster (e.g. no_unique_features can fire once per non-matching
     candidate transcript) would otherwise inflate a per-row count in a way
     that mixes "one row per cluster" event types (e.g.
     no_canonical_transcript) with "one row per candidate transcript" ones in
@@ -1827,7 +1836,7 @@ def analyze_file(path, label=None, fetch_domain_descriptions=False, specie_filte
     clusters from all their rows, analyzable ones from the representative
     transcript - so "one row per cluster" event types (e.g.
     no_canonical_transcript) aren't mixed with "one row per candidate
-    transcript" ones (e.g. no_unique_junctions) in the same tally.
+    transcript" ones (e.g. no_unique_features) in the same tally.
 
     Returns the loaded, normalised DataFrame, so callers can pass several of
     these into compare_files() without reloading.

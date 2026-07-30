@@ -50,10 +50,9 @@ LEAFCUTTER_EFFECT = os.path.join(LEAFCUTTER_DIR, 'leafcutter_ds_effect_sizes.txt
 LEAFCUTTER_SUBSET_CLUSTERS = 200
 
 RMATS_DIR = os.path.join(TESTS_DIR, 'rmats')
-# Same subset size as leafcutter (200 clusters), but spread evenly across the
+# Same subset size as leafcutter (200 clusters), but spread evenly across the five
 # rMATS event types: a plain sorted-first-N slice would be all A3SS (it sorts first)
-# and would never exercise the SE/A5SS/MXE junction conversion. RI is not read at
-# all (see utils._RMATS_EVENT_FILES), so the spread is over four types.
+# and would never exercise the SE/A5SS/MXE/RI feature conversion.
 RMATS_SUBSET_CLUSTERS = LEAFCUTTER_SUBSET_CLUSTERS
 
 MAJIQ_TSV = os.path.join(TESTS_DIR, 'majiq', 'NveB_Mono_voila.txt')
@@ -61,8 +60,8 @@ MAJIQ_TSV = os.path.join(TESTS_DIR, 'majiq', 'NveB_Mono_voila.txt')
 # Mirrors JunctionsAnalysis._SKIPPED_TRANSCRIPT_EVENTS plus the cluster-level
 # events that carry no real transcript id.
 _SKIPPED_EVENTS = {
-    'gene_not_in_db', 'transcript_doesnt_have_junctions', 'no_unique_junctions',
-    'no_canonical_transcript', 'only_one_transcript', 'no_canonical_junctions', 'junction_not_mapped',
+    'gene_not_in_db', 'transcript_doesnt_have_features', 'no_unique_features',
+    'no_canonical_transcript', 'only_one_transcript', 'no_canonical_features', 'feature_not_mapped',
 }
 
 # (restrict_pdf_to_comparable, use_representative_domains). The tie-break rules
@@ -300,7 +299,7 @@ def _load_leafcutter_junctions(con, subset):
     When `subset` is None (the full test) every cluster is kept. Otherwise the
     subset is the leafcutter clusters whose gene appears in the rMATS subset
     (`_rmats_subset_df(subset)`): this way the leafcutter and rMATS subset tests
-    analyze the *same genes* - genes that in rMATS span all event types read - so
+    analyze the *same genes* - genes that in rMATS span all five event types - so
     their domain-analysis outputs can be compared tool-to-tool. `subset` sets the
     size of that rMATS subset."""
     df = leafcutter_read_input_files(con, LEAFCUTTER_SIG, LEAFCUTTER_EFFECT)
@@ -397,10 +396,10 @@ def test_leafcutter_full_compare_against_reference(con, keep_test_output):
 
 def _rmats_subset_df(subset):
     """The deterministic rMATS subset used by the rMATS test: `subset` clusters
-    spread evenly across the event types read from the fixture (sorted within each
-    type; RI is not read, so that is four types). `subset` None returns every event.
-    Also drives the leafcutter and MAJIQ subsets' gene sets - changing which event
-    types are read therefore changes those tests' gene set too."""
+    spread evenly across the five event types (sorted within each type). `subset`
+    None returns every event. Also drives the leafcutter and MAJIQ subsets' gene
+    sets - changing which event types are read therefore changes those tests'
+    gene set too."""
     df = rmats2junctions(RMATS_DIR)
     if subset is None:
         return df
@@ -461,8 +460,8 @@ def test_rmats_subset_compare_against_reference(con, keep_test_output):
 # mirrors junction_analisys.NON_COMPARISON_EVENTS; filter_non_comparable drops these.
 _NON_COMPARISON_EVENTS = {
     'gene_not_in_db', 'no_canonical_transcript', 'only_one_transcript',
-    'no_canonical_junctions', 'junction_not_mapped',
-    'transcript_doesnt_have_junctions', 'no_unique_junctions',
+    'no_canonical_features', 'feature_not_mapped',
+    'transcript_doesnt_have_features', 'no_unique_features',
 }
 
 
@@ -604,8 +603,8 @@ def test_comparable_transcript_ids_excludes_skipped_events():
     cluster_result.canonical_transcript_id = 'ENST_CANON'
     cluster_result.add_event('added_domain', transcript_id='ENST_COMPARED')
     cluster_result.add_event('no_domains_in_region', transcript_id='ENST_COMPARED_2')
-    cluster_result.add_event('transcript_doesnt_have_junctions', transcript_id='ENST_NO_JUNCTIONS')
-    cluster_result.add_event('no_unique_junctions', transcript_id='ENST_NOT_UNIQUE')
+    cluster_result.add_event('transcript_doesnt_have_features', transcript_id='ENST_NO_JUNCTIONS')
+    cluster_result.add_event('no_unique_features', transcript_id='ENST_NOT_UNIQUE')
 
     comparable_ids = analysis._comparable_transcript_ids(cluster_result)
 
