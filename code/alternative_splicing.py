@@ -418,13 +418,11 @@ human_relevant_columns_names = [
     'h_junction',
     'symbol_h',
     'ensembl_h',
-    'rank_h',
     'cluster',
 ]
 mouse_relevant_columns_names = [
     'm_junction',
     'genes',
-    'rank_m',
     'cluster'
 ]
 
@@ -440,10 +438,10 @@ def hadas_read_input_file(con, input_path):
         df_h['end_position'] = df_h['end_position'].astype(int)
         df_h = df_h[(df_h.start_position >= 0) & (df_h.end_position >= 0)]
         df_h['specie'] = 'human'
-        df_h.rename(columns={'symbol_h': 'gene_symbol', 'ensembl_h': 'gene_ensembl_id', 'rank_h': 'rank',
+        df_h.rename(columns={'symbol_h': 'gene_symbol', 'ensembl_h': 'gene_ensembl_id',
                              'h_junction': 'junction_name', 'cluster': 'cluster_name'}, inplace=True)
         df_h = df_h[['gene_symbol', 'gene_ensembl_id', 'junction_name', 'chromosome',
-                      'start_position', 'end_position', 'specie', 'cluster_name', 'rank']]
+                      'start_position', 'end_position', 'specie', 'cluster_name']]
 
         # create mouse df with relevant columns and parsed junction coordinates
         df_m = df[mouse_relevant_columns_names].copy()
@@ -463,9 +461,9 @@ def hadas_read_input_file(con, input_path):
         df_mouse_genes['gene_symbol'] = df_mouse_genes['gene_symbol'].str.upper()
         df_m = pd.merge(df_m, df_mouse_genes, left_on='genes', right_on='gene_symbol', how='left')
         df_m.drop(columns=['genes'], inplace=True)
-        df_m.rename(columns={ 'm_junction': 'junction_name', 'cluster': 'cluster_name', 'rank_m': 'rank'}, inplace=True)
+        df_m.rename(columns={ 'm_junction': 'junction_name', 'cluster': 'cluster_name'}, inplace=True)
         df_m = df_m[['gene_symbol', 'gene_ensembl_id', 'junction_name', 'chromosome',
-                     'start_position', 'end_position', 'specie', 'cluster_name', 'rank']]
+                     'start_position', 'end_position', 'specie', 'cluster_name']]
         merged_df = pd.concat([df_h, df_m], ignore_index=True)
 
         print("Completed parsing junctions.")
@@ -577,9 +575,6 @@ def leafcutter_read_input_files(con, significance_file, effect_sizes_file, speci
     df['junction_name'] = (df['chromosome'] + ':' + df['start_position'].astype(str)
                            + ':' + df['end_position'].astype(str))
     df = df[(df.start_position >= 0) & (df.end_position >= 0)].copy()
-    # 'rank' is carried only to match the junction schema the other readers
-    # produce; nothing downstream reads it, so deltapsi is not propagated.
-    df['rank'] = ''
 
     # cluster -> the gene symbols the significance file names for it.
     #
@@ -635,7 +630,7 @@ def leafcutter_read_input_files(con, significance_file, effect_sizes_file, speci
     df['specie'] = specie
 
     columns = ['gene_symbol', 'gene_ensembl_id', 'junction_name', 'chromosome',
-               'start_position', 'end_position', 'specie', 'cluster_name', 'rank']
+               'start_position', 'end_position', 'specie', 'cluster_name']
     return df[columns].reset_index(drop=True)
 
 

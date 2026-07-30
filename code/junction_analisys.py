@@ -1017,8 +1017,8 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
 
     gene_ensembl_id = cluster_df.gene_ensembl_id.iat[0]
     gene_symbol = cluster_df.gene_symbol.iat[0]
-    event_type = cluster_df.event_type.iat[0] if 'event_type' in cluster_df.columns else None
-    specie = cluster_df.specie.iat[0] if 'specie' in cluster_df.columns else None
+    event_type = cluster_df.event_type.iat[0]
+    specie = cluster_df.specie.iat[0]
     strand = gene_strand.get(gene_ensembl_id)
 
     cluster_result = ClusterAnalysisResult(
@@ -1026,11 +1026,10 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
         as_event_type=event_type, specie=specie, strand=strand
     )
     cluster_result.junctions = list(zip(cluster_df['start_position'], cluster_df['end_position']))
-    if FEATURE_TYPE_COLUMN in cluster_df.columns:
-        cluster_result.feature_types = [
-            FEATURE_JUNCTION if pd.isna(value) else str(value)
-            for value in cluster_df[FEATURE_TYPE_COLUMN]
-        ]
+    cluster_result.feature_types = [
+        FEATURE_JUNCTION if pd.isna(value) else str(value)
+        for value in cluster_df[FEATURE_TYPE_COLUMN]
+    ]
 
     df_gene_transcripts = transcripts_by_gene.get(gene_ensembl_id)
     cluster_result.analyze(df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup)
@@ -1228,12 +1227,11 @@ class JunctionsAnalysis:
         if 'cluster_name' not in df_junctions.columns and 'cluster' in df_junctions.columns:
             df_junctions = df_junctions.rename(columns={'cluster': 'cluster_name'})
 
-        required_columns = ['gene_ensembl_id', 'start_position', 'end_position', 'cluster_name']
-        for col in required_columns:
-            if col not in df_junctions.columns:
-                raise ValueError(f"Column '{col}' is required in df_junctions but not found.")
-
-        return df_junctions
+        # One contract for every reader: required columns validated, optional ones
+        # filled with their declared default, specie derived where a reader left it
+        # blank. Past this point the columns are simply there, so downstream code
+        # does not each carry its own "if 'x' in df.columns" default.
+        return utils.normalize_junctions_frame(df_junctions)
 
     def _filter_junctions_by_transcript_count(self, df_junctions, filter_transcript_count):
         """Filter junctions to genes with exactly filter_transcript_count transcripts."""
@@ -1303,8 +1301,18 @@ class JunctionsAnalysis:
 
     def _prepare_cluster_groups(self, df_junctions):
         """Group junctions into clusters."""
-        group_columns = ['specie', 'cluster_name'] if 'specie' in df_junctions.columns else ['cluster_name']
-        cluster_groups = list(df_junctions.groupby(group_columns))
+        # specie is always present after normalize_junctions_frame(), so clusters
+        # are grouped per species unconditionally. Grouping on cluster_name alone -
+        # what the three formats without a specie column used to get - would merge
+        # same-named clusters from different species in a multi-species run.
+        #
+        # dropna=False because the value may still be None: it is derived from the
+        # Ensembl gene id, and an input keyed by GeneID or by a non-Ensembl
+        # identifier yields nothing to derive from. groupby() discards NaN keys by
+        # default, which would silently drop those clusters instead of analysing
+        # them - the same trap that lost every gene without a gene_ensembl_id.
+        group_columns = ['specie', 'cluster_name']
+        cluster_groups = list(df_junctions.groupby(group_columns, dropna=False))
         return cluster_groups
 
     def _run_parallel_analysis(self, cluster_groups, df_exons, df_domains, canonical_transcript_ids,

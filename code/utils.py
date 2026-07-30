@@ -61,6 +61,86 @@ def gene_id_clause(gene_ids):
     return f'({fragment})', ids * len(GENE_ID_COLUMNS)
 
 
+# ---------------------------------------------------------------------------
+# The junctions frame: one contract for every reader.
+#
+# Each reader parses a different file, but they all hand back the same frame, and
+# this is where its shape is declared. Previously each reader carried its own
+# column list and the differences were absorbed downstream by a dozen scattered
+# "if 'x' in df.columns" defaults - which is how three of the five formats ended
+# up with no specie column at all (see specie_from_gene_id below).
+#
+# Optional columns are filled with their default at the boundary
+# (normalize_junctions_frame), so code past that point can read them directly.
+# ---------------------------------------------------------------------------
+
+REQUIRED_JUNCTION_COLUMNS = ('gene_ensembl_id', 'start_position', 'end_position', 'cluster_name')
+
+def _optional_junction_defaults():
+    """Optional columns and the value to fill them with.
+
+    A function rather than a module constant so it can name the feature-type
+    constants, which are defined further down with the matcher they belong to."""
+    return {
+        'chromosome': None,
+        'gene_symbol': None,
+        'event_type': None,      # the AS type the tool assigned (SE / A3SS / ...)
+        'specie': None,          # 'human', 'mouse', ... - see _SPECIE_DB_NAME
+        'junction_name': None,   # provenance only; nothing reads it
+        FEATURE_TYPE_COLUMN: FEATURE_JUNCTION,
+    }
+
+# Ensembl stamps the species into its gene ids. Longest-prefix-first is not
+# needed - 'ENSMUSG...' does not start with 'ENSG' - but the order is kept
+# explicit so adding a species cannot silently shadow another.
+_ENSEMBL_GENE_PREFIX_SPECIE = (
+    ('ENSMUSG', 'mouse'),
+    ('ENSRNOG', 'rat'),
+    ('ENSDARG', 'zebrafish'),
+    ('ENSXETG', 'frog'),
+    ('ENSG', 'human'),
+)
+
+
+def specie_from_gene_id(gene_id):
+    """The species an Ensembl gene id belongs to, or None if it is not one.
+
+    rMATS, MAJIQ and SUPPA embed an Ensembl gene id per event but no species, so
+    their frames carried no specie column. That is not cosmetic: clusters are
+    grouped by (specie, cluster_name) where the column exists and by cluster_name
+    alone where it does not, so a multi-species run of those formats would merge
+    same-named clusters from different species into one.
+    """
+    if gene_id is None or (not isinstance(gene_id, str) and pd.isna(gene_id)):
+        return None
+    text = str(gene_id).strip().upper()
+    for prefix, specie in _ENSEMBL_GENE_PREFIX_SPECIE:
+        if text.startswith(prefix):
+            return specie
+    return None
+
+
+def normalize_junctions_frame(df):
+    """Validate the required columns and fill every optional one with its default.
+
+    Also derives `specie` per row from the Ensembl gene id wherever a reader left
+    it blank. Returns the same frame, modified in place where possible.
+    """
+    missing = [c for c in REQUIRED_JUNCTION_COLUMNS if c not in df.columns]
+    if missing:
+        raise ValueError(f"Columns {missing} are required in df_junctions but not found.")
+
+    for column, default in _optional_junction_defaults().items():
+        if column not in df.columns:
+            df[column] = default
+
+    if df['specie'].isna().all():
+        df['specie'] = df['gene_ensembl_id'].map(specie_from_gene_id)
+    else:
+        df['specie'] = df['specie'].fillna(df['gene_ensembl_id'].map(specie_from_gene_id))
+    return df
+
+
 def _clean_ensembl_id(gene_id):
     """rMATS GeneID like '"ENSG00000156256.15"' -> 'ENSG00000156256'."""
     gid = str(gene_id).strip().strip('"').strip("'")

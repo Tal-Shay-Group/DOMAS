@@ -387,10 +387,13 @@ def _bare_analysis():
 
 
 def test_load_junctions_data_raises_on_missing_required_column():
+    """Every missing required column is named at once, rather than only the first."""
     analysis = _bare_analysis()
     df = pd.DataFrame({'gene_ensembl_id': ['G1'], 'start_position': [1]})  # missing end_position, cluster_name
-    with pytest.raises(ValueError, match="is required"):
+    with pytest.raises(ValueError, match="required") as excinfo:
         analysis._load_junctions_data(df)
+    message = str(excinfo.value)
+    assert 'end_position' in message and 'cluster_name' in message, message
 
 
 def test_load_junctions_data_renames_cluster_to_cluster_name():
@@ -1163,3 +1166,64 @@ def test_named_gene_with_unresolved_symbol_is_not_no_gene_specified():
     )
     events = [e[0] for e in cluster_result.events]
     assert events == ['gene_not_in_db'], events
+
+
+# ---------------------------------------------------------------------------
+# The junctions-frame contract (utils.normalize_junctions_frame)
+# ---------------------------------------------------------------------------
+
+def test_normalize_junctions_frame_fills_optional_columns():
+    """Every optional column is present with its declared default afterwards, so
+    downstream code can read it directly instead of carrying its own fallback."""
+    import utils
+    df = pd.DataFrame({'gene_ensembl_id': ['ENSG1'], 'start_position': [1],
+                       'end_position': [2], 'cluster_name': ['c1']})
+    out = utils.normalize_junctions_frame(df)
+    for column in utils.REQUIRED_JUNCTION_COLUMNS:
+        assert column in out.columns
+    assert out['feature_type'].iat[0] == utils.FEATURE_JUNCTION
+    assert out['event_type'].iat[0] is None
+    assert 'gene_symbol' in out.columns and 'junction_name' in out.columns
+
+
+def test_normalize_junctions_frame_does_not_overwrite_supplied_values():
+    """A reader that already sets a column keeps its value."""
+    import utils
+    df = pd.DataFrame({'gene_ensembl_id': ['ENSG1'], 'start_position': [1],
+                       'end_position': [2], 'cluster_name': ['c1'],
+                       'specie': ['mouse'], 'event_type': ['SE'],
+                       'feature_type': [utils.FEATURE_RETAINED_INTRON]})
+    out = utils.normalize_junctions_frame(df)
+    assert out['specie'].iat[0] == 'mouse', "a human ENSG id must not override a stated specie"
+    assert out['event_type'].iat[0] == 'SE'
+    assert out['feature_type'].iat[0] == utils.FEATURE_RETAINED_INTRON
+
+
+def test_specie_derived_for_the_tool_formats():
+    """rMATS, MAJIQ and SUPPA embed an Ensembl gene id but no species, so their
+    frames had no specie column at all - and clusters are grouped by
+    (specie, cluster_name), so a multi-species run merged same-named clusters."""
+    import utils
+    df = pd.DataFrame({'gene_ensembl_id': ['ENSG1', 'ENSMUSG2', 'ENSDARG3'],
+                       'start_position': [1, 1, 1], 'end_position': [2, 2, 2],
+                       'cluster_name': ['c', 'c', 'c']})
+    out = utils.normalize_junctions_frame(df)
+    assert list(out['specie']) == ['human', 'mouse', 'zebrafish']
+
+
+def test_cluster_grouping_keeps_rows_whose_specie_cannot_be_derived():
+    """specie is derived from the Ensembl gene id, so a GeneID-keyed or otherwise
+    non-Ensembl input leaves it None. groupby() drops NaN keys by default, which
+    would silently discard those clusters - the same trap that lost every gene
+    without a gene_ensembl_id."""
+    import utils
+    analysis = _bare_analysis()
+    df = utils.normalize_junctions_frame(pd.DataFrame({
+        'gene_ensembl_id': ['79400', '79400'],   # a GeneID, not an Ensembl id
+        'start_position': [1, 3], 'end_position': [2, 4],
+        'cluster_name': ['clu_a', 'clu_a'],
+    }))
+    assert df['specie'].isna().all(), "precondition: specie cannot be derived here"
+    groups = analysis._prepare_cluster_groups(df)
+    assert len(groups) == 1, f"the cluster must survive grouping, got {len(groups)} groups"
+    assert len(groups[0][1]) == 2
