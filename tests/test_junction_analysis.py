@@ -1405,3 +1405,51 @@ def test_non_site_tiers_survive_alongside_site_removal():
     ])
     kept = filter_representative_domains(df)
     assert set(kept['domain_id']) == {'IPR000001', 'IPR000002'}, list(kept['domain_id'])
+
+
+# ---------------------------------------------------------------------------
+# Empty transcript set: a run where no event resolves a gene
+# ---------------------------------------------------------------------------
+
+def test_get_exons_for_transcripts_with_no_ids_returns_empty_frame(db_path):
+    """A run whose events all fail to resolve a gene has no transcript ids at all,
+    so the chunk loop never runs and there is nothing to concatenate. pd.concat([])
+    raises "No objects to concatenate", which killed the run with an opaque pandas
+    error instead of letting it finish and report each event's reason.
+
+    It happens for real: every LeafCutter cluster unannotated (82 in the fixture), or
+    a gene set absent from the database.
+    """
+    import sqlite3
+    import utils
+    if not os.path.exists(db_path):
+        pytest.skip(f"DoChaP database not found at {db_path}")
+    con = sqlite3.connect(db_path)
+    try:
+        df = utils.get_exons_for_transcripts(con, set())
+    finally:
+        con.close()
+
+    assert len(df) == 0
+    # The table's own shape, not a bare DataFrame(): downstream code reads these
+    # columns, and an empty frame without them fails on attribute access instead.
+    for column in ('transcript_ensembl_id', 'transcript_refseq_id',
+                   'genomic_start_tx', 'genomic_end_tx', 'order_in_transcript'):
+        assert column in df.columns, f"{column} missing from the empty result"
+
+
+def test_get_exons_for_transcripts_empty_matches_populated_shape(db_path):
+    """The empty result must carry exactly the columns a populated one does."""
+    import sqlite3
+    import utils
+    if not os.path.exists(db_path):
+        pytest.skip(f"DoChaP database not found at {db_path}")
+    con = sqlite3.connect(db_path)
+    try:
+        empty = utils.get_exons_for_transcripts(con, set())
+        populated = utils.get_exons_for_transcripts(con, {'ENST00000388866.8'})
+    finally:
+        con.close()
+
+    assert len(populated) > 0, "fixture transcript should have exons"
+    assert list(empty.columns) == list(populated.columns)

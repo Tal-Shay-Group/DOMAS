@@ -1018,6 +1018,16 @@ def get_exons_for_transcripts(con, transcript_ids):
         df_chunk = pd.read_sql_query(query, con, params=params)
         df_list.append(df_chunk)
 
+    if not df_list:
+        # No transcript ids at all, so the chunk loop never ran and there is nothing
+        # to concatenate - pd.concat([]) raises "No objects to concatenate", which
+        # surfaced as an opaque pandas error rather than an empty result. It happens
+        # whenever no event resolves a gene: every LeafCutter cluster unannotated, or
+        # a gene set absent from the database. Returning the table's own empty shape
+        # lets the run finish and report each event's reason (no_gene_specified /
+        # gene_not_in_db) instead of dying.
+        return pd.read_sql_query('SELECT * FROM Transcript_exon LIMIT 0', con)
+
     # Combine all chunks into one final DataFrame
     df_exons = pd.concat(df_list, ignore_index=True)
     return df_exons

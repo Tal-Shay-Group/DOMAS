@@ -159,7 +159,15 @@ case was generated for it:
    against synthetic frames, cross-checked on the real transcript
    `ENST00000680265.1`, whose 6 Binding_site entries are dropped (38 → 28 rows). A
    reviewable case could be built by sampling a gene that carries one.
-3. **`no_gene_specified` has no PDF** — the LeafCutter runs that produce it are the
-   ones without PDF generation.
+3. **`no_gene_specified` cannot have a PDF, by design.** The figure is per-gene, and
+   a cluster naming no gene has no transcripts, exons or domains to draw; DOMAS
+   declines with `Skipping PDF generation for None ... Gene 'None' not found in
+   database`. The results.csv row carries more than a blank page would. Covered by
+   unit tests and by 82 real clusters in the LeafCutter fixture.
+
+   Establishing this uncovered a crash: with no gene resolved anywhere in a run there
+   are no transcript ids, so `get_exons_for_transcripts` had nothing to concatenate
+   and the run died on `pd.concat([])` rather than reporting each event's reason.
+   Fixed, with a regression test.
 4. The generated sets under `review_cases/` are **not** golden references and are
    compared against nothing; they exist to be looked at.
