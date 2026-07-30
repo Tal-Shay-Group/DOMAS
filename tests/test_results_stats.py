@@ -80,3 +80,42 @@ def test_hadas_analysis_and_stats_report_flow(con, tmp_path):
     PyPDF2 = pytest.importorskip('PyPDF2')
     reader = PyPDF2.PdfReader(stats_pdf)
     assert len(reader.pages) > 1, "Expected more than just a title page in the stats report"
+
+
+# ---------------------------------------------------------------------------
+# select_representative_transcript - the is_longest_cds fallback
+# ---------------------------------------------------------------------------
+
+def _rep_df(rows):
+    """Minimal frame for select_representative_transcript: one row per
+    (cluster, transcript), each row (cluster, transcript_id, most_like, longest)."""
+    clusters, transcripts, most_like, longest = zip(*rows)
+    return pd.DataFrame({
+        'specie': ['H_sapiens'] * len(rows),
+        'cluster': clusters,
+        'transcript_id': transcripts,
+        'event_type': ['shorter'] * len(rows),
+        'is_most_like_canonical': most_like,
+        'is_longest_cds': longest,
+    })
+
+
+def test_select_representative_transcript_prefers_most_like_canonical():
+    df = _rep_df([
+        ('clu_1', 'ENST_A', True, False),
+        ('clu_1', 'ENST_B', False, True),
+    ])
+    kept = results_stats.select_representative_transcript(df)
+    assert kept['transcript_id'].unique().tolist() == ['ENST_A']
+
+
+def test_select_representative_transcript_falls_back_to_longest_cds():
+    """No transcript qualifies as most-like-canonical, so no row carries that flag.
+    The cluster must still resolve, via is_longest_cds - this is the path that
+    reproduces the fallback select_most_like_canonical() no longer performs itself."""
+    df = _rep_df([
+        ('clu_1', 'ENST_A', False, False),
+        ('clu_1', 'ENST_B', False, True),
+    ])
+    kept = results_stats.select_representative_transcript(df)
+    assert kept['transcript_id'].unique().tolist() == ['ENST_B']

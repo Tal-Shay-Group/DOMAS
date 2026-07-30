@@ -101,38 +101,40 @@ def select_most_like_canonical(comparable_transcript_ids, canonical_transcript_i
     always taking the longest-CDS one when several transcripts have unique junctions vs
     canonical.
 
-    Among the candidates whose exons *outside* the cluster's junction range (the span
-    from the earliest to the latest coordinate among the cluster's own junctions) are an
-    exact match - by genomic start/end, as a set - to canonical's exons outside that
-    range, pick the one with the most exons - across the whole transcript, including
-    exons inside the junction range - that exactly match a canonical exon. Ties are
-    broken by transcript id for determinism.
+    A candidate qualifies when ALL of its exons lying *outside* the cluster's junction
+    range (the span from the earliest to the latest coordinate among the cluster's own
+    junctions) exactly match - by genomic start/end, as a set - canonical's exons
+    outside that range. Such a transcript differs from canonical only within the spliced
+    region, so any domain difference it shows is attributable to the event itself.
 
-    Falls back to the longest-CDS candidate if no candidate has an exact outside-range
-    match to canonical.
+    Qualifying is a hard filter, not a preference: a single qualifying candidate is
+    taken even if a disqualified one has a longer CDS. Among several qualifying
+    candidates the longest-CDS one is taken, ties broken by transcript id for
+    determinism.
+
+    Returns None when no candidate qualifies - the flag then goes unset rather than
+    falling back to the longest-CDS candidate, which is_longest_cds already marks in
+    its own right. Callers wanting a single transcript per cluster fall back to that
+    flag themselves (see results_stats.select_representative_transcript()).
     """
     min_bp = min(start for start, end in junctions)
     max_bp = max(end for start, end in junctions)
 
     c_exons = transcript_exons[canonical_transcript_id]
-    c_exon_set = _exon_coord_set(c_exons)
     c_outside_set = _outside_range_exon_set(c_exons, min_bp, max_bp)
 
-    qualifying = {}
-    for transcript_id in comparable_transcript_ids:
-        t_exons = transcript_exons[transcript_id]
-        if _outside_range_exon_set(t_exons, min_bp, max_bp) != c_outside_set:
-            continue
-        qualifying[transcript_id] = len(_exon_coord_set(t_exons) & c_exon_set)
+    qualifying = [
+        transcript_id for transcript_id in comparable_transcript_ids
+        if _outside_range_exon_set(transcript_exons[transcript_id], min_bp, max_bp) == c_outside_set
+    ]
 
     if not qualifying:
-        return max(
-            comparable_transcript_ids,
-            key=lambda tid: (cds_length_by_transcript.get(tid, -1), tid),
-        )
+        return None
 
-    best_score = max(qualifying.values())
-    return sorted(tid for tid, score in qualifying.items() if score == best_score)[0]
+    return max(
+        qualifying,
+        key=lambda tid: (cds_length_by_transcript.get(tid, -1), tid),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -825,7 +827,9 @@ class ClusterAnalysisResult:
 
         Phase 1.5 - tag each comparable transcript with whether it's the one the
         longest-CDS rule and/or the most-like-canonical rule (see
-        select_most_like_canonical()) would pick - none are skipped.
+        select_most_like_canonical()) would pick - none are skipped. Exactly one
+        transcript is tagged is_longest_cds; is_most_like_canonical is left unset
+        across the whole cluster when no transcript qualifies.
 
         Phase 2/3 - for each transcript with a unique junction, determine the
         relevant genomic window and compare its domains against the canonical
