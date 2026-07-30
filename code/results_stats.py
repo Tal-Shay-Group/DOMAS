@@ -97,9 +97,12 @@ DEFAULT_DOCHAP_DB_PATH = "/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-
 # can actually produce (see junction_analisys.py: the literal add_event(...)
 # calls for the unanalyzable/skip reasons, classify_domain_change() for the
 # analyzed outcomes).
-# "gene_not_in_db" = gene's ENSG ID not found in the reference database (e.g., lncRNAs)
+# "no_gene_specified" = the event named no gene at all, so no lookup was possible
+#   (LeafCutter builds clusters annotation-free, so a cluster can overlap nothing)
+# "gene_not_in_db" = a gene WAS named but its ID is not in the reference database
 # "no_canonical_transcript" = gene found in DB but no canonical transcript
 UNANALYZABLE_TYPES = [
+    "no_gene_specified",
     "gene_not_in_db",
     "no_canonical_transcript",
     "only_one_transcript",
@@ -150,7 +153,7 @@ def _warn(message):
 # length mismatch (e.g. forgetting to add a color when a new event type is
 # added) would otherwise make zip() truncate and shift every later color by
 # one, which happened once already when "gene_not_in_db" was added.
-_UNANALYZABLE_COLORS = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2", "#937860", "#CCB974", "#64B5CD"]
+_UNANALYZABLE_COLORS = ["#8C8C8C", "#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2", "#937860", "#CCB974", "#64B5CD"]
 _ANALYZED_COLORS = ["#C00000", "#2E8B57", "#FF8C00", "#FFC000", "#70AD47", "#7030A0", "#4472C4", "#A6761D", "#E7298A"]
 assert len(_UNANALYZABLE_COLORS) == len(UNANALYZABLE_TYPES), \
     f"event_color(): {len(_UNANALYZABLE_COLORS)} unanalyzable colors for {len(UNANALYZABLE_TYPES)} UNANALYZABLE_TYPES"
@@ -201,6 +204,7 @@ def event_sort_key(event_type):
 # Never used for filtering/CSV output - ANALYZED_TYPES, UNANALYZABLE_TYPES,
 # ALL_EVENT_TYPES and the "event_type"/"label" column values stay unchanged.
 SHORT_LABELS = {
+    "no_gene_specified": "no gene named",
     "gene_not_in_db": "not in DB",
     "dropped domain": "dropped",
     "added_domain": "added",

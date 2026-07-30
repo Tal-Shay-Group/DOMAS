@@ -766,6 +766,16 @@ def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, tr
         }
 
 
+def _is_missing_gene_id(gene_id):
+    """True when an event names no gene at all. A reader may leave this as None,
+    NaN, or a blank/placeholder string, so all three are treated alike."""
+    if gene_id is None:
+        return True
+    if not isinstance(gene_id, str) and pd.isna(gene_id):
+        return True
+    return str(gene_id).strip().lower() in ('', 'nan', 'none', 'na', '.')
+
+
 class ClusterAnalysisResult:
     def __init__(self, cluster_name, gene_ensembl_id, gene_symbol, chromosome=None, as_event_type=None, specie=None, strand=None):
         self.cluster_name = cluster_name
@@ -812,6 +822,20 @@ class ClusterAnalysisResult:
         relevant genomic window and compare its domains against the canonical
         transcript's, recording one event per domain group.
         """
+        # No gene named for this event at all - distinct from one that was named
+        # and not found. LeafCutter builds clusters annotation-free, so a cluster
+        # overlapping nothing annotated is an expected outcome; reporting it as
+        # gene_not_in_db claimed a lookup had failed when none was ever possible.
+        #
+        # A missing id alone is NOT enough to conclude that: a named gene whose
+        # symbol did not resolve - a lncRNA clone id absent from DoChaP, say -
+        # also arrives with no id, and that IS a failed lookup. The symbol is what
+        # separates the two.
+        if _is_missing_gene_id(self.gene_ensembl_id) and _is_missing_gene_id(self.gene_symbol):
+            self.add_event('no_gene_specified')
+            logger.debug(f"No gene named for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
+            return
+
         # Check if gene exists in the database at all. Done before any column is
         # read, so an absent gene can be signalled with a plain empty frame (or
         # None) rather than one carrying the DB's columns.
@@ -1020,7 +1044,7 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
 # carrying these events are the "non-comparable" / "not chosen" transcripts that
 # analyze_junctions(filter_non_comparable=True) drops from the output CSV.
 NON_COMPARISON_EVENTS = frozenset({
-    'gene_not_in_db', 'no_canonical_transcript', 'only_one_transcript',
+    'no_gene_specified', 'gene_not_in_db', 'no_canonical_transcript', 'only_one_transcript',
     'no_canonical_features', 'feature_not_mapped',
     'transcript_doesnt_have_features', 'no_unique_features',
 })

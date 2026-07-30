@@ -511,6 +511,24 @@ def _split_leafcutter_intron(intron):
     return chromosome, start, end, _leafcutter_cluster_key(f'{chromosome}:{clu}')
 
 
+def _leafcutter_gene_symbols(genes):
+    """The gene symbols a leafcutter_ds significance row names, as a list.
+
+    An unannotated cluster gives []. Previously this went through
+    `str(genes).split(',')`, which turns a missing value into the *string* 'nan' -
+    so those clusters carried gene_symbol="nan" all the way into the output CSV
+    instead of an empty cell.
+    """
+    if genes is None or (not isinstance(genes, str) and pd.isna(genes)):
+        return []
+    symbols = []
+    for symbol in str(genes).split(','):
+        symbol = symbol.strip()
+        if symbol and symbol.lower() not in ('nan', 'na', '.', 'none') and symbol not in symbols:
+            symbols.append(symbol)
+    return symbols
+
+
 def _leafcutter_cluster_key(cluster):
     """chr:clu_<n>_<strand> (significance file) -> chr:clu_<n>, the same key
     _split_leafcutter_intron() builds from the effect-sizes intron id."""
@@ -563,11 +581,35 @@ def leafcutter_read_input_files(con, significance_file, effect_sizes_file, speci
     # produce; nothing downstream reads it, so deltapsi is not propagated.
     df['rank'] = ''
 
-    # cluster -> gene symbol (first gene if several) from the significance file
+    # cluster -> the gene symbols the significance file names for it.
+    #
+    # LeafCutter builds intron clusters annotation-free and only then annotates
+    # each with whichever genes it overlaps, so a cluster can name several -
+    # readthrough loci, tandem paralogues, a lncRNA over a coding gene. 6.6% of
+    # clusters in a real run name more than one, up to nine. Keeping only the
+    # first attributed the event to whichever name LeafCutter happened to list
+    # first and silently discarded any domain change in the others; where that
+    # first name was absent from DoChaP the whole cluster was lost even though a
+    # later name would have resolved.
+    #
+    # The cluster is now analysed once per named gene. Its identifier carries the
+    # symbol only where there is more than one, so the far commoner single-gene
+    # id is unchanged.
     df_sig['cluster_key'] = df_sig['cluster'].apply(_leafcutter_cluster_key)
-    df_sig['gene_symbol_first'] = df_sig['genes'].astype(str).str.split(',').str[0].str.strip()
-    cluster_to_symbol = dict(zip(df_sig['cluster_key'], df_sig['gene_symbol_first']))
-    df['gene_symbol'] = df['cluster_name'].map(cluster_to_symbol)
+    cluster_to_symbols = dict(zip(df_sig['cluster_key'],
+                                  df_sig['genes'].apply(_leafcutter_gene_symbols)))
+    df['gene_symbols'] = df['cluster_name'].map(cluster_to_symbols)
+    # A cluster naming no gene keeps one row with a missing symbol - it is a real
+    # LeafCutter outcome (a novel cluster overlapping nothing annotated), not bad
+    # input, and is labelled no_gene_specified downstream rather than dropped.
+    df['gene_symbols'] = df['gene_symbols'].apply(lambda s: s if s else [None])
+    df = df.explode('gene_symbols', ignore_index=True)
+    df = df.rename(columns={'gene_symbols': 'gene_symbol'})
+
+    multi_gene_clusters = {key for key, symbols in cluster_to_symbols.items() if len(symbols) > 1}
+    is_multi = df['cluster_name'].isin(multi_gene_clusters)
+    df.loc[is_multi, 'cluster_name'] = (df.loc[is_multi, 'cluster_name']
+                                        + ':' + df.loc[is_multi, 'gene_symbol'].astype(str))
 
     # resolve gene symbol -> gene_ensembl_id via the DoChaP Genes table.
     # The same symbol exists across species in the DB (e.g. USP16 -> human,

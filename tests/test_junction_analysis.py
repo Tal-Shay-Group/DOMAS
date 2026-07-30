@@ -1090,3 +1090,76 @@ def test_transcripts_grouped_by_combined_gene_id_keeps_geneid_only_genes():
     assert '222' not in dropped, "precondition: the old grouping loses the GeneID-only gene"
     assert set(kept) == {'ENSG_A', '222'}
     assert len(kept['222']) == 2, "both transcripts of the GeneID-only gene are reachable"
+
+
+# ---------------------------------------------------------------------------
+# LeafCutter gene annotation: one cluster per named gene, and no_gene_specified
+# ---------------------------------------------------------------------------
+
+def test_leafcutter_gene_symbols_parsing():
+    """A significance row can name several genes, or none. Missing must give [] -
+    it previously went through str(genes).split(','), which turns NaN into the
+    literal string 'nan' and carried that into the output's gene_symbol column."""
+    from alternative_splicing import _leafcutter_gene_symbols
+    assert _leafcutter_gene_symbols('CDK11B,CDK11A,AL031282.2') == ['CDK11B', 'CDK11A', 'AL031282.2']
+    assert _leafcutter_gene_symbols('PFKP') == ['PFKP']
+    assert _leafcutter_gene_symbols(float('nan')) == []
+    assert _leafcutter_gene_symbols(None) == []
+    assert _leafcutter_gene_symbols('') == []
+    assert _leafcutter_gene_symbols('.') == []
+    # whitespace trimmed, duplicates collapsed, order preserved
+    assert _leafcutter_gene_symbols(' A , B ,A') == ['A', 'B']
+
+
+def test_missing_gene_id_detection():
+    """A reader may leave an unnamed gene as None, NaN or a placeholder string."""
+    from junction_analisys import _is_missing_gene_id
+    for value in (None, float('nan'), '', '  ', 'nan', 'None', 'NA', '.'):
+        assert _is_missing_gene_id(value), value
+    for value in ('ENSG00000123456', '79400', 'CDK11B'):
+        assert not _is_missing_gene_id(value), value
+
+
+def test_cluster_with_no_gene_reports_no_gene_specified():
+    """An event naming no gene is distinct from one naming a gene that isn't in the
+    database: no lookup was possible, so gene_not_in_db claimed a failure that never
+    happened. LeafCutter builds clusters annotation-free, so this is an expected
+    outcome and needs its own label to keep the coverage audit honest."""
+    cluster_result = ClusterAnalysisResult('chr1:clu_1', float('nan'), None, specie='H_sapiens')
+    cluster_result.junctions = [(100, 200)]
+    cluster_result.analyze(
+        df_gene_transcripts=None, canonical_transcript_ids=set(),
+        exon_lookup=lambda t: pd.DataFrame(), domain_lookup=lambda t: pd.DataFrame(),
+    )
+    events = [e[0] for e in cluster_result.events]
+    assert events == ['no_gene_specified'], events
+
+
+def test_named_but_absent_gene_still_reports_gene_not_in_db():
+    """The new label must not swallow the old one: a gene that WAS named and is
+    genuinely missing from the database still reports gene_not_in_db."""
+    cluster_result = ClusterAnalysisResult('chr1:clu_2', 'ENSG99999999', 'FAKE', specie='H_sapiens')
+    cluster_result.junctions = [(100, 200)]
+    cluster_result.analyze(
+        df_gene_transcripts=None, canonical_transcript_ids=set(),
+        exon_lookup=lambda t: pd.DataFrame(), domain_lookup=lambda t: pd.DataFrame(),
+    )
+    events = [e[0] for e in cluster_result.events]
+    assert events == ['gene_not_in_db'], events
+
+
+def test_named_gene_with_unresolved_symbol_is_not_no_gene_specified():
+    """A gene that WAS named but whose symbol did not resolve to a database id - a
+    lncRNA clone id such as AL451164.2, absent from DoChaP - arrives with no gene
+    id, exactly like an unannotated cluster. It is not the same thing: a lookup was
+    possible and failed, so it must stay gene_not_in_db. Keying only on the missing
+    id mislabels 1,582 clusters of the leafcutter fixture as no_gene_specified."""
+    cluster_result = ClusterAnalysisResult('chr10:clu_1:AL451164.2', float('nan'),
+                                           'AL451164.2', specie='H_sapiens')
+    cluster_result.junctions = [(100, 200)]
+    cluster_result.analyze(
+        df_gene_transcripts=None, canonical_transcript_ids=set(),
+        exon_lookup=lambda t: pd.DataFrame(), domain_lookup=lambda t: pd.DataFrame(),
+    )
+    events = [e[0] for e in cluster_result.events]
+    assert events == ['gene_not_in_db'], events

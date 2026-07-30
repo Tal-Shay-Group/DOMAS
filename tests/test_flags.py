@@ -60,7 +60,7 @@ MAJIQ_TSV = os.path.join(TESTS_DIR, 'majiq', 'NveB_Mono_voila.txt')
 # Mirrors JunctionsAnalysis._SKIPPED_TRANSCRIPT_EVENTS plus the cluster-level
 # events that carry no real transcript id.
 _SKIPPED_EVENTS = {
-    'gene_not_in_db', 'transcript_doesnt_have_features', 'no_unique_features',
+    'gene_not_in_db', 'no_gene_specified', 'transcript_doesnt_have_features', 'no_unique_features',
     'no_canonical_transcript', 'only_one_transcript', 'no_canonical_features', 'feature_not_mapped',
 }
 
@@ -459,7 +459,7 @@ def test_rmats_subset_compare_against_reference(con, keep_test_output):
 # events that mark a transcript/cluster that was NOT compared to canonical -
 # mirrors junction_analisys.NON_COMPARISON_EVENTS; filter_non_comparable drops these.
 _NON_COMPARISON_EVENTS = {
-    'gene_not_in_db', 'no_canonical_transcript', 'only_one_transcript',
+    'gene_not_in_db', 'no_gene_specified', 'no_canonical_transcript', 'only_one_transcript',
     'no_canonical_features', 'feature_not_mapped',
     'transcript_doesnt_have_features', 'no_unique_features',
 }

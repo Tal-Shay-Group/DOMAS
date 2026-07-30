@@ -1137,7 +1137,8 @@ class GeneVisualization:
 
         # Cluster-level events (not tied to a specific transcript) shown once above canonical
         _CLUSTER_EVENTS = {'feature_not_mapped', 'no_canonical_features',
-                           'no_canonical_transcript', 'only_one_transcript'}
+                           'no_canonical_transcript', 'only_one_transcript',
+                           'no_gene_specified'}
         cluster_events_df = None
         if df_results is not None and 'event' in df_results.columns:
             _mask = df_results['event'].isin(_CLUSTER_EVENTS)
