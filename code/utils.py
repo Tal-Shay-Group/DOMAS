@@ -90,6 +90,21 @@ def _optional_junction_defaults():
         FEATURE_TYPE_COLUMN: FEATURE_JUNCTION,
     }
 
+# The species DOMAS knows, mapping the label carried on the junctions frame to
+# the DoChaP Genes.specie value. Lives here rather than in alternative_splicing.py
+# so that junction_analisys.py can cross-check the stated species against the
+# database without importing it (which would be circular).
+SPECIE_DB_NAME = {
+    'human': 'H_sapiens',
+    'mouse': 'M_musculus',
+    'rat': 'R_norvegicus',
+    'zebrafish': 'D_rerio',
+    'frog': 'X_tropicalis',
+}
+
+SPECIE_FROM_DB_NAME = {db_name: label for label, db_name in SPECIE_DB_NAME.items()}
+
+
 # Ensembl stamps the species into its gene ids. Longest-prefix-first is not
 # needed - 'ENSMUSG...' does not start with 'ENSG' - but the order is kept
 # explicit so adding a species cannot silently shadow another.
@@ -120,11 +135,21 @@ def specie_from_gene_id(gene_id):
     return None
 
 
-def normalize_junctions_frame(df):
+def normalize_junctions_frame(df, specie=None):
     """Validate the required columns and fill every optional one with its default.
 
-    Also derives `specie` per row from the Ensembl gene id wherever a reader left
-    it blank. Returns the same frame, modified in place where possible.
+    `specie` is the species the caller states the input belongs to - required at
+    the CLI, since three of the five formats carry no species field. It is
+    authoritative: it fills the column, and any gene id that demonstrably
+    contradicts it aborts the run.
+
+    Contradiction is not the same as silence. An Ensembl id names its species in
+    its prefix, so it can disagree; a GeneID or other non-Ensembl id names nothing
+    and simply takes the stated value. Treating the second as an error would
+    reject exactly the GeneID-only genes DOMAS goes out of its way to support.
+
+    Where no species is stated the prefix is used, so library callers that predate
+    the flag keep working.
     """
     missing = [c for c in REQUIRED_JUNCTION_COLUMNS if c not in df.columns]
     if missing:
@@ -134,10 +159,28 @@ def normalize_junctions_frame(df):
         if column not in df.columns:
             df[column] = default
 
-    if df['specie'].isna().all():
-        df['specie'] = df['gene_ensembl_id'].map(specie_from_gene_id)
-    else:
-        df['specie'] = df['specie'].fillna(df['gene_ensembl_id'].map(specie_from_gene_id))
+    derived = df['gene_ensembl_id'].map(specie_from_gene_id)
+    if specie is None:
+        df['specie'] = df['specie'].fillna(derived) if df['specie'].notna().any() else derived
+        return df
+
+    if specie not in SPECIE_DB_NAME:
+        raise ValueError(f"Unknown specie {specie!r}. Expected one of: "
+                         f"{', '.join(sorted(SPECIE_DB_NAME))}.")
+
+    conflicting = df.loc[derived.notna() & (derived != specie), 'gene_ensembl_id']
+    if not conflicting.empty:
+        found = sorted(derived[conflicting.index].unique())
+        raise ValueError(
+            f"Input does not match -specie {specie}: {len(conflicting)} of {len(df)} "
+            f"rows carry gene ids from {', '.join(found)} "
+            f"(e.g. {', '.join(str(g) for g in conflicting.unique()[:3])}). "
+            f"Re-run with the species the data actually came from."
+        )
+
+    # Rows whose species could not be derived keep the stated one; rows that agree
+    # are unaffected by writing it.
+    df['specie'] = specie
     return df
 
 

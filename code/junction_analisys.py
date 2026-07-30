@@ -766,6 +766,34 @@ def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, tr
         }
 
 
+def _assert_specie_matches_database(df_junctions, gene_specie):
+    """Abort when the species carried on the junctions contradicts DoChaP.
+
+    Catches a wrong -specie for any gene the database holds - unlike the Ensembl
+    prefix check, which is blind to GeneID-keyed genes. Genes absent from the
+    database say nothing and are left to the gene_not_in_db path.
+    """
+    if not gene_specie or 'specie' not in df_junctions.columns:
+        return
+
+    expected = df_junctions['specie'].map(
+        lambda s: utils.SPECIE_DB_NAME.get(s) if isinstance(s, str) else None)
+    actual = df_junctions['gene_ensembl_id'].map(gene_specie)
+    mismatched = df_junctions[expected.notna() & actual.notna() & (expected != actual)]
+    if mismatched.empty:
+        return
+
+    found = sorted({utils.SPECIE_FROM_DB_NAME.get(s, s)
+                    for s in actual[mismatched.index].dropna().unique()})
+    stated = sorted(mismatched['specie'].dropna().unique())
+    examples = ', '.join(str(g) for g in mismatched['gene_ensembl_id'].unique()[:3])
+    raise ValueError(
+        f"Species mismatch: {len(mismatched)} of {len(df_junctions)} rows are stated as "
+        f"{'/'.join(stated)} but their genes are {'/'.join(found)} in the database "
+        f"(e.g. {examples}). Re-run with the species the data actually came from."
+    )
+
+
 def _is_missing_gene_id(gene_id):
     """True when an event names no gene at all. A reader may leave this as None,
     NaN, or a blank/placeholder string, so all three are treated alike."""
@@ -1218,7 +1246,7 @@ class JunctionsAnalysis:
         self.logger = logger_instance or logger
         self.gene_visualization_cls = gene_visualization_cls
 
-    def _load_junctions_data(self, df_junctions):
+    def _load_junctions_data(self, df_junctions, specie=None):
         """Validate the junctions DataFrame. Reading junctions from a file (plain CSV,
         hadas-format Excel, IOE, ...) is alternative_splicing.py's responsibility -
         callers pass an already-loaded DataFrame here."""
@@ -1231,7 +1259,7 @@ class JunctionsAnalysis:
         # filled with their declared default, specie derived where a reader left it
         # blank. Past this point the columns are simply there, so downstream code
         # does not each carry its own "if 'x' in df.columns" default.
-        return utils.normalize_junctions_frame(df_junctions)
+        return utils.normalize_junctions_frame(df_junctions, specie=specie)
 
     def _filter_junctions_by_transcript_count(self, df_junctions, filter_transcript_count):
         """Filter junctions to genes with exactly filter_transcript_count transcripts."""
@@ -1254,10 +1282,11 @@ class JunctionsAnalysis:
         """Load genes, transcripts, domains, and exons from database."""
         clause, params = utils.gene_id_clause(gene_ids)
         df_genes = pd.read_sql_query(
-            f"SELECT gene_ensembl_id, gene_GeneID_id, strand FROM Genes WHERE {clause}",
+            f"SELECT gene_ensembl_id, gene_GeneID_id, specie, strand FROM Genes WHERE {clause}",
             self.con, params=params
         )
         gene_strand = dict(zip(utils.combined_gene_ids(df_genes), df_genes['strand']))
+        gene_specie = dict(zip(utils.combined_gene_ids(df_genes), df_genes['specie']))
 
         df_transcripts = utils.get_genes_df_transcripts(self.con, gene_ids)
 
@@ -1279,7 +1308,7 @@ class JunctionsAnalysis:
 
         df_exons = utils.get_exons_for_transcripts(self.con, transcript_ids)
 
-        return df_genes, df_transcripts, df_domains, df_exons, gene_strand
+        return df_genes, df_transcripts, df_domains, df_exons, gene_strand, gene_specie
 
     def _prepare_lookup_structures(self, df_transcripts, df_exons, df_domains):
         """Build lookup structures and transcript groupings."""
@@ -1510,7 +1539,7 @@ class JunctionsAnalysis:
                 self.logger.warning(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}, specie {cluster_result.specie}: {e}")
 
     def analyze_junctions(self, df_junctions, output_path='as_events_junctions_analysis.csv',
-                          filter_transcript_count=0, create_pdf=True, print_genes=None,
+                          specie=None, filter_transcript_count=0, create_pdf=True, print_genes=None,
                           num_workers=4, use_ensembl_only=False, restrict_pdf_to_comparable=False,
                           use_representative_domains=False, filter_non_comparable=False):
         """
@@ -1553,16 +1582,22 @@ class JunctionsAnalysis:
             List of ClusterAnalysisResult objects
         """
         # Validate input
-        df_junctions = self._load_junctions_data(df_junctions)
+        df_junctions = self._load_junctions_data(df_junctions, specie=specie)
         df_junctions = self._filter_junctions_by_transcript_count(df_junctions, filter_transcript_count)
 
         gene_ids = df_junctions.gene_ensembl_id.unique().tolist()
         self.logger.info(f"Analyzing {len(gene_ids)} genes")
 
         # Load data from database
-        df_genes, df_transcripts, df_domains, df_exons, gene_strand = self._load_database_data(
+        df_genes, df_transcripts, df_domains, df_exons, gene_strand, gene_specie = self._load_database_data(
             gene_ids, use_ensembl_only=use_ensembl_only, use_representative_domains=use_representative_domains
         )
+
+        # The database knows the species of every gene it holds, including those
+        # keyed only by GeneID, which the Ensembl-prefix check cannot read. This is
+        # therefore the stronger check on the stated species: a wrong -specie is
+        # caught on any gene present in DoChaP, not only Ensembl-keyed ones.
+        _assert_specie_matches_database(df_junctions, gene_specie)
 
         # Prepare lookup structures
         canonical_transcript_ids, transcripts_by_gene = \

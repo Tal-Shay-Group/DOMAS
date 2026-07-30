@@ -486,13 +486,9 @@ def hadas_read_input_file(con, input_path):
 
 # Maps the specie label carried on the junctions (matching the hadas convention:
 # 'human'/'mouse') to the DoChaP Genes.specie value used for symbol lookups.
-_SPECIE_DB_NAME = {
-    'human': 'H_sapiens',
-    'mouse': 'M_musculus',
-    'rat': 'R_norvegicus',
-    'zebrafish': 'D_rerio',
-    'frog': 'X_tropicalis',
-}
+# Moved to utils.SPECIE_DB_NAME so junction_analisys.py can cross-check the
+# stated species against the database without a circular import.
+_SPECIE_DB_NAME = utils.SPECIE_DB_NAME
 
 
 def _split_leafcutter_intron(intron):
@@ -898,7 +894,7 @@ def _limit_clusters(df_junctions, max_clusters):
     return df_junctions[df_junctions[col].isin(keep)].copy()
 
 
-def analyze_junctions(con, df_junctions=None, junctions_csv=None, hadas_format=False,
+def analyze_junctions(con, df_junctions=None, junctions_csv=None, hadas_format=False, specie=None,
                         output_path='as_events_junctions_analysis.csv',
                         n=0, create_pdf=True, print_genes=None, num_workers=5,
                         use_representative_domains=False, max_clusters=0,
@@ -917,41 +913,41 @@ def analyze_junctions(con, df_junctions=None, junctions_csv=None, hadas_format=F
     df_junctions = _limit_clusters(df_junctions, max_clusters)
 
     analyzer = JunctionsAnalysis(con, logger_instance=logger)
-    return analyzer.analyze_junctions(df_junctions=df_junctions, output_path=output_path,
+    return analyzer.analyze_junctions(df_junctions=df_junctions, output_path=output_path, specie=specie,
                                       filter_transcript_count=n, create_pdf=create_pdf, print_genes=print_genes, num_workers=num_workers,
                                       use_representative_domains=use_representative_domains,
                                       filter_non_comparable=filter_non_comparable)
 
-def analyze_ioe_file(con, ioe_file, output_csv, num_workers=5, use_representative_domains=False, max_clusters=0,
+def analyze_ioe_file(con, ioe_file, output_csv, specie=None, num_workers=5, use_representative_domains=False, max_clusters=0,
                      filter_non_comparable=False):
     df_junctions = utils.ioe2junctions(ioe_file)
     gene_symbols_dict = utils.get_gene_symbols(con, df_junctions.gene_ensembl_id.unique().tolist())
     # add gene symbols to df_junctions
     df_junctions['gene_symbol'] = df_junctions['gene_ensembl_id'].map(gene_symbols_dict)
-    analyze_junctions(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False, num_workers=num_workers,
+    analyze_junctions(con, df_junctions=df_junctions, specie=specie, output_path=output_csv, create_pdf=False, num_workers=num_workers,
                         use_representative_domains=use_representative_domains, max_clusters=max_clusters,
                         filter_non_comparable=filter_non_comparable)
 
 
-def analyze_rmats_input(con, rmats_dir, output_csv, num_workers=5, use_representative_domains=False, max_clusters=0,
+def analyze_rmats_input(con, rmats_dir, output_csv, specie=None, num_workers=5, use_representative_domains=False, max_clusters=0,
                         filter_non_comparable=False):
     """Read an rMATS-turbo output directory (the SE/A5SS/A3SS/MXE [Event].MATS.JC.txt files)
     and run the domain analysis. rMATS embeds the Ensembl GeneID and gene symbol
     in each event, so - unlike the leafcutter path - no symbol->ensembl lookup is
     needed. All events are analyzed (no significance filtering)."""
     df_junctions = utils.rmats2junctions(rmats_dir)
-    analyze_junctions(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False,
+    analyze_junctions(con, df_junctions=df_junctions, specie=specie, output_path=output_csv, create_pdf=False,
                        num_workers=num_workers, use_representative_domains=use_representative_domains,
                        max_clusters=max_clusters, filter_non_comparable=filter_non_comparable)
 
 
-def analyze_voila_input(con, voila_tsv, output_csv, num_workers=5, use_representative_domains=False, max_clusters=0,
+def analyze_voila_input(con, voila_tsv, output_csv, specie=None, num_workers=5, use_representative_domains=False, max_clusters=0,
                         filter_non_comparable=False):
     """Read a MAJIQ voila TSV (`voila tsv` output) and run the domain analysis.
     voila embeds the Ensembl Gene ID and gene name in each LSV, so no
     symbol->ensembl lookup is needed. All LSVs are analyzed (no filtering)."""
     df_junctions = utils.voila2junctions(voila_tsv)
-    analyze_junctions(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False,
+    analyze_junctions(con, df_junctions=df_junctions, specie=specie, output_path=output_csv, create_pdf=False,
                        num_workers=num_workers, use_representative_domains=use_representative_domains,
                        max_clusters=max_clusters, filter_non_comparable=filter_non_comparable)
 
@@ -981,7 +977,7 @@ def keep_min_transcript_clusters(df, examples_per_event=2):
 
     return filtered_df
 
-def analyze_ioe_files(con, input_path, pattern, output_csv, examples_per_event=5, num_workers=5,
+def analyze_ioe_files(con, input_path, pattern, output_csv, specie=None, examples_per_event=5, num_workers=5,
                        use_representative_domains=False, max_clusters=0, filter_non_comparable=False):
     dfs = []
     for file in os.listdir(input_path):
@@ -1006,12 +1002,12 @@ def analyze_ioe_files(con, input_path, pattern, output_csv, examples_per_event=5
         # per event type, keep only examples_per_event unique cluster_name with minimum number of transcripts for the gene
         df_examples = keep_min_transcript_clusters(df_all_junctions, examples_per_event=examples_per_event)
         df_examples.to_csv('ioe_example_junctions.csv', index=False)
-        analyze_junctions(con, df_junctions=df_examples, output_path=output_csv, create_pdf=False, num_workers=num_workers,
+        analyze_junctions(con, df_junctions=df_examples, specie=specie, output_path=output_csv, create_pdf=False, num_workers=num_workers,
                             use_representative_domains=use_representative_domains, max_clusters=max_clusters,
                             filter_non_comparable=filter_non_comparable)
     else:
         df_all_junctions.to_csv('ioe_all_junctions.csv', index=False)
-        analyze_junctions(con, df_junctions=df_all_junctions, output_path=output_csv, create_pdf=False, num_workers=num_workers,
+        analyze_junctions(con, df_junctions=df_all_junctions, specie=specie, output_path=output_csv, create_pdf=False, num_workers=num_workers,
                             use_representative_domains=use_representative_domains, max_clusters=max_clusters,
                             filter_non_comparable=filter_non_comparable)
 

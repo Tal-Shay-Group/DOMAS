@@ -1227,3 +1227,68 @@ def test_cluster_grouping_keeps_rows_whose_specie_cannot_be_derived():
     groups = analysis._prepare_cluster_groups(df)
     assert len(groups) == 1, f"the cluster must survive grouping, got {len(groups)} groups"
     assert len(groups[0][1]) == 2
+
+
+# ---------------------------------------------------------------------------
+# -specie: stated by the user, cross-checked against the data
+# ---------------------------------------------------------------------------
+
+def _specie_frame(gene_ids):
+    return pd.DataFrame({'gene_ensembl_id': gene_ids,
+                         'start_position': list(range(len(gene_ids))),
+                         'end_position': [x + 1 for x in range(len(gene_ids))],
+                         'cluster_name': ['c'] * len(gene_ids)})
+
+
+def test_stated_specie_is_authoritative():
+    import utils
+    out = utils.normalize_junctions_frame(_specie_frame(['ENSG1', 'ENSG2']), specie='human')
+    assert list(out['specie']) == ['human', 'human']
+
+
+def test_contradicting_gene_ids_abort():
+    """A wrong -specie must stop the run, not silently mislabel every row."""
+    import utils
+    with pytest.raises(ValueError, match="does not match"):
+        utils.normalize_junctions_frame(_specie_frame(['ENSG1', 'ENSG2']), specie='mouse')
+
+
+def test_undeterminable_gene_ids_do_not_abort():
+    """A GeneID names no species, so it cannot contradict the stated one. Treating
+    silence as a mismatch would reject exactly the GeneID-only genes DOMAS supports."""
+    import utils
+    out = utils.normalize_junctions_frame(_specie_frame(['79400', '434223']), specie='mouse')
+    assert list(out['specie']) == ['mouse', 'mouse']
+
+
+def test_unknown_specie_rejected():
+    import utils
+    with pytest.raises(ValueError, match="Unknown specie"):
+        utils.normalize_junctions_frame(_specie_frame(['ENSG1']), specie='dog')
+
+
+def test_no_stated_specie_falls_back_to_derivation():
+    """Library callers that predate the flag keep working."""
+    import utils
+    out = utils.normalize_junctions_frame(_specie_frame(['ENSG1', 'ENSMUSG2']))
+    assert list(out['specie']) == ['human', 'mouse']
+
+
+def test_database_specie_mismatch_aborts():
+    """The database knows the species of every gene it holds, including GeneID-keyed
+    ones the Ensembl prefix cannot read - so it catches a wrong -specie the prefix
+    check is blind to."""
+    from junction_analisys import _assert_specie_matches_database
+    df = _specie_frame(['79400'])
+    df['specie'] = 'mouse'
+    with pytest.raises(ValueError, match="Species mismatch"):
+        _assert_specie_matches_database(df, {'79400': 'H_sapiens'})
+
+
+def test_database_specie_check_ignores_genes_it_does_not_hold():
+    """A gene absent from the database says nothing about the species; it is left to
+    the gene_not_in_db path rather than aborting the run."""
+    from junction_analisys import _assert_specie_matches_database
+    df = _specie_frame(['ENSG_UNKNOWN'])
+    df['specie'] = 'human'
+    _assert_specie_matches_database(df, {'79400': 'H_sapiens'})  # must not raise
