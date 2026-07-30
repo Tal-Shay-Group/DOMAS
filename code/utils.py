@@ -258,6 +258,38 @@ def _rmats_event_junctions(event_type, r):
     return []
 
 
+# Columns _rmats_event_junctions() reads, per event type, on top of the common
+# GeneID/geneSymbol/chr/strand. Checked once per file so that a schema change -
+# a renamed column in a future rMATS release - fails loudly on the header instead
+# of raising KeyError on every row and being swallowed row by row, which would
+# silently produce an empty or truncated analysis.
+_RMATS_REQUIRED_COLUMNS = {
+    'SE': ('upstreamEE', 'exonStart_0base', 'exonEnd', 'downstreamES'),
+    'A5SS': ('longExonStart_0base', 'longExonEnd', 'shortES', 'shortEE',
+             'flankingES', 'flankingEE'),
+    'A3SS': ('longExonStart_0base', 'longExonEnd', 'shortES', 'shortEE',
+             'flankingES', 'flankingEE'),
+    'MXE': ('upstreamEE', 'downstreamES', '1stExonStart_0base', '1stExonEnd',
+            '2ndExonStart_0base', '2ndExonEnd'),
+    'RI': ('upstreamEE', 'downstreamES'),
+}
+
+_RMATS_COMMON_COLUMNS = ('GeneID', 'geneSymbol', 'chr', 'strand')
+
+
+def _check_rmats_columns(event_type, columns, path):
+    """Raise if `path` lacks a column the event type needs."""
+    required = _RMATS_COMMON_COLUMNS + _RMATS_REQUIRED_COLUMNS.get(event_type, ())
+    missing = [c for c in required if c not in columns]
+    if missing:
+        raise ValueError(
+            f"{os.path.basename(path)} is missing the column(s) {missing} that DOMAS "
+            f"needs to build {event_type} junctions. Found: {sorted(columns)}. "
+            f"This usually means the file is not rMATS-turbo {event_type} output, or "
+            f"the format changed."
+        )
+
+
 def _rmats_event_feature_types(event_type):
     """Feature type per junction returned by _rmats_event_junctions(), in order.
 
@@ -289,6 +321,8 @@ def rmats2junctions(rmats_dir):
                            f"events will be analysed.")
             continue
         df = pd.read_csv(path, sep='\t')
+        _check_rmats_columns(event_type, df.columns, path)
+        malformed = 0
         for _, r in df.iterrows():
             gene_ensembl_id = _clean_ensembl_id(r['GeneID'])
             gene_symbol = str(r['geneSymbol']).strip().strip('"')
@@ -299,13 +333,21 @@ def rmats2junctions(rmats_dir):
             cluster_name = f'{event_type}_{gene_ensembl_id}_{chromosome}_{idx}'
             try:
                 event_junctions = _rmats_event_junctions(event_type, r)
-            except (KeyError, ValueError, TypeError):
-                continue  # malformed / incomplete row - skip it
+            except (ValueError, TypeError):
+                # A single row with an unparseable coordinate. Counted and reported
+                # below rather than passed over in silence: the columns are known to
+                # exist by now, so this is bad data in one row, not a schema problem.
+                malformed += 1
+                continue
             feature_types = _rmats_event_feature_types(event_type)
             for position, (start, end) in enumerate(event_junctions):
                 feature_type = FEATURE_JUNCTION if feature_types is None else feature_types[position]
                 junctions.append([chromosome, gene_ensembl_id, gene_symbol,
                                   event_type, start, end, cluster_name, feature_type])
+
+        if malformed:
+            logger.warning(f"{os.path.basename(path)}: skipped {malformed} of {len(df)} "
+                           f"{event_type} row(s) with unparseable coordinates.")
 
     if not junctions:
         raise ValueError(f"No rMATS MATS.JC.txt events found under {rmats_dir}")
@@ -444,15 +486,26 @@ def ioe2junctions(file_path):
                                   cluster_name, FEATURE_RETAINED_INTRON])
                 retained_intron_events += 1
         elif event_type == 'SE':
-            # SE is giving the junction between the skipped exon and the flanking exons, so we need to add the junction between the flanking exons
+            # SE:<chr>:<e1>-<s2>:<e2>-<s3> names the two INCLUSION junctions - the
+            # skipped exon to each flanking exon - and leaves the skipping junction
+            # (e1-s3) to be constructed. All three are emitted.
+            #
+            # The second inclusion junction used to be dropped: it supplied only its
+            # right coordinate to the constructed skipping junction and was never
+            # added in its own right, so SUPPA produced 2 junctions where rMATS
+            # produces 3 for the same event (verified across all 51,450 SE clusters
+            # of events_SE_strict.ioe). A transcript carrying only that downstream
+            # junction - an alternative first exon starting inside the skipped exon -
+            # was therefore comparable when the event came from rMATS but not from
+            # SUPPA. See tests/test_cross_format.py.
             if len(current_junctions) != 2:
                 continue
-            start_short, end_short = current_junctions[0]
-            start_long, end_long = current_junctions[0][0], current_junctions[1][1]
-            junctions.append([chromosome, gene_ensembl_id, event_type, start_short, end_short,
-                              cluster_name, FEATURE_JUNCTION])
-            junctions.append([chromosome, gene_ensembl_id, event_type, start_long, end_long,
-                              cluster_name, FEATURE_JUNCTION])
+            upstream_inclusion = current_junctions[0]
+            downstream_inclusion = current_junctions[1]
+            skipping = (current_junctions[0][0], current_junctions[1][1])
+            for start, end in (upstream_inclusion, downstream_inclusion, skipping):
+                junctions.append([chromosome, gene_ensembl_id, event_type, start, end,
+                                  cluster_name, FEATURE_JUNCTION])
         else:
             for start, end in current_junctions:
                 junctions.append([chromosome, gene_ensembl_id, event_type, start, end,
