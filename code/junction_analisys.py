@@ -69,7 +69,9 @@ def select_most_like_canonical(comparable_transcript_ids, canonical_transcript_i
     Qualifying is a hard filter, not a preference: a single qualifying candidate is
     taken even if a disqualified one has a longer CDS. Among several qualifying
     candidates the longest-CDS one is taken, ties broken by transcript id for
-    determinism.
+    determinism. `comparable_transcript_ids` is expected to have been reduced to the
+    protein-coding candidates already (step 1 of the priority) - this function
+    implements steps 2 and 3 only.
 
     Returns None when no candidate qualifies - the flag then goes unset rather than
     falling back to the longest-CDS candidate, which is_longest_cds already marks in
@@ -797,9 +799,14 @@ class ClusterAnalysisResult:
 
         Phase 1.5 - tag each comparable transcript with whether it's the one the
         longest-CDS rule and/or the most-like-canonical rule (see
-        select_most_like_canonical()) would pick - none are skipped. Exactly one
+        select_most_like_canonical()) would pick - none are skipped. Both rules run
+        over the protein-coding candidates where there are any (step 1 of the
+        priority), falling through to all of them where there are none. Exactly one
         transcript is tagged is_longest_cds; is_most_like_canonical is left unset
         across the whole cluster when no transcript qualifies.
+
+        "Longest CDS" means the coding length in bases, not the genomic span from
+        cds_start to cds_end - see cds_length_by_transcript below.
 
         Phase 2/3 - for each transcript with a unique junction, determine the
         relevant genomic window and compare its domains against the canonical
@@ -826,13 +833,27 @@ class ClusterAnalysisResult:
             if tid is not None and not pd.isna(tid) and tid not in invalid_ids
         ]
 
-        # CDS length per transcript id, for the longest-CDS tag below. Missing
-        # cds_start/cds_end yields NaN here, normalized to -1 so such transcripts
-        # are deprioritized rather than breaking the max() comparison.
-        cds_length_by_transcript = {
-            tid: (length if pd.notna(length) else -1)
-            for tid, length in zip(combined_ids, df_gene_transcripts.cds_end - df_gene_transcripts.cds_start)
-        }
+        # Transcripts carrying an annotated protein. The v1 priority puts
+        # protein-coding first, ahead of most-like-canonical and longest CDS: a
+        # transcript with no protein has no domains, so comparing it to the
+        # canonical one trivially "drops" every domain, and flagging it as the
+        # transcript that best represents the event is misleading. DoChaP
+        # populates cds_start/cds_end for non-coding transcripts too, so CDS
+        # length cannot stand in for this test - protein-id presence is the signal.
+        #
+        # Absent columns mean "unknown", not "non-coding": a caller building
+        # df_gene_transcripts by hand should not silently lose every candidate.
+        protein_columns = [c for c in ('protein_ensembl_id', 'protein_refseq_id')
+                           if c in df_gene_transcripts.columns]
+        if protein_columns:
+            has_protein = pd.Series(False, index=df_gene_transcripts.index)
+            for column in protein_columns:
+                values = df_gene_transcripts[column]
+                has_protein |= values.notna() & ~values.astype(str).str.strip().isin(
+                    ['', 'nan', 'None'])
+            coding_by_transcript = dict(zip(combined_ids, has_protein))
+        else:
+            coding_by_transcript = {tid: True for tid in combined_ids}
 
         gene_canonical_ids = canonical_transcript_ids.intersection(gene_transcript_ids)
         if not gene_canonical_ids:
@@ -853,6 +874,23 @@ class ClusterAnalysisResult:
             transcript_id: exon_lookup(transcript_id)
             for transcript_id in gene_transcript_ids
         }
+
+        # CDS length per transcript, for the longest-CDS tag below: the coding
+        # length in bases, taken as the largest CDS-relative exon offset.
+        # cds_end - cds_start, used previously, is a GENOMIC span that counts the
+        # introns between the first and last coding exon - a median of ~10x the
+        # coding length - so it ranked transcripts partly by intron content rather
+        # than by the size of the protein it was meant to stand in for. Interior
+        # coding exons are wholly coding, so the largest abs_end_CDS equals the
+        # summed exonic CDS (verified equal on 4,000 coding transcripts).
+        cds_length_by_transcript = {}
+        for transcript_id, exons in transcript_exons.items():
+            length = -1
+            if len(exons) and 'abs_end_CDS' in exons.columns:
+                largest_offset = pd.to_numeric(exons['abs_end_CDS'], errors='coerce').max()
+                if pd.notna(largest_offset):
+                    length = largest_offset
+            cds_length_by_transcript[transcript_id] = length
 
         transcript_junctions = {
             transcript_id: find_matching_junction_indices(exons, self.junctions, strand=self.strand or '+',
@@ -895,12 +933,20 @@ class ClusterAnalysisResult:
         longest_cds_transcript_id = None
         most_like_canonical_transcript_id = None
         if comparable_transcript_ids:
+            # Step 1 of the priority: prefer protein-coding candidates. A priority,
+            # not a hard filter - where no candidate is coding they all tie here and
+            # selection falls through to the structural and length steps, so a
+            # cluster still resolves to one transcript rather than none.
+            coding_candidates = [tid for tid in comparable_transcript_ids
+                                 if coding_by_transcript.get(tid, True)]
+            selection_candidates = coding_candidates or comparable_transcript_ids
+
             longest_cds_transcript_id = max(
-                comparable_transcript_ids,
+                selection_candidates,
                 key=lambda tid: (cds_length_by_transcript.get(tid, -1), tid),
             )
             most_like_canonical_transcript_id = select_most_like_canonical(
-                comparable_transcript_ids, self.canonical_transcript_id, transcript_exons,
+                selection_candidates, self.canonical_transcript_id, transcript_exons,
                 self.junctions, cds_length_by_transcript,
             )
 

@@ -951,3 +951,92 @@ def test_voila_lsv_without_intron_retention_is_all_junctions():
 
     assert len(df) == 2
     assert set(df[utils.FEATURE_TYPE_COLUMN]) == {utils.FEATURE_JUNCTION}
+
+
+# ---------------------------------------------------------------------------
+# Selection step 1: protein-coding, and the CDS-length metric
+# ---------------------------------------------------------------------------
+
+def _selection_fixture(protein_ids, cds_offsets):
+    """Two comparable candidates plus canonical. `protein_ids` maps transcript id to
+    its protein_ensembl_id ('' for non-coding); `cds_offsets` maps it to the exons'
+    largest abs_end_CDS, i.e. the coding length the selection sees."""
+    ids = ['CANON', 'ENST_A', 'ENST_B']
+    df_gene_transcripts = pd.DataFrame({
+        'transcript_ensembl_id': ids,
+        'transcript_refseq_id': [None] * 3,
+        'canonical': [1, 0, 0],
+        'cds_start': [0, 0, 0],
+        'cds_end': [1000, 1000, 1000],
+        'protein_ensembl_id': [protein_ids.get(i, 'ENSP1') for i in ids],
+        'protein_refseq_id': [None] * 3,
+    })
+    canonical_exons = _two_exon_df((1, 0, 100), (2, 200, 300))
+    canonical_exons['abs_start_CDS'] = [1, 51]
+    canonical_exons['abs_end_CDS'] = [50, cds_offsets.get('CANON', 100)]
+
+    exons_by_id = {'CANON': canonical_exons}
+    for tid in ('ENST_A', 'ENST_B'):
+        # both candidates match junction 1 only -> both comparable
+        exons = _two_exon_df((1, 250, 300), (2, 400, 500))
+        exons['abs_start_CDS'] = [1, 51]
+        exons['abs_end_CDS'] = [50, cds_offsets[tid]]
+        exons_by_id[tid] = exons
+    return df_gene_transcripts, exons_by_id
+
+
+def _run_selection(df_gene_transcripts, exons_by_id):
+    empty_domains = pd.DataFrame(columns=['AA_start', 'AA_end'] + DOMAIN_NAME_COLUMNS)
+    cluster_result = ClusterAnalysisResult('cluster_1', 'ENSG_TEST', 'TESTGENE')
+    cluster_result.junctions = [(100, 200), (300, 400)]
+    cluster_result.analyze(
+        df_gene_transcripts, canonical_transcript_ids={'CANON'},
+        exon_lookup=lambda tid: exons_by_id[tid], domain_lookup=lambda tid: empty_domains,
+    )
+    df = cluster_result.get_results_df()
+    def tagged(col):
+        ids = set(df.loc[df[col] == True, 'transcript_id'].dropna())
+        return ids.pop() if ids else None
+    return tagged('is_longest_cds'), tagged('is_most_like_canonical')
+
+
+def test_selection_prefers_protein_coding_over_longer_cds():
+    """Step 1 of the priority: a non-coding candidate is not selected even when it
+    has the longer CDS. A transcript with no protein has no domains, so comparing it
+    trivially reports every canonical domain as dropped."""
+    df, exons = _selection_fixture(protein_ids={'ENST_A': ''},          # A non-coding
+                                   cds_offsets={'ENST_A': 900, 'ENST_B': 300})
+    longest, most_like = _run_selection(df, exons)
+    assert longest == 'ENST_B', f"non-coding ENST_A must not win on length, got {longest}"
+    assert most_like == 'ENST_B', most_like
+
+
+def test_selection_falls_back_when_no_candidate_is_coding():
+    """Where no candidate is coding they tie on step 1 and selection falls through,
+    so the cluster still resolves to one transcript rather than none."""
+    df, exons = _selection_fixture(protein_ids={'ENST_A': '', 'ENST_B': ''},
+                                   cds_offsets={'ENST_A': 900, 'ENST_B': 300})
+    longest, most_like = _run_selection(df, exons)
+    assert longest == 'ENST_A', f"expected the longest of the non-coding pair, got {longest}"
+    assert most_like is not None
+
+
+def test_selection_without_protein_columns_does_not_filter():
+    """Absent protein columns mean "unknown", not "non-coding" - a caller building
+    df_gene_transcripts by hand must not silently lose every candidate."""
+    df, exons = _selection_fixture(protein_ids={}, cds_offsets={'ENST_A': 900, 'ENST_B': 300})
+    df = df.drop(columns=['protein_ensembl_id', 'protein_refseq_id'])
+    longest, _ = _run_selection(df, exons)
+    assert longest == 'ENST_A', longest
+
+
+def test_cds_length_is_coding_length_not_genomic_span():
+    """The longest-CDS tag ranks by coding length (largest abs_end_CDS), not by
+    cds_end - cds_start, which is a genomic span counting the introns between the
+    first and last coding exon - a median of ~10x the coding length. Here both
+    candidates carry the SAME cds_start/cds_end, so a genomic-span metric could not
+    separate them at all; only the exonic offsets can."""
+    df, exons = _selection_fixture(protein_ids={}, cds_offsets={'ENST_A': 120, 'ENST_B': 800})
+    assert (df.cds_end - df.cds_start).nunique() == 1, "fixture: genomic spans are equal"
+    longest, _ = _run_selection(df, exons)
+    assert longest == 'ENST_B', f"expected the longer coding length, got {longest}"
