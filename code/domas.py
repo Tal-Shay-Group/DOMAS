@@ -41,7 +41,7 @@ def parse_args():
                               "(only used with -format leafcutter)")
     parser.add_argument("-specie", required=False, choices=sorted(alternative_splicing.utils.SPECIE_DB_NAME),
                          help="Species the input was produced from. Allowed values: "
-                              "human, mouse, rat, zebrafish, frog. Required for every "
+                              "human, mouse, rat. Required for every "
                               "format except hadas, which is a human/mouse comparison and "
                               "carries the species per row. rMATS, MAJIQ and SUPPA files "
                               "contain no species field at all, so it cannot be read from "

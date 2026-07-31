@@ -29,8 +29,6 @@ SPECIES = {
     "H_sapiens":    {"up": "UP000005640_9606",  "afdb": "UP000005640_9606_HUMAN_v4",  "ensembl": "homo_sapiens"},
     "M_musculus":   {"up": "UP000000589_10090", "afdb": "UP000000589_10090_MOUSE_v4", "ensembl": "mus_musculus"},
     "R_norvegicus": {"up": "UP000002494_10116", "afdb": "UP000002494_10116_RAT_v4",   "ensembl": "rattus_norvegicus"},
-    "D_rerio":      {"up": "UP000000437_7955",  "afdb": "UP000000437_7955_DANRE_v4",  "ensembl": "danio_rerio"},
-    "X_tropicalis": {"up": "UP000008143_8364",  "afdb": "UP000008143_8364_XENTR_v4",  "ensembl": "xenopus_tropicalis"},
 }
 
 _UNIPROT_BASE = ("https://ftp.uniprot.org/pub/databases/uniprot/current_release/"

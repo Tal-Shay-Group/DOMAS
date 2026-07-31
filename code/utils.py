@@ -30,10 +30,11 @@ _RMATS_EVENT_FILES = {
 # Gene identity.
 #
 # DoChaP identifies a gene by gene_ensembl_id OR gene_GeneID_id (the NCBI/RefSeq
-# side). 16,672 of 128,454 genes - 13%, and over 20% in D_rerio and X_tropicalis -
-# carry ONLY a GeneID, so a lookup keyed on gene_ensembl_id alone silently drops
-# them along with all 36,441 of their transcripts. Absent ids are stored as NULL,
-# never as an empty string.
+# side). 16,672 of 128,454 genes - 13% - carry ONLY a GeneID, so a lookup keyed on
+# gene_ensembl_id alone silently drops them along with all of their transcripts.
+# Absent ids are stored as NULL, never as an empty string. (The share was highest
+# in D_rerio and X_tropicalis, since dropped - see RETIRED_SPECIE_DB_NAME - but it
+# is still 4,515 genes across the three supported species.)
 #
 # The junctions frame keeps one 'gene_ensembl_id' column holding whichever id the
 # input supplied; these helpers let a lookup accept either kind, mirroring the
@@ -90,7 +91,7 @@ def _optional_junction_defaults():
         FEATURE_TYPE_COLUMN: FEATURE_JUNCTION,
     }
 
-# The species DOMAS knows, mapping the label carried on the junctions frame to
+# The species DOMAS supports, mapping the label carried on the junctions frame to
 # the DoChaP Genes.specie value. Lives here rather than in alternative_splicing.py
 # so that junction_analisys.py can cross-check the stated species against the
 # database without importing it (which would be circular).
@@ -98,16 +99,29 @@ SPECIE_DB_NAME = {
     'human': 'H_sapiens',
     'mouse': 'M_musculus',
     'rat': 'R_norvegicus',
-    'zebrafish': 'D_rerio',
-    'frog': 'X_tropicalis',
 }
 
 SPECIE_FROM_DB_NAME = {db_name: label for label, db_name in SPECIE_DB_NAME.items()}
 
+# Dropped from support. DOMAS compares every transcript against its gene's
+# canonical one, and NCBI publishes no representative-transcript tag (MANE
+# Select or RefSeq Select) for these two, so DoChaP can only mark a canonical
+# where Ensembl supplies one - never for a gene that exists on the RefSeq side
+# alone. They are still recognised by name and by gene-id prefix purely so a
+# run on such data fails with an explanation instead of silently analysing it
+# as another species.
+RETIRED_SPECIE_DB_NAME = {
+    'zebrafish': 'D_rerio',
+    'frog': 'X_tropicalis',
+}
+
 
 # Ensembl stamps the species into its gene ids. Longest-prefix-first is not
 # needed - 'ENSMUSG...' does not start with 'ENSG' - but the order is kept
-# explicit so adding a species cannot silently shadow another.
+# explicit so adding a species cannot silently shadow another. The retired
+# species stay listed: dropping them would make their ids underivable, and an
+# underived species is indistinguishable from a GeneID-keyed gene, which is
+# exactly the case normalize_junctions_frame lets pass.
 _ENSEMBL_GENE_PREFIX_SPECIE = (
     ('ENSMUSG', 'mouse'),
     ('ENSRNOG', 'rat'),
@@ -115,6 +129,19 @@ _ENSEMBL_GENE_PREFIX_SPECIE = (
     ('ENSXETG', 'frog'),
     ('ENSG', 'human'),
 )
+
+
+def _reject_retired(species_labels, context):
+    """Abort when any of `species_labels` names a dropped species."""
+    retired = sorted({s for s in species_labels if s in RETIRED_SPECIE_DB_NAME})
+    if retired:
+        raise ValueError(
+            f"{', '.join(retired)} {'is' if len(retired) == 1 else 'are'} no longer "
+            f"supported by DOMAS ({context}). DoChaP has no canonical transcript for "
+            f"genes that exist only on the RefSeq side in these species, so there is "
+            f"nothing to compare against. Supported species: "
+            f"{', '.join(sorted(SPECIE_DB_NAME))}."
+        )
 
 
 def specie_from_gene_id(gene_id):
@@ -162,8 +189,13 @@ def normalize_junctions_frame(df, specie=None):
     derived = df['gene_ensembl_id'].map(specie_from_gene_id)
     if specie is None:
         df['specie'] = df['specie'].fillna(derived) if df['specie'].notna().any() else derived
+        # Without a stated species the conflict check below never runs, so this is
+        # the only place a retired species gets caught before its rows are analysed
+        # against a database that holds no canonical transcript for them.
+        _reject_retired(df['specie'].dropna().unique(), 'derived from the input gene ids')
         return df
 
+    _reject_retired([specie], 'requested with -specie')
     if specie not in SPECIE_DB_NAME:
         raise ValueError(f"Unknown specie {specie!r}. Expected one of: "
                          f"{', '.join(sorted(SPECIE_DB_NAME))}.")

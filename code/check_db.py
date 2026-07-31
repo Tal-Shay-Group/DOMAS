@@ -40,8 +40,6 @@ SPECIE_TO_ENSEMBL = {
     'H_sapiens': 'homo_sapiens',
     'M_musculus': 'mus_musculus',
     'R_norvegicus': 'rattus_norvegicus',
-    'D_rerio': 'danio_rerio',
-    'X_tropicalis': 'xenopus_tropicalis',
 }
 
 

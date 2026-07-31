@@ -547,7 +547,7 @@ def parse_args(argv=None):
                         help="Output sqlite path for -build (default: <data_dir>/enrichment.sqlite).")
     parser.add_argument("-species", type=str, default=None,
                         help="Comma-separated species subset for -download/-build "
-                             "(default: all; choices: H_sapiens,M_musculus,R_norvegicus,D_rerio).")
+                             "(default: all; choices: H_sapiens,M_musculus,R_norvegicus).")
     parser.add_argument("-only", type=str, default=None,
                         help="Comma-separated source subset for -download/-build "
                              "(default: all; choices: uniprot,afdb,ensembl,pfam).")

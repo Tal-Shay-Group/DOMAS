@@ -92,7 +92,7 @@ def summarize(df, label, cols=SOURCE_COLUMNS):
     return summary, cooccurrence, either_n
 
 
-SPECIES = ['D_rerio', 'H_sapiens', 'M_musculus', 'R_norvegicus', 'X_tropicalis']
+SPECIES = ['H_sapiens', 'M_musculus', 'R_norvegicus']
 
 # (label, filter applied to df_t, a DataFrame of Transcripts joined with Genes)
 SCOPES = [("Entire DB", None)]

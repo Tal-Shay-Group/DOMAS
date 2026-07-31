@@ -1204,11 +1204,35 @@ def test_specie_derived_for_the_tool_formats():
     frames had no specie column at all - and clusters are grouped by
     (specie, cluster_name), so a multi-species run merged same-named clusters."""
     import utils
-    df = pd.DataFrame({'gene_ensembl_id': ['ENSG1', 'ENSMUSG2', 'ENSDARG3'],
+    df = pd.DataFrame({'gene_ensembl_id': ['ENSG1', 'ENSMUSG2', 'ENSRNOG3'],
                        'start_position': [1, 1, 1], 'end_position': [2, 2, 2],
                        'cluster_name': ['c', 'c', 'c']})
     out = utils.normalize_junctions_frame(df)
-    assert list(out['specie']) == ['human', 'mouse', 'zebrafish']
+    assert list(out['specie']) == ['human', 'mouse', 'rat']
+
+
+def test_retired_species_are_rejected_not_silently_analysed():
+    """zebrafish and frog were dropped (no MANE/RefSeq Select, so no canonical to
+    compare against). Their ids must still be derivable: an underived species is
+    indistinguishable from a GeneID-keyed gene, which normalize lets pass, so
+    dropping the prefixes would turn a hard stop into a silent wrong-species run."""
+    import utils
+    assert utils.specie_from_gene_id('ENSDARG3') == 'zebrafish'
+    assert utils.specie_from_gene_id('ENSXETG4') == 'frog'
+
+    def frame(gene_id):
+        return pd.DataFrame({'gene_ensembl_id': [gene_id], 'start_position': [1],
+                             'end_position': [2], 'cluster_name': ['c']})
+
+    # derived from the ids, with no -specie stated
+    with pytest.raises(ValueError, match='no longer supported'):
+        utils.normalize_junctions_frame(frame('ENSDARG3'))
+    # asked for explicitly
+    with pytest.raises(ValueError, match='no longer supported'):
+        utils.normalize_junctions_frame(frame('ENSG1'), specie='frog')
+    # stated as a supported species, but the ids say otherwise
+    with pytest.raises(ValueError, match='does not match'):
+        utils.normalize_junctions_frame(frame('ENSDARG3'), specie='human')
 
 
 def test_cluster_grouping_keeps_rows_whose_specie_cannot_be_derived():

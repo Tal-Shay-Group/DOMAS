@@ -40,10 +40,6 @@ SPECIES_ALIASES = {
     'human': 'H_sapiens',
     'm_musculus': 'M_musculus',
     'mouse': 'M_musculus',
-    'Frog': 'X_tropicalis',
-    'x_tropicalis': 'X_tropicalis',
-    'zebrafish': 'D_rerio',
-    'd_rerio': 'D_rerio',
     'rat': 'R_norvegicus',
     'r_norvegicus': 'R_norvegicus',   
 }
