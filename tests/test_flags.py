@@ -580,9 +580,11 @@ def test_gene_not_in_database():
     assert cluster_result.events[0][0] == 'gene_not_in_db'
 
 
-def test_no_canonical_transcript_when_gene_in_db():
-    """When a gene IS in the database but has no canonical transcripts,
-    the 'no_canonical_transcript' event is added (not 'gene_not_in_db')."""
+def test_no_canonical_transcript_falls_back_instead_of_skipping():
+    """A gene that IS in the database but has no canonical transcript is no longer
+    skipped: the longest-CDS transcript stands in as canonical, so 'no_canonical_transcript'
+    is not what comes back. (Here the exons are empty, so the run stops one step later
+    at 'no_canonical_features' - the point is that it got past canonical selection.)"""
     cluster_result = ClusterAnalysisResult('TEST_1', 'ENSG12345678', 'KNOWNGENE', specie='H_sapiens')
     # DataFrame with transcripts but no canonical ones (empty canonical_transcript_ids)
     df_with_transcripts = pd.DataFrame({
@@ -599,7 +601,31 @@ def test_no_canonical_transcript_when_gene_in_db():
         domain_lookup=lambda x: pd.DataFrame(),
     )
 
-    # Should have exactly one event: no_canonical_transcript (not gene_not_in_db)
+    assert cluster_result.canonical_transcript_id in {'ENST00000001', 'ENST00000002'}
+    assert [e[0] for e in cluster_result.events] != ['no_canonical_transcript']
+
+
+def test_no_canonical_transcript_when_no_usable_transcript_id():
+    """The 'no_canonical_transcript' event survives for the one case the fallback
+    cannot cover: a gene row present in the database, but with no usable transcript
+    id to stand in as canonical."""
+    cluster_result = ClusterAnalysisResult('TEST_1', 'ENSG12345678', 'KNOWNGENE', specie='H_sapiens')
+    # Present in the DB, but neither an ensembl nor a refseq id on any row - the
+    # placeholder ids are dropped, leaving nothing to choose between.
+    df_with_transcripts = pd.DataFrame({
+        'transcript_ensembl_id': [None, None],
+        'transcript_refseq_id': [None, None],
+        'cds_start': [100, 200],
+        'cds_end': [500, 600]
+    })
+
+    cluster_result.analyze(
+        df_gene_transcripts=df_with_transcripts,
+        canonical_transcript_ids=set(),
+        exon_lookup=lambda x: pd.DataFrame(),
+        domain_lookup=lambda x: pd.DataFrame(),
+    )
+
     assert len(cluster_result.events) == 1
     assert cluster_result.events[0][0] == 'no_canonical_transcript'
 

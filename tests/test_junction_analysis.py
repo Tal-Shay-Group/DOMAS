@@ -1003,6 +1003,55 @@ def _run_selection(df_gene_transcripts, exons_by_id):
     return tagged('is_longest_cds'), tagged('is_most_like_canonical')
 
 
+def _run_without_canonical(df_gene_transcripts, exons_by_id):
+    """Same fixture, but with no transcript flagged canonical - so the longest-CDS
+    fallback has to choose one. Returns the ClusterAnalysisResult."""
+    empty_domains = pd.DataFrame(columns=['AA_start', 'AA_end'] + DOMAIN_NAME_COLUMNS)
+    cluster_result = ClusterAnalysisResult('cluster_1', 'ENSG_TEST', 'TESTGENE')
+    cluster_result.junctions = [(100, 200), (300, 400)]
+    cluster_result.analyze(
+        df_gene_transcripts, canonical_transcript_ids=set(),
+        exon_lookup=lambda tid: exons_by_id[tid], domain_lookup=lambda tid: empty_domains,
+    )
+    return cluster_result
+
+
+def test_no_canonical_falls_back_to_longest_cds():
+    """With no canonical transcript flagged for the gene, the longest-CDS transcript
+    stands in, so the cluster is analyzed instead of dropped."""
+    df, exons = _selection_fixture(protein_ids={},
+                                   cds_offsets={'ENST_A': 900, 'ENST_B': 300})
+    cluster_result = _run_without_canonical(df, exons)
+    assert cluster_result.canonical_transcript_id == 'ENST_A'
+    assert 'no_canonical_transcript' not in {e[0] for e in cluster_result.events}
+
+
+def test_no_canonical_fallback_prefers_protein_coding():
+    """The fallback follows the same priority as the longest-CDS tag: a non-coding
+    transcript does not become the stand-in canonical just for being longer. It has
+    no domains, so every canonical domain would trivially read as dropped."""
+    df, exons = _selection_fixture(protein_ids={'ENST_A': ''},        # A non-coding
+                                   cds_offsets={'ENST_A': 900, 'ENST_B': 300})
+    cluster_result = _run_without_canonical(df, exons)
+    assert cluster_result.canonical_transcript_id == 'ENST_B', \
+        f"non-coding ENST_A must not become canonical on length, got {cluster_result.canonical_transcript_id}"
+
+
+def test_canonical_flag_wins_over_longer_cds():
+    """The fallback is only for genes with no canonical at all - where one IS
+    flagged, it stays canonical even though another transcript has a longer CDS."""
+    df, exons = _selection_fixture(protein_ids={},
+                                   cds_offsets={'CANON': 100, 'ENST_A': 900, 'ENST_B': 300})
+    empty_domains = pd.DataFrame(columns=['AA_start', 'AA_end'] + DOMAIN_NAME_COLUMNS)
+    cluster_result = ClusterAnalysisResult('cluster_1', 'ENSG_TEST', 'TESTGENE')
+    cluster_result.junctions = [(100, 200), (300, 400)]
+    cluster_result.analyze(
+        df, canonical_transcript_ids={'CANON'},
+        exon_lookup=lambda tid: exons[tid], domain_lookup=lambda tid: empty_domains,
+    )
+    assert cluster_result.canonical_transcript_id == 'CANON'
+
+
 def test_selection_prefers_protein_coding_over_longer_cds():
     """Step 1 of the priority: a non-coding candidate is not selected even when it
     has the longer CDS. A transcript with no protein has no domains, so comparing it
@@ -1477,3 +1526,56 @@ def test_get_exons_for_transcripts_empty_matches_populated_shape(db_path):
 
     assert len(populated) > 0, "fixture transcript should have exons"
     assert list(empty.columns) == list(populated.columns)
+
+
+# ---------------------------------------------------------------------------
+# Canonical precedence when a gene has more than one canonical transcript.
+# ---------------------------------------------------------------------------
+
+def _canonical_pick(canonical_ids, canonical_rank):
+    """Which transcript analyze() adopts as the gene's canonical one."""
+    df_gene_transcripts = pd.DataFrame({
+        'transcript_ensembl_id': ['ENST_AAA', 'ENST_BBB', 'ENST_CCC'],
+        'transcript_refseq_id': [None, None, None],
+        'canonical': [canonical_rank.get(t, 0) for t in ('ENST_AAA', 'ENST_BBB', 'ENST_CCC')],
+        'cds_start': [0, 0, 0],
+        'cds_end': [1000, 1000, 1000],
+    })
+    exons = _two_exon_df((1, 0, 100), (2, 200, 300))
+    exons['abs_start_CDS'] = [1, 51]
+    exons['abs_end_CDS'] = [50, 100]
+    empty_domains = pd.DataFrame(columns=['AA_start', 'AA_end'] + DOMAIN_NAME_COLUMNS)
+
+    cluster_result = ClusterAnalysisResult('cluster_1', 'ENSG_TEST', 'TESTGENE')
+    cluster_result.junctions = [(100, 200)]
+    cluster_result.analyze(
+        df_gene_transcripts, canonical_transcript_ids=set(canonical_ids),
+        exon_lookup=lambda tid: exons, domain_lookup=lambda tid: empty_domains,
+        canonical_rank=canonical_rank,
+    )
+    return cluster_result.canonical_transcript_id
+
+
+def test_canonical_precedence_prefers_both_then_ensembl_then_refseq():
+    """DoChaP flags 1=RefSeq, 2=Ensembl, 3=both. Reading RefSeq Select gave ~4,800
+    mouse and ~7,100 rat genes two canonical transcripts, so the pick must be
+    ordered, not alphabetical: both-sources first, then Ensembl, then RefSeq.
+    The lowest id would pick ENST_AAA in every case below."""
+    # RefSeq-flagged AAA vs Ensembl-flagged BBB -> Ensembl wins
+    assert _canonical_pick(['ENST_AAA', 'ENST_BBB'],
+                           {'ENST_AAA': 1, 'ENST_BBB': 2}) == 'ENST_BBB'
+    # Ensembl-flagged AAA vs both-flagged BBB -> both wins
+    assert _canonical_pick(['ENST_AAA', 'ENST_BBB'],
+                           {'ENST_AAA': 2, 'ENST_BBB': 3}) == 'ENST_BBB'
+    # all three ranks present -> the 3 wins
+    assert _canonical_pick(['ENST_AAA', 'ENST_BBB', 'ENST_CCC'],
+                           {'ENST_AAA': 1, 'ENST_BBB': 2, 'ENST_CCC': 3}) == 'ENST_CCC'
+
+
+def test_canonical_precedence_ties_and_missing_rank_keep_lowest_id():
+    """Equal flags, and the no-rank path used by callers that pass only a set,
+    both keep the previous behaviour: the lowest id, never hash order."""
+    assert _canonical_pick(['ENST_AAA', 'ENST_BBB'],
+                           {'ENST_AAA': 2, 'ENST_BBB': 2}) == 'ENST_AAA'
+    assert _canonical_pick(['ENST_BBB', 'ENST_AAA'],
+                           {'ENST_AAA': 3, 'ENST_BBB': 3}) == 'ENST_AAA'

@@ -53,6 +53,18 @@ def _outside_range_exon_set(df_exons, min_bp, max_bp):
     return _exon_coord_set(outside)
 
 
+def select_longest_cds(candidate_ids, cds_length_by_transcript):
+    """
+    The longest-CDS transcript among `candidate_ids`. Ties fall to the lowest id,
+    so the choice does not depend on Python's per-process string hash seed.
+
+    @param candidate_ids: transcript ids to choose between (must be non-empty)
+    @param cds_length_by_transcript: dict {transcript_id: coding length in bases}
+    @return: the chosen transcript id
+    """
+    return max(candidate_ids, key=lambda tid: (cds_length_by_transcript.get(tid, -1), tid))
+
+
 def select_most_like_canonical(comparable_transcript_ids, canonical_transcript_id, transcript_exons, junctions,
                                 cds_length_by_transcript):
     """
@@ -874,6 +886,9 @@ class ClusterAnalysisResult:
         Phase 1 - find the canonical transcript and, for every other transcript
         of the gene, the junctions (if any) that match its exon structure and
         the subset of those that are unique compared to the canonical transcript.
+        Where DoChaP flags no canonical transcript for the gene, the longest-CDS
+        transcript stands in for it (protein-coding candidates first), so the
+        cluster is still analyzed rather than dropped.
 
         Phase 1.5 - tag each comparable transcript with whether it's the one the
         longest-CDS rule and/or the most-like-canonical rule (see
@@ -947,36 +962,10 @@ class ClusterAnalysisResult:
         else:
             coding_by_transcript = {tid: True for tid in combined_ids}
 
-        gene_canonical_ids = canonical_transcript_ids.intersection(gene_transcript_ids)
-        if not gene_canonical_ids:
-            self.add_event('no_canonical_transcript')
-            logger.debug(f"No canonical transcript found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
-            return
         if len(gene_transcript_ids) == 1:
             self.add_event('only_one_transcript')
             logger.debug(f"Only one transcript found for cluster {self.cluster_name}, specie {self.specie}.")
             return
-        # A gene can carry more than one canonical transcript, common outside human:
-        # ~4,800 mouse and ~7,100 rat genes have one transcript flagged by RefSeq
-        # (canonical=1) and a different one by Ensembl (canonical=2). Human rarely
-        # does - MANE makes the two agree, merging them into one canonical=3 row.
-        #
-        # Prefer the transcript both sources agree on (3), then Ensembl's (2), then
-        # RefSeq's (1). DoChaP's CanonicalEnum values rank in that order, so the
-        # higher value wins; ties fall to the lowest id, independent of hash order.
-        ranked_ids = sorted(gene_canonical_ids)
-        if canonical_rank:
-            self.canonical_transcript_id = max(
-                ranked_ids, key=lambda tid: canonical_rank.get(tid, 0))
-        else:
-            self.canonical_transcript_id = ranked_ids[0]
-        if len(gene_canonical_ids) > 1:
-            logger.warning(
-                f"Multiple canonical transcripts found for cluster {self.cluster_name}, "
-                f"specie {self.specie}: "
-                f"{ {tid: canonical_rank.get(tid) for tid in ranked_ids} if canonical_rank else ranked_ids}. "
-                f"Using {self.canonical_transcript_id} (highest canonical flag, then lowest id)."
-            )
 
         transcript_exons = {
             transcript_id: exon_lookup(transcript_id)
@@ -997,6 +986,54 @@ class ClusterAnalysisResult:
                 if pd.notna(largest_offset):
                     length = largest_offset
             cds_length_by_transcript[transcript_id] = length
+
+        gene_canonical_ids = canonical_transcript_ids.intersection(gene_transcript_ids)
+        if not gene_canonical_ids:
+            # No transcript of this gene is flagged canonical in DoChaP - common for
+            # genes annotated by RefSeq alone, where neither MANE Select nor RefSeq
+            # Select names a representative. Rather than abandon the cluster, stand
+            # in the longest-CDS transcript, by the same rule that picks the
+            # longest-CDS comparable transcript below: protein-coding candidates
+            # first (a transcript with no protein has no domains to compare
+            # against), then the longest coding sequence, then the lowest id.
+            #
+            # This is a substitute, not an annotation: the comparisons it produces
+            # are between real transcripts, but "canonical" for such a cluster means
+            # DOMAS's choice, not a curated representative.
+            coding_ids = [tid for tid in gene_transcript_ids if coding_by_transcript.get(tid, True)]
+            fallback_candidates = coding_ids or gene_transcript_ids
+            if not fallback_candidates:
+                self.add_event('no_canonical_transcript')
+                logger.debug(f"No canonical transcript found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
+                return
+            self.canonical_transcript_id = select_longest_cds(fallback_candidates, cds_length_by_transcript)
+            logger.warning(
+                f"No canonical transcript for cluster {self.cluster_name}, specie {self.specie}. "
+                f"Using the longest-CDS transcript {self.canonical_transcript_id} "
+                f"(CDS {cds_length_by_transcript.get(self.canonical_transcript_id, -1)} bases) instead."
+            )
+        else:
+            # A gene can carry more than one canonical transcript, common outside human:
+            # ~4,800 mouse and ~7,100 rat genes have one transcript flagged by RefSeq
+            # (canonical=1) and a different one by Ensembl (canonical=2). Human rarely
+            # does - MANE makes the two agree, merging them into one canonical=3 row.
+            #
+            # Prefer the transcript both sources agree on (3), then Ensembl's (2), then
+            # RefSeq's (1). DoChaP's CanonicalEnum values rank in that order, so the
+            # higher value wins; ties fall to the lowest id, independent of hash order.
+            ranked_ids = sorted(gene_canonical_ids)
+            if canonical_rank:
+                self.canonical_transcript_id = max(
+                    ranked_ids, key=lambda tid: canonical_rank.get(tid, 0))
+            else:
+                self.canonical_transcript_id = ranked_ids[0]
+            if len(gene_canonical_ids) > 1:
+                logger.warning(
+                    f"Multiple canonical transcripts found for cluster {self.cluster_name}, "
+                    f"specie {self.specie}: "
+                    f"{ {tid: canonical_rank.get(tid) for tid in ranked_ids} if canonical_rank else ranked_ids}. "
+                    f"Using {self.canonical_transcript_id} (highest canonical flag, then lowest id)."
+                )
 
         transcript_junctions = {
             transcript_id: find_matching_junction_indices(exons, self.junctions, strand=self.strand or '+',
@@ -1047,10 +1084,8 @@ class ClusterAnalysisResult:
                                  if coding_by_transcript.get(tid, True)]
             selection_candidates = coding_candidates or comparable_transcript_ids
 
-            longest_cds_transcript_id = max(
-                selection_candidates,
-                key=lambda tid: (cds_length_by_transcript.get(tid, -1), tid),
-            )
+            longest_cds_transcript_id = select_longest_cds(
+                selection_candidates, cds_length_by_transcript)
             most_like_canonical_transcript_id = select_most_like_canonical(
                 selection_candidates, self.canonical_transcript_id, transcript_exons,
                 self.junctions, cds_length_by_transcript,
