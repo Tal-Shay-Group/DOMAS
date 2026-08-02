@@ -1,0 +1,19 @@
+# Runtime dependencies for the DOMAS analysis pipeline (code/domas.py).
+#
+# Python 3.9 or newer (the code compiles cleanly under 3.9; sqlite3 is in the
+# standard library and needs nothing here).
+#
+# Verified working with: pandas 2.3.3, numpy 2.0.2, matplotlib 3.9.4,
+# scipy 1.13.1, openpyxl 3.1.5.
+#
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+
+pandas>=2.0
+numpy>=1.24
+matplotlib>=3.7    # figures in results_stats.py and the -pdf gene reports
+scipy>=1.10        # results_stats.py only (chi2_contingency, norm)
+openpyxl>=3.1      # reading the hadas .xlsx input
+
+# Optional: only alphafold_benchmark/ needs this (Shrake-Rupley SASA). It is
+# imported lazily, so the analysis pipeline runs without it.
+# biopython>=1.81
