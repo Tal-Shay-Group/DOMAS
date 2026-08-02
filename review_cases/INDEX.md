@@ -1,173 +1,102 @@
 # Review cases — one example per decision the algorithm makes
 
-Picks re-derived against the reference outputs as of commit `85bf0b6` (the refreshed
-SUPPA fixture). Paths are relative to the repository root.
-
-`REF = tests/reference_outputs/<case>` — use the `restrict_False__representative_True`
-variant of each case unless a row says otherwise; the four flag variants differ only
-in PDF scope and representative-domain source.
-
-> The ioe fixture was refreshed in `85bf0b6` and now samples 2-transcript genes, so
-> multi-transcript examples come from `category_examples`. Every pick below was
-> re-derived after that change; earlier drafts of this file named clusters that no
-> longer exist.
-
-> **The PDFs are not in git.** `.gitignore` excludes `*.pdf` across the repository,
-> and the generated set is ~5 MB of reproducible output. Rebuild the three generated
-> format directories with:
+> **Generated file — do not edit by hand.** Rebuild with
+> `python3 tests/generate_review_index.py`.
 >
-> ```
-> python3 tests/generate_review_pdfs.py
-> ```
->
-> The reference PDFs under `tests/reference_outputs/` are produced by the test suite
-> itself — run `pytest tests/ -q` (add `--keep-test-output` to retain them).
+> The picks are properties of the output, so they stop being true when the
+> outputs move — which has happened both when a fixture was refreshed and when
+> DoChaP was rebuilt. Deriving them is what keeps this file honest.
+
+- reference outputs as of commit `f2adf69`
+- DoChaP database built `2026-07-31 09:29`
+- generated `2026-08-02 08:28`
+
+The PDFs are not in git (`.gitignore` excludes `*.pdf`). Rebuild them with
+`python3 tests/generate_reference_outputs.py` and
+`python3 tests/generate_review_pdfs.py`, then collect them into one directory
+with `python3 tests/collect_review_pdfs.py`.
 
 ---
 
 ## A. Choosing the comparable transcript
 
-Ladder: **protein-coding → most-like-canonical → longest CDS**. The first flag is
-left unset when nothing passes the outside-exon gate.
-
-| # | What it shows | Gene | Cluster | Case |
-| :-- | :--- | :--- | :--- | :--- |
-| A1 | `is_most_like_canonical` **set** (14 of 59 clusters) | RIMS4 | `A3_ENSG00000101098_20_67494` | ioe_csv |
-| A2 | `is_most_like_canonical` **unset** — no candidate passes the gate, only the longest-CDS flag is awarded (45 of 59) | IBSP | `A3_ENSG00000029559_4_18475` | ioe_csv |
-| A3 | Cluster containing a **non-coding** transcript — excluded from selection by step 1, still compared and reported | FGF4 | `SE_ENSG00000075388_11_83184` | ioe_csv |
-| A4 | **Several comparable transcripts**, 6 transcripts of which 2 non-coding — the most readable multi-candidate case | POLQ | `A3_ENSG00000051341_3_16572` | category_examples |
-| A5 | Two comparable transcripts out of 10 | PRRG3 | `AF_ENSG00000130032_X_265953` | category_examples |
-| A6 | Five transcripts, one non-coding, outcome `split domain` | PEX3 | `SE_ENSG00000034693_6_53833` | category_examples |
-
-The transcript header carries the tags — `Protein: ENSP…  [longest CDS, most like
-canonical]`. `Protein: N/A` marks a non-coding transcript.
-
----
+| # | What it shows | Where | Detail |
+| :-- | :--- | :--- | :--- |
+| A1 | the outside-exon gate picks a DIFFERENT transcript than longest-CDS - the one case where is_most_like_canonical changes the answer | `*_TMED8_*.pdf` in `review_cases/leafcutter_all_transcripts` | TMED8 `chr14:clu_9428` · 5 tx, 2 comparable · longest CDS `XM_017021224.2`, most like canonical `NM_001346133.2` · dropped domain |
+| A2 | is_most_like_canonical is UNSET - no candidate passes the gate, so longest-CDS decides among coding candidates alone | `*_GLIPR1_*.pdf` in `review_cases/leafcutter_all_transcripts` | GLIPR1 `chr12:clu_6316` · 5 tx, 3 comparable · longest CDS `ENST00000456650.7` · dropped domain, shorter |
+| A3 | a non-coding candidate holds the longest CDS - step 1 excludes it from selection, so the tag goes to a coding transcript instead | `*_FAM209A_*.pdf` in `review_cases/leafcutter_all_transcripts` | FAM209A `chr20:clu_4032:FAM209A` · 4 tx, 3 comparable · 1 non-coding · longest CDS `XM_047439965.1` · dropped domain |
+| A4 | several comparable transcripts, so the flags have to choose between them | `*_PRRG3_*.pdf` in `tests/reference_outputs/category_examples__restrict_False__representative_True` | PRRG3 `AF_ENSG00000130032_X_265953` · 11 tx, 2 comparable · longest CDS `ENST00000884468.1`, most like canonical `ENST00000370353.3` · merged domain, same_domains |
 
 ## B. Domain resolution (InterPro entry-type ladder)
 
-**Domain/Repeat** always kept → **Family/Homologous_superfamily** dropped only where a
-higher tier covers >50 % of it → **member-database hits** dropped on the same rule.
-Site/PTM removed outright.
-
-| # | What it shows | Gene / transcript | Count |
+| # | What it shows | Where | Detail |
 | :-- | :--- | :--- | :--- |
-| B1 | Reduction happens, 2 annotations → 1 | CACNG3 `ENST00000005284.4` | 28 transcripts |
-| B2 | **Demote, don't delete** — a member-DB hit is kept because no InterPro Domain covers the region | CACNG3 `ENST00000005284.4` | 25 |
-| B3 | **All three tiers** in one transcript, 6 annotations → 4 | DIAPH2 `ENST00000324765.13` | 2 |
-| B4 | Site/PTM entries removed | no fixture cluster samples one — covered by unit test instead | 0 here, 1,007 human transcripts in the DB |
-| B5 | **Repeated accession**: same domain id more than once | BPIFB2 `ENST00000170150.4` | 12 |
+| B1 | the tier ladder discards a redundant annotation (2 -> 1 annotations) | `*_CACNG3_*.pdf` in `tests/reference_outputs/ioe_csv__restrict_True__representative_True` | CACNG3 `ENST00000005284.4` · 254 such transcripts |
+| B2 | demote, don't delete - a member-DB hit kept as the only evidence (2 -> 1 annotations) | `*_CACNG3_*.pdf` in `tests/reference_outputs/ioe_csv__restrict_True__representative_True` | CACNG3 `ENST00000005284.4` · 384 such transcripts |
+| B3 | all three tiers present in one transcript (6 -> 4 annotations) | `*_DIAPH2_*.pdf` in `tests/reference_outputs/ioe_csv__restrict_True__representative_True` | DIAPH2 `ENST00000324765.13` · 113 such transcripts |
+| B4 | Site/PTM entries removed - unconditional, unlike the tier rule (11 -> 8 annotations) | `*_KMT2D_*.pdf` in `tests/reference_outputs/category_examples__restrict_True__representative_True` | KMT2D `ENST00000301067.12` · 5 such transcripts |
+| B5 | the same accession more than once (3 -> 3 annotations) | `*_BPIFB2_*.pdf` in `tests/reference_outputs/ioe_csv__restrict_True__representative_True` | BPIFB2 `ENST00000170150.4` · 366 such transcripts |
+| B6a | an instance of a repeat DISCARDED for overlapping its neighbour of the same accession - the domain count drops though both instances are real (11 -> 9 annotations) | `*_TOPBP1_*.pdf` in `review_cases/leafcutter` | TOPBP1 `ENST00000260810.10` · IPR036420 102-199 dropped, 199-302 kept, overlap 1 aa (1% of the shorter) · 43 such transcripts |
+| B6b | an instance of a repeat DISCARDED for overlapping its neighbour of the same accession - the domain count drops though both instances are real (10 -> 8 annotations) | `*_ZNF317_*.pdf` in `review_cases/leafcutter` | ZNF317 `ENST00000247956.11` · IPR036236 175-231 dropped, 230-287 kept, overlap 2 aa (4% of the shorter) · 43 such transcripts |
+| B6c | an instance of a repeat DISCARDED for overlapping its neighbour of the same accession - the domain count drops though both instances are real (9 -> 5 annotations) | `*_ZNF680_*.pdf` in `tests/reference_outputs/category_examples__restrict_True__representative_True` | ZNF680 `ENST00000309683.11` · IPR036236 246-303 dropped, 190-247 kept, overlap 2 aa (3% of the shorter) · 43 such transcripts |
+| B6d | an instance of a repeat DISCARDED for overlapping its neighbour of the same accession - the domain count drops though both instances are real (5 -> 4 annotations) | `*_CSMD2_*.pdf` in `tests/reference_outputs/category_examples__restrict_True__representative_True` | CSMD2 `ENST00000465819.1` · IPR035976 95-158 dropped, 154-222 kept, overlap 5 aa (8% of the shorter) · 43 such transcripts |
+| B6e | an instance of a repeat DISCARDED for overlapping its neighbour of the same accession - the domain count drops though both instances are real (20 -> 18 annotations) | `*_SORL1_*.pdf` in `tests/reference_outputs/category_examples__restrict_True__representative_True` | SORL1 `ENST00000260197.12` · IPR003961 2025-2112 dropped, 1934-2029 kept, overlap 5 aa (6% of the shorter) · 43 such transcripts |
+| B7a | the same rule applied where it IS right - two calls of one region, near-identical spans, one discarded (2 -> 1 annotations) | `*_SLC6A19_*.pdf` in `tests/reference_outputs/ioe_csv__restrict_True__representative_True` | SLC6A19 `ENST00000304460.11` · IPR000175 31-610 dropped, 25-608 kept, overlap 578 aa (100% of the shorter) · 20 such transcripts |
+| B7b | the same rule applied where it IS right - two calls of one region, near-identical spans, one discarded (2 -> 1 annotations) | `*_WNT16_*.pdf` in `tests/reference_outputs/ioe_csv__restrict_True__representative_True` | WNT16 `ENST00000222462.3` · IPR005817 51-365 dropped, 49-365 kept, overlap 315 aa (100% of the shorter) · 20 such transcripts |
+| B7c | the same rule applied where it IS right - two calls of one region, near-identical spans, one discarded (2 -> 1 annotations) | `*_DNASE1L1_*.pdf` in `review_cases/leafcutter` | DNASE1L1 `ENST00000862494.1` · IPR016202 3-294 dropped, 2-293 kept, overlap 291 aa (100% of the shorter) · 20 such transcripts |
 
----
+## C. Intron retention
 
-## C. Intron retention (new in this work)
-
-The retained interval is drawn as a **dotted span inside the exon**, not as a raised
-bracket — it is the opposite of an excision. The first-page junction table carries a
-`feature_type` column, present only for events that contain a retained intron.
-
-| # | What it shows | Gene | Cluster | Case |
-| :-- | :--- | :--- | :--- | :--- |
-| C1 | RI producing real domain calls (`added_domain`, `shorter`) | ZNF593 | `RI_ENSG00000142684_1_269` | ioe_csv |
-| C2 | RI with a non-coding transcript, outcome `dropped domain` | MSLNL | `RI_ENSG00000162006_16_14761` | ioe_csv |
-| C3 | RI from rMATS, both strands | PFKL (+), MCM3AP (−) | — | `review_cases/rmats/` |
-
-Before `85bf0b6` these five ioe RI clusters produced **zero** analysed rows — the
-fixture had frozen the single-junction representation, so the golden test asserted
-the broken behaviour. They now yield 7 domain calls.
-
----
+| # | What it shows | Where | Detail |
+| :-- | :--- | :--- | :--- |
+| C1 | a retained intron producing real domain calls | `*_ZNF593_*.pdf` in `tests/reference_outputs/ioe_csv__restrict_True__representative_True` | ZNF593 `RI_ENSG00000142684_1_269` · 2 tx, 1 comparable · longest CDS `ENST00000270812.6` · added_domain, shorter |
+| C2 | a retained intron in a cluster with a non-coding transcript | `*_MSLNL_*.pdf` in `tests/reference_outputs/ioe_csv__restrict_True__representative_True` | MSLNL `RI_ENSG00000162006_16_14761` · 2 tx, 1 comparable · 1 non-coding · longest CDS `ENST00000537221.1` · dropped domain |
 
 ## D. Input format × AS event type
 
-`ioe_csv` covers all seven SUPPA types. The other three formats had **no PDFs at all**
-— their tests run `create_pdf=False` — so a set was generated here.
+| # | What it shows | Where | Detail |
+| :-- | :--- | :--- | :--- |
+| D1a | plus-strand A3SS | `*_A3SS_COL18A1_*.pdf` in `review_cases/rmats` | COL18A1 `A3SS_ENSG00000182871_21_63` · 33 tx, 4 comparable · added_domain, dropped domain |
+| D1b | minus-strand A3SS - the boundary that varies with strand | `*_A3SS_SBF1_*.pdf` in `review_cases/rmats` | SBF1 `A3SS_ENSG00000100241_22_78` · 80 tx, 10 comparable · added_domain, dropped domain, longer |
+| D2a | plus-strand A5SS | `*_A5SS_GGA1_*.pdf` in `review_cases/rmats` | GGA1 `A5SS_ENSG00000100083_22_37` · 49 tx, 7 comparable · dropped domain, longer, split domain |
+| D2b | minus-strand A5SS - the boundary that varies with strand | `*_A5SS_POFUT2_*.pdf` in `review_cases/rmats` | POFUT2 `A5SS_ENSG00000186866_21_62` · 33 tx, 1 comparable · added_domain, dropped domain |
+| D3a | plus-strand SE - NO comparable transcript, canonical only | `*_SE_DIP2A_*.pdf` in `review_cases/rmats` | DIP2A `SE_ENSG00000160305_21_1` · 38 tx, 0 comparable |
+| D3b | minus-strand SE | `*_SE_POFUT2_*.pdf` in `review_cases/rmats` | POFUT2 `SE_ENSG00000186866_21_29` · 33 tx, 5 comparable · dropped domain |
+| D4a | plus-strand MXE | `*_MXE_PDXK_*.pdf` in `review_cases/rmats` | PDXK `MXE_ENSG00000160209_21_94` · 36 tx, 2 comparable · added_domain, dropped domain, shorter |
+| D4b | minus-strand MXE | `*_MXE_ATP5PO_*.pdf` in `review_cases/rmats` | ATP5PO `MXE_ENSG00000241837_21_114` · 26 tx, 4 comparable · dropped domain, shorter |
+| D5 | MAJIQ per-LSV classification | `*.pdf` in `review_cases/majiq` | — |
+| D6a | one LeafCutter event, first of the two genes it names | `*_HYPK_*.pdf` in `review_cases/leafcutter` | HYPK `chr15:clu_17411:HYPK` · 3 comparable |
+| D6b | the same event, second of the two genes it names | `*_SERF2_*.pdf` in `review_cases/leafcutter` | SERF2 `chr15:clu_17411:SERF2` · 4 comparable |
 
-| Format | Coverage | Location |
-| :--- | :--- | :--- |
-| SUPPA (`ioe`) | A3, A5, AF, AL, MX, RI, SE — 5 clusters each | `REF/ioe_csv__…/` |
-| category_examples | A3, A5, AF, AL, MX, SE | `REF/category_examples__…/` |
-| hadas | human/mouse comparison | `REF/hadas_xlsx__…/` |
-| rMATS | SE, A5SS, A3SS, MXE, RI — **one + and one − strand each** | `review_cases/rmats/` (10) |
-| MAJIQ | per-LSV classification | `review_cases/majiq/` (4) |
-| LeafCutter | incl. the multi-gene pair and the `longer_domains` case | `review_cases/leafcutter/` (7) |
+## E. Classification outcomes
 
-The rMATS ten, paired by strand so the strand-dependent construction can be compared:
-
-| Event | + strand | − strand |
-| :--- | :--- | :--- |
-| SE | `human_SE_DIP2A_10_*.pdf` | `human_SE_MCM3AP_9_*.pdf` |
-| A5SS | `human_A5SS_PDXK_3_*.pdf` | `human_A5SS_POFUT2_4_*.pdf` |
-| A3SS | `human_A3SS_COL18A1_2_*.pdf` | `human_A3SS_MCM3AP_1_*.pdf` |
-| MXE | `human_MXE_PDXK_5_*.pdf` | `human_MXE_MCM3AP_6_*.pdf` |
-| RI | `human_RI_PFKL_7_*.pdf` | `human_RI_MCM3AP_8_*.pdf` |
-
-**Highest value to look at first:**
-
-1. **A minus-strand A3SS or A5SS** — `human_A3SS_MCM3AP_1_*.pdf`,
-   `human_A5SS_POFUT2_4_*.pdf`. Every such event was unanalysable before this work,
-   so no one has ever seen one.
-2. **A retained intron** — C1 or `review_cases/rmats/human_RI_PFKL_7_*.pdf`. New
-   capability and a new drawing convention.
-3. **The multi-gene LeafCutter pair** — `human_RBM5_5_*.pdf` and `human_RBM6_6_*.pdf`:
-   one event, `chr3:clu_10461`, now analysed once per gene. Adjacent paralogues at
-   3p21.3; previously only the first-named gene was reported.
+| # | What it shows | Where | Detail |
+| :-- | :--- | :--- | :--- |
+| E1 | longer_domains - equal counts >1 on both sides, compared side longer | `*_DHX29_*.pdf` in `review_cases/leafcutter` | — |
 
 ---
 
-## E. Classification outcomes (Table S4)
+## Table S4 outcome coverage
 
-`category_examples` is built for this — 11 of the 12 outcomes have 1–13 clusters each.
-
-| Outcome | Clusters | Example |
-| :--- | ---: | :--- |
-| dropped domain | 13 | PRRG3 |
-| added_domain | 10 | SMAD9 |
-| longer | 7 | ZNF680 |
-| same | 7 | KMT2D |
-| shorter | 3 | FKBP5 |
-| same_domains | 3 | FKBP5 |
-| merged domain | 3 | PRRG3 |
-| split domain | 2 | PEX3 |
-| increased_domain_number | 2 | ZNF141 |
-| reduced_domain_number | 2 | DAZ4 |
-| shorter_domains | 1 | PCDH7 |
-| longer_domains | 83 (in `leafcutter_full`) | DHX29 |
-
-`longer_domains` is the one outcome absent from `category_examples`, so a reviewable
-case was generated for it:
-
-| # | What it shows | Gene | Cluster | Where |
-| :-- | :--- | :--- | :--- | :--- |
-| E1 | Equal counts >1 on both sides, compared side longer — 2 domains each, 429 aa against 426 | DHX29 | `chr5:clu_3349` | `review_cases/leafcutter/human_DHX29_7_*.pdf` |
+| Outcome | Clusters in category_examples |
+| :--- | ---: |
+| dropped domain | 12 |
+| added_domain | 10 |
+| longer | 7 |
+| same | 7 |
+| shorter | 3 |
+| same_domains | 4 |
+| merged domain | 5 |
+| split domain | 2 |
+| increased_domain_number | 2 |
+| reduced_domain_number | 2 |
+| shorter_domains | 1 |
+| longer_domains | **0 — see E1** |
 
 ---
 
 ## Gaps
 
-1. ~~`longer_domains` has no example~~ — **corrected**. It occurs in 114 rows across
-   83 clusters of `leafcutter_full__representative_True`; the earlier claim came from
-   searching only `category_examples`, the fixture built to hold one of each outcome.
-   None of the 83 has fewer than 11 transcripts, so `review_cases/leafcutter/
-   human_DHX29_7_*.pdf` was generated as the readable one: 12 transcripts but a single
-   comparable transcript, giving one comparison to follow. Two domains on each side,
-   429 aa against 426.
-2. **Site/PTM removal (B4) has no reviewable PDF**, though it is now tested. The
-   database holds 3,041 such entries (Conserved_site 2,702, Binding_site 326, PTM 13;
-   no Active_site) on 1,007 human transcripts, so this is an accident of which 35
-   clusters the ioe fixture samples, not a data limitation. Covered by unit tests
-   against synthetic frames, cross-checked on the real transcript
-   `ENST00000680265.1`, whose 6 Binding_site entries are dropped (38 → 28 rows). A
-   reviewable case could be built by sampling a gene that carries one.
-3. **`no_gene_specified` cannot have a PDF, by design.** The figure is per-gene, and
-   a cluster naming no gene has no transcripts, exons or domains to draw; DOMAS
-   declines with `Skipping PDF generation for None ... Gene 'None' not found in
-   database`. The results.csv row carries more than a blank page would. Covered by
-   unit tests and by 82 real clusters in the LeafCutter fixture.
-
-   Establishing this uncovered a crash: with no gene resolved anywhere in a run there
-   are no transcript ids, so `get_exons_for_transcripts` had nothing to concatenate
-   and the run died on `pd.concat([])` rather than reporting each event's reason.
-   Fixed, with a regression test.
-4. The generated sets under `review_cases/` are **not** golden references and are
-   compared against nothing; they exist to be looked at.
+- None: every case above resolved against the current outputs.
+- `no_gene_specified` cannot have a PDF: the figure is per-gene, and a cluster
+  naming no gene has no transcripts, exons or domains to draw.

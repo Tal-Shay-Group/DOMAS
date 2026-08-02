@@ -1,0 +1,443 @@
+[
+  {
+    "code": "A1",
+    "label": "most_like_set",
+    "shows": "the outside-exon gate picks a DIFFERENT transcript than longest-CDS - the one case where is_most_like_canonical changes the answer",
+    "gene": "TMED8",
+    "cluster": "chr14:clu_9428",
+    "case": "leafcutter_all_transcripts",
+    "n_tx": 4,
+    "n_comparable": 2,
+    "n_noncoding": 0,
+    "outcomes": [
+      "dropped domain"
+    ],
+    "source": "review_cases/leafcutter_all_transcripts",
+    "pattern": "*_TMED8_*.pdf",
+    "gene_n_tx": 5,
+    "longest_id": "XM_017021224.2",
+    "most_like_id": "NM_001346133.2"
+  },
+  {
+    "code": "A2",
+    "label": "most_like_unset",
+    "shows": "is_most_like_canonical is UNSET - no candidate passes the gate, so longest-CDS decides among coding candidates alone",
+    "gene": "GLIPR1",
+    "cluster": "chr12:clu_6316",
+    "case": "leafcutter_all_transcripts",
+    "n_tx": 4,
+    "n_comparable": 3,
+    "n_noncoding": 0,
+    "outcomes": [
+      "dropped domain",
+      "shorter"
+    ],
+    "source": "review_cases/leafcutter_all_transcripts",
+    "pattern": "*_GLIPR1_*.pdf",
+    "gene_n_tx": 5,
+    "longest_id": "ENST00000456650.7"
+  },
+  {
+    "code": "A3",
+    "label": "has_noncoding",
+    "shows": "a non-coding candidate holds the longest CDS - step 1 excludes it from selection, so the tag goes to a coding transcript instead",
+    "gene": "FAM209A",
+    "cluster": "chr20:clu_4032:FAM209A",
+    "case": "leafcutter_all_transcripts",
+    "n_tx": 3,
+    "n_comparable": 3,
+    "n_noncoding": 1,
+    "outcomes": [
+      "dropped domain"
+    ],
+    "source": "review_cases/leafcutter_all_transcripts",
+    "pattern": "*_FAM209A_*.pdf",
+    "gene_n_tx": 4,
+    "longest_id": "XM_047439965.1"
+  },
+  {
+    "code": "A4",
+    "label": "several_comparable",
+    "shows": "several comparable transcripts, so the flags have to choose between them",
+    "gene": "PRRG3",
+    "cluster": "AF_ENSG00000130032_X_265953",
+    "case": "category_examples__restrict_False__representative_True",
+    "n_tx": 10,
+    "n_comparable": 2,
+    "n_noncoding": 0,
+    "outcomes": [
+      "merged domain",
+      "same_domains"
+    ],
+    "source": "tests/reference_outputs/category_examples__restrict_False__representative_True",
+    "pattern": "*_PRRG3_*.pdf",
+    "gene_n_tx": 11,
+    "longest_id": "ENST00000884468.1",
+    "most_like_id": "ENST00000370353.3"
+  },
+  {
+    "code": "B1",
+    "label": "reduction",
+    "shows": "the tier ladder discards a redundant annotation (2 -> 1 annotations)",
+    "gene": "CACNG3",
+    "transcript": "ENST00000005284.4",
+    "case": "ioe_csv__restrict_True__representative_True",
+    "source": "tests/reference_outputs/ioe_csv__restrict_True__representative_True",
+    "pattern": "*_CACNG3_*.pdf",
+    "n_variants": 254
+  },
+  {
+    "code": "B2",
+    "label": "member_only",
+    "shows": "demote, don't delete - a member-DB hit kept as the only evidence (2 -> 1 annotations)",
+    "gene": "CACNG3",
+    "transcript": "ENST00000005284.4",
+    "case": "ioe_csv__restrict_True__representative_True",
+    "source": "tests/reference_outputs/ioe_csv__restrict_True__representative_True",
+    "pattern": "*_CACNG3_*.pdf",
+    "n_variants": 384
+  },
+  {
+    "code": "B3",
+    "label": "all_tiers",
+    "shows": "all three tiers present in one transcript (6 -> 4 annotations)",
+    "gene": "DIAPH2",
+    "transcript": "ENST00000324765.13",
+    "case": "ioe_csv__restrict_True__representative_True",
+    "source": "tests/reference_outputs/ioe_csv__restrict_True__representative_True",
+    "pattern": "*_DIAPH2_*.pdf",
+    "n_variants": 113
+  },
+  {
+    "code": "B4",
+    "label": "site_ptm",
+    "shows": "Site/PTM entries removed - unconditional, unlike the tier rule (11 -> 8 annotations)",
+    "gene": "KMT2D",
+    "transcript": "ENST00000301067.12",
+    "case": "category_examples__restrict_True__representative_True",
+    "source": "tests/reference_outputs/category_examples__restrict_True__representative_True",
+    "pattern": "*_KMT2D_*.pdf",
+    "n_variants": 5
+  },
+  {
+    "code": "B5",
+    "label": "repeated",
+    "shows": "the same accession more than once (3 -> 3 annotations)",
+    "gene": "BPIFB2",
+    "transcript": "ENST00000170150.4",
+    "case": "ioe_csv__restrict_True__representative_True",
+    "source": "tests/reference_outputs/ioe_csv__restrict_True__representative_True",
+    "pattern": "*_BPIFB2_*.pdf",
+    "n_variants": 366
+  },
+  {
+    "code": "B6a",
+    "label": "tandem_collapsed",
+    "shows": "an instance of a repeat DISCARDED for overlapping its neighbour of the same accession - the domain count drops though both instances are real (11 -> 9 annotations)",
+    "gene": "TOPBP1",
+    "transcript": "ENST00000260810.10",
+    "case": "leafcutter",
+    "source": "review_cases/leafcutter",
+    "pattern": "*_TOPBP1_*.pdf",
+    "n_variants": 43,
+    "detail": "IPR036420 102-199 dropped, 199-302 kept, overlap 1 aa (1% of the shorter)"
+  },
+  {
+    "code": "B6b",
+    "label": "tandem_collapsed",
+    "shows": "an instance of a repeat DISCARDED for overlapping its neighbour of the same accession - the domain count drops though both instances are real (10 -> 8 annotations)",
+    "gene": "ZNF317",
+    "transcript": "ENST00000247956.11",
+    "case": "leafcutter",
+    "source": "review_cases/leafcutter",
+    "pattern": "*_ZNF317_*.pdf",
+    "n_variants": 43,
+    "detail": "IPR036236 175-231 dropped, 230-287 kept, overlap 2 aa (4% of the shorter)"
+  },
+  {
+    "code": "B6c",
+    "label": "tandem_collapsed",
+    "shows": "an instance of a repeat DISCARDED for overlapping its neighbour of the same accession - the domain count drops though both instances are real (9 -> 5 annotations)",
+    "gene": "ZNF680",
+    "transcript": "ENST00000309683.11",
+    "case": "category_examples__restrict_True__representative_True",
+    "source": "tests/reference_outputs/category_examples__restrict_True__representative_True",
+    "pattern": "*_ZNF680_*.pdf",
+    "n_variants": 43,
+    "detail": "IPR036236 246-303 dropped, 190-247 kept, overlap 2 aa (3% of the shorter)"
+  },
+  {
+    "code": "B6d",
+    "label": "tandem_collapsed",
+    "shows": "an instance of a repeat DISCARDED for overlapping its neighbour of the same accession - the domain count drops though both instances are real (5 -> 4 annotations)",
+    "gene": "CSMD2",
+    "transcript": "ENST00000465819.1",
+    "case": "category_examples__restrict_True__representative_True",
+    "source": "tests/reference_outputs/category_examples__restrict_True__representative_True",
+    "pattern": "*_CSMD2_*.pdf",
+    "n_variants": 43,
+    "detail": "IPR035976 95-158 dropped, 154-222 kept, overlap 5 aa (8% of the shorter)"
+  },
+  {
+    "code": "B6e",
+    "label": "tandem_collapsed",
+    "shows": "an instance of a repeat DISCARDED for overlapping its neighbour of the same accession - the domain count drops though both instances are real (20 -> 18 annotations)",
+    "gene": "SORL1",
+    "transcript": "ENST00000260197.12",
+    "case": "category_examples__restrict_True__representative_True",
+    "source": "tests/reference_outputs/category_examples__restrict_True__representative_True",
+    "pattern": "*_SORL1_*.pdf",
+    "n_variants": 43,
+    "detail": "IPR003961 2025-2112 dropped, 1934-2029 kept, overlap 5 aa (6% of the shorter)"
+  },
+  {
+    "code": "B7a",
+    "label": "duplicate_redundant",
+    "shows": "the same rule applied where it IS right - two calls of one region, near-identical spans, one discarded (2 -> 1 annotations)",
+    "gene": "SLC6A19",
+    "transcript": "ENST00000304460.11",
+    "case": "ioe_csv__restrict_True__representative_True",
+    "source": "tests/reference_outputs/ioe_csv__restrict_True__representative_True",
+    "pattern": "*_SLC6A19_*.pdf",
+    "n_variants": 20,
+    "detail": "IPR000175 31-610 dropped, 25-608 kept, overlap 578 aa (100% of the shorter)"
+  },
+  {
+    "code": "B7b",
+    "label": "duplicate_redundant",
+    "shows": "the same rule applied where it IS right - two calls of one region, near-identical spans, one discarded (2 -> 1 annotations)",
+    "gene": "WNT16",
+    "transcript": "ENST00000222462.3",
+    "case": "ioe_csv__restrict_True__representative_True",
+    "source": "tests/reference_outputs/ioe_csv__restrict_True__representative_True",
+    "pattern": "*_WNT16_*.pdf",
+    "n_variants": 20,
+    "detail": "IPR005817 51-365 dropped, 49-365 kept, overlap 315 aa (100% of the shorter)"
+  },
+  {
+    "code": "B7c",
+    "label": "duplicate_redundant",
+    "shows": "the same rule applied where it IS right - two calls of one region, near-identical spans, one discarded (2 -> 1 annotations)",
+    "gene": "DNASE1L1",
+    "transcript": "ENST00000862494.1",
+    "case": "leafcutter",
+    "source": "review_cases/leafcutter",
+    "pattern": "*_DNASE1L1_*.pdf",
+    "n_variants": 20,
+    "detail": "IPR016202 3-294 dropped, 2-293 kept, overlap 291 aa (100% of the shorter)"
+  },
+  {
+    "code": "C1",
+    "label": "RI_domain_calls",
+    "shows": "a retained intron producing real domain calls",
+    "gene": "ZNF593",
+    "cluster": "RI_ENSG00000142684_1_269",
+    "case": "ioe_csv__restrict_True__representative_True",
+    "n_tx": 1,
+    "n_comparable": 1,
+    "n_noncoding": 0,
+    "outcomes": [
+      "added_domain",
+      "shorter"
+    ],
+    "source": "tests/reference_outputs/ioe_csv__restrict_True__representative_True",
+    "pattern": "*_ZNF593_*.pdf",
+    "gene_n_tx": 2,
+    "longest_id": "ENST00000270812.6"
+  },
+  {
+    "code": "C2",
+    "label": "RI_noncoding",
+    "shows": "a retained intron in a cluster with a non-coding transcript",
+    "gene": "MSLNL",
+    "cluster": "RI_ENSG00000162006_16_14761",
+    "case": "ioe_csv__restrict_True__representative_True",
+    "n_tx": 1,
+    "n_comparable": 1,
+    "n_noncoding": 1,
+    "outcomes": [
+      "dropped domain"
+    ],
+    "source": "tests/reference_outputs/ioe_csv__restrict_True__representative_True",
+    "pattern": "*_MSLNL_*.pdf",
+    "gene_n_tx": 2,
+    "longest_id": "ENST00000537221.1"
+  },
+  {
+    "code": "D1a",
+    "label": "A3SS_plus",
+    "shows": "plus-strand A3SS",
+    "source": "review_cases/rmats",
+    "pattern": "*_A3SS_COL18A1_*.pdf",
+    "gene": "COL18A1",
+    "n_comparable": 4,
+    "missing": false,
+    "cluster": "A3SS_ENSG00000182871_21_63",
+    "n_tx": 32,
+    "outcomes": [
+      "added_domain",
+      "dropped domain"
+    ],
+    "gene_n_tx": 33
+  },
+  {
+    "code": "D1b",
+    "label": "A3SS_minus",
+    "shows": "minus-strand A3SS - the boundary that varies with strand",
+    "source": "review_cases/rmats",
+    "pattern": "*_A3SS_SBF1_*.pdf",
+    "gene": "SBF1",
+    "n_comparable": 10,
+    "missing": false,
+    "cluster": "A3SS_ENSG00000100241_22_78",
+    "n_tx": 79,
+    "outcomes": [
+      "added_domain",
+      "dropped domain",
+      "longer",
+      "same",
+      "shorter",
+      "split domain"
+    ],
+    "gene_n_tx": 80
+  },
+  {
+    "code": "D2a",
+    "label": "A5SS_plus",
+    "shows": "plus-strand A5SS",
+    "source": "review_cases/rmats",
+    "pattern": "*_A5SS_GGA1_*.pdf",
+    "gene": "GGA1",
+    "n_comparable": 7,
+    "missing": false,
+    "cluster": "A5SS_ENSG00000100083_22_37",
+    "n_tx": 48,
+    "outcomes": [
+      "dropped domain",
+      "longer",
+      "split domain"
+    ],
+    "gene_n_tx": 49
+  },
+  {
+    "code": "D2b",
+    "label": "A5SS_minus",
+    "shows": "minus-strand A5SS - the boundary that varies with strand",
+    "source": "review_cases/rmats",
+    "pattern": "*_A5SS_POFUT2_*.pdf",
+    "gene": "POFUT2",
+    "n_comparable": 1,
+    "missing": false,
+    "cluster": "A5SS_ENSG00000186866_21_62",
+    "n_tx": 32,
+    "outcomes": [
+      "added_domain",
+      "dropped domain"
+    ],
+    "gene_n_tx": 33
+  },
+  {
+    "code": "D3a",
+    "label": "SE_plus",
+    "shows": "plus-strand SE - NO comparable transcript, canonical only",
+    "source": "review_cases/rmats",
+    "pattern": "*_SE_DIP2A_*.pdf",
+    "gene": "DIP2A",
+    "n_comparable": 0,
+    "missing": false,
+    "cluster": "SE_ENSG00000160305_21_1",
+    "n_tx": 37,
+    "outcomes": [],
+    "gene_n_tx": 38
+  },
+  {
+    "code": "D3b",
+    "label": "SE_minus",
+    "shows": "minus-strand SE",
+    "source": "review_cases/rmats",
+    "pattern": "*_SE_POFUT2_*.pdf",
+    "gene": "POFUT2",
+    "n_comparable": 5,
+    "missing": false,
+    "cluster": "SE_ENSG00000186866_21_29",
+    "n_tx": 32,
+    "outcomes": [
+      "dropped domain"
+    ],
+    "gene_n_tx": 33
+  },
+  {
+    "code": "D4a",
+    "label": "MXE_plus",
+    "shows": "plus-strand MXE",
+    "source": "review_cases/rmats",
+    "pattern": "*_MXE_PDXK_*.pdf",
+    "gene": "PDXK",
+    "n_comparable": 2,
+    "missing": false,
+    "cluster": "MXE_ENSG00000160209_21_94",
+    "n_tx": 35,
+    "outcomes": [
+      "added_domain",
+      "dropped domain",
+      "shorter",
+      "split domain"
+    ],
+    "gene_n_tx": 36
+  },
+  {
+    "code": "D4b",
+    "label": "MXE_minus",
+    "shows": "minus-strand MXE",
+    "source": "review_cases/rmats",
+    "pattern": "*_MXE_ATP5PO_*.pdf",
+    "gene": "ATP5PO",
+    "n_comparable": 4,
+    "missing": false,
+    "cluster": "MXE_ENSG00000241837_21_114",
+    "n_tx": 25,
+    "outcomes": [
+      "dropped domain",
+      "shorter"
+    ],
+    "gene_n_tx": 26
+  },
+  {
+    "code": "D5",
+    "label": "majiq_lsv",
+    "shows": "MAJIQ per-LSV classification",
+    "source": "review_cases/majiq",
+    "pattern": "*.pdf",
+    "missing": false
+  },
+  {
+    "code": "D6a",
+    "label": "leafcutter_multigene_HYPK",
+    "shows": "one LeafCutter event, first of the two genes it names",
+    "source": "review_cases/leafcutter",
+    "pattern": "*_HYPK_*.pdf",
+    "gene": "HYPK",
+    "cluster": "chr15:clu_17411:HYPK",
+    "n_comparable": 3,
+    "missing": false
+  },
+  {
+    "code": "D6b",
+    "label": "leafcutter_multigene_SERF2",
+    "shows": "the same event, second of the two genes it names",
+    "source": "review_cases/leafcutter",
+    "pattern": "*_SERF2_*.pdf",
+    "gene": "SERF2",
+    "cluster": "chr15:clu_17411:SERF2",
+    "n_comparable": 4,
+    "missing": false
+  },
+  {
+    "code": "E1",
+    "label": "longer_domains",
+    "shows": "longer_domains - equal counts >1 on both sides, compared side longer",
+    "source": "review_cases/leafcutter",
+    "pattern": "*_DHX29_*.pdf",
+    "missing": false
+  }
+]

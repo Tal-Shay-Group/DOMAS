@@ -1,4 +1,587 @@
 cluster,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_name,c_domain_length,t_domain_length,c_domains_number,t_domains_number,is_longest_cds,is_most_like_canonical
+chr19:clu_15038,ZNF317,human,transcript_doesnt_have_features,ENST00000247956.11,ENST00000419608.2,,,,,,,
+chr19:clu_15038,ZNF317,human,no_unique_features,ENST00000247956.11,ENST00000590152.1,,,,,,,
+chr19:clu_15038,ZNF317,human,no_unique_features,ENST00000247956.11,ENST00000891822.1,,,,,,,
+chr19:clu_15038,ZNF317,human,no_unique_features,ENST00000247956.11,ENST00000949136.1,,,,,,,
+chr19:clu_15038,ZNF317,human,no_unique_features,ENST00000247956.11,ENST00000933873.1,,,,,,,
+chr19:clu_15038,ZNF317,human,no_unique_features,ENST00000247956.11,ENST00000949134.1,,,,,,,
+chr19:clu_15038,ZNF317,human,no_unique_features,ENST00000247956.11,ENST00000591278.5,,,,,,,
+chr19:clu_15038,ZNF317,human,no_unique_features,ENST00000247956.11,ENST00000891823.1,,,,,,,
+chr19:clu_15038,ZNF317,human,no_unique_features,ENST00000247956.11,ENST00000591508.1,,,,,,,
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000360385.7,IPR050752,428.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000360385.7,IPR001909,72.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000360385.7,IPR036236,148.0,,3.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000360385.7,IPR013087,28.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,added_domain,ENST00000247956.11,ENST00000360385.7,pfam01352,,42.0,0.0,1.0,False,False
+chr19:clu_15038,ZNF317,human,added_domain,ENST00000247956.11,ENST00000360385.7,smart00349,,60.0,0.0,1.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,XM_047439139.1,IPR050752,428.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,XM_047439139.1,IPR001909,72.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,XM_047439139.1,IPR036236,148.0,,3.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,XM_047439139.1,IPR013087,28.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000949135.1,IPR050752,428.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,longer,ENST00000247956.11,ENST00000949135.1,IPR001909,72.0,75.0,1.0,1.0,False,False
+chr19:clu_15038,ZNF317,human,shorter_domains,ENST00000247956.11,ENST00000949135.1,IPR036236,148.0,147.0,3.0,3.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000949135.1,IPR013087,28.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,added_domain,ENST00000247956.11,ENST00000949135.1,G3DSA:3.30.160.60,,29.0,0.0,1.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933872.1,IPR050752,428.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933872.1,IPR001909,72.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933872.1,IPR036236,148.0,,3.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933872.1,IPR013087,28.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,added_domain,ENST00000247956.11,ENST00000933872.1,pfam01352,,42.0,0.0,1.0,False,False
+chr19:clu_15038,ZNF317,human,added_domain,ENST00000247956.11,ENST00000933872.1,smart00349,,60.0,0.0,1.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933874.1,IPR050752,428.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933874.1,IPR001909,72.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933874.1,IPR036236,148.0,,3.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933874.1,IPR013087,28.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,added_domain,ENST00000247956.11,ENST00000933874.1,pfam01352,,42.0,0.0,1.0,False,False
+chr19:clu_15038,ZNF317,human,added_domain,ENST00000247956.11,ENST00000933874.1,smart00349,,60.0,0.0,1.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933875.1,IPR050752,428.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933875.1,IPR001909,72.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933875.1,IPR036236,148.0,,3.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933875.1,IPR013087,28.0,,1.0,0.0,False,False
+chr19:clu_15038,ZNF317,human,added_domain,ENST00000247956.11,ENST00000933875.1,pfam01352,,42.0,0.0,1.0,False,False
+chr19:clu_15038,ZNF317,human,added_domain,ENST00000247956.11,ENST00000933875.1,smart00349,,60.0,0.0,1.0,False,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933876.1,IPR050752,428.0,,1.0,0.0,True,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933876.1,IPR001909,72.0,,1.0,0.0,True,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933876.1,IPR036236,148.0,,3.0,0.0,True,False
+chr19:clu_15038,ZNF317,human,dropped domain,ENST00000247956.11,ENST00000933876.1,IPR013087,28.0,,1.0,0.0,True,False
+chr19:clu_15038,ZNF317,human,added_domain,ENST00000247956.11,ENST00000933876.1,pfam01352,,42.0,0.0,1.0,True,False
+chr19:clu_15038,ZNF317,human,added_domain,ENST00000247956.11,ENST00000933876.1,smart00349,,60.0,0.0,1.0,True,False
+chr5:clu_3349,DHX29,human,no_unique_features,ENST00000251636.10,ENST00000867274.1,,,,,,,
+chr5:clu_3349,DHX29,human,no_unique_features,ENST00000251636.10,NM_001345965.2,,,,,,,
+chr5:clu_3349,DHX29,human,no_unique_features,ENST00000251636.10,ENST00000504778.5,,,,,,,
+chr5:clu_3349,DHX29,human,transcript_doesnt_have_features,ENST00000251636.10,ENST00000513447.1,,,,,,,
+chr5:clu_3349,DHX29,human,transcript_doesnt_have_features,ENST00000251636.10,ENST00000867276.1,,,,,,,
+chr5:clu_3349,DHX29,human,no_unique_features,ENST00000251636.10,ENST00000867273.1,,,,,,,
+chr5:clu_3349,DHX29,human,no_unique_features,ENST00000251636.10,ENST00000962096.1,,,,,,,
+chr5:clu_3349,DHX29,human,no_unique_features,ENST00000251636.10,ENST00000867272.1,,,,,,,
+chr5:clu_3349,DHX29,human,no_unique_features,ENST00000251636.10,ENST00000962095.1,,,,,,,
+chr5:clu_3349,DHX29,human,no_unique_features,ENST00000251636.10,ENST00000912931.1,,,,,,,
+chr5:clu_3349,DHX29,human,transcript_doesnt_have_features,ENST00000251636.10,ENST00000912930.1,,,,,,,
+chr5:clu_3349,DHX29,human,transcript_doesnt_have_features,ENST00000251636.10,ENST00000508346.1,,,,,,,
+chr5:clu_3349,DHX29,human,shorter,ENST00000251636.10,ENST00000867275.1,IPR034730,1369.0,1268.0,1.0,1.0,True,False
+chr5:clu_3349,DHX29,human,same,ENST00000251636.10,ENST00000867275.1,IPR056890,55.0,55.0,1.0,1.0,True,False
+chr5:clu_3349,DHX29,human,same,ENST00000251636.10,ENST00000867275.1,IPR056328,78.0,78.0,1.0,1.0,True,False
+chr5:clu_3349,DHX29,human,longer_domains,ENST00000251636.10,ENST00000867275.1,IPR027417,426.0,429.0,2.0,2.0,True,False
+chr5:clu_3349,DHX29,human,dropped domain,ENST00000251636.10,ENST00000867275.1,IPR011709,87.0,,1.0,0.0,True,False
+chr5:clu_3349,DHX29,human,same,ENST00000251636.10,ENST00000867275.1,IPR059023,58.0,58.0,1.0,1.0,True,False
+chr15:clu_17411:SERF2,SERF2,human,feature_not_mapped,ENST00000249786.9,,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,feature_not_mapped,ENST00000249786.9,,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,feature_not_mapped,ENST00000249786.9,,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,feature_not_mapped,ENST00000249786.9,,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,no_unique_features,ENST00000249786.9,ENST00000381359.5,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,transcript_doesnt_have_features,ENST00000249786.9,ENST00000409960.6,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,no_unique_features,ENST00000249786.9,ENST00000403425.5,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,transcript_doesnt_have_features,ENST00000249786.9,ENST00000486144.1,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,transcript_doesnt_have_features,ENST00000249786.9,ENST00000475927.5,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,transcript_doesnt_have_features,ENST00000249786.9,ENST00000630046.2,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,transcript_doesnt_have_features,ENST00000249786.9,ENST00000914901.1,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,transcript_doesnt_have_features,ENST00000249786.9,ENST00000914900.1,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,transcript_doesnt_have_features,ENST00000249786.9,ENST00000914902.1,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,transcript_doesnt_have_features,ENST00000249786.9,ENST00000914903.1,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,transcript_doesnt_have_features,ENST00000249786.9,ENST00000409646.5,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,no_unique_features,ENST00000249786.9,ENST00000445816.5,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,no_unique_features,ENST00000249786.9,ENST00000402131.5,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,transcript_doesnt_have_features,ENST00000249786.9,ENST00000430901.1,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,no_unique_features,ENST00000249786.9,ENST00000409614.1,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,transcript_doesnt_have_features,ENST00000249786.9,ENST00000474290.1,,,,,,,
+chr15:clu_17411:SERF2,SERF2,human,dropped domain,ENST00000249786.9,ENST00000339624.9,IPR040211,56.0,,1.0,0.0,True,False
+chr15:clu_17411:SERF2,SERF2,human,added_domain,ENST00000249786.9,ENST00000339624.9,pfam04419,,37.0,0.0,1.0,True,False
+chr15:clu_17411:SERF2,SERF2,human,dropped domain,ENST00000249786.9,ENST00000409291.5,IPR040211,56.0,,1.0,0.0,False,False
+chr15:clu_17411:SERF2,SERF2,human,dropped domain,ENST00000249786.9,ENST00000409617.6,IPR040211,56.0,,1.0,0.0,False,False
+chr15:clu_17411:SERF2,SERF2,human,dropped domain,ENST00000249786.9,ENST00000448830.2,IPR040211,56.0,,1.0,0.0,False,False
+chr15:clu_17411:HYPK,HYPK,human,feature_not_mapped,ENST00000442995.4,,,,,,,,
+chr15:clu_17411:HYPK,HYPK,human,feature_not_mapped,ENST00000442995.4,,,,,,,,
+chr15:clu_17411:HYPK,HYPK,human,feature_not_mapped,ENST00000442995.4,,,,,,,,
+chr15:clu_17411:HYPK,HYPK,human,feature_not_mapped,ENST00000442995.4,,,,,,,,
+chr15:clu_17411:HYPK,HYPK,human,feature_not_mapped,ENST00000442995.4,,,,,,,,
+chr15:clu_17411:HYPK,HYPK,human,feature_not_mapped,ENST00000442995.4,,,,,,,,
+chr15:clu_17411:HYPK,HYPK,human,no_unique_features,ENST00000442995.4,ENST00000406925.7,,,,,,,
+chr15:clu_17411:HYPK,HYPK,human,no_unique_features,ENST00000442995.4,ENST00000498605.1,,,,,,,
+chr15:clu_17411:HYPK,HYPK,human,dropped domain,ENST00000442995.4,NM_001199885.1,IPR002244,41.0,,1.0,0.0,True,True
+chr15:clu_17411:HYPK,HYPK,human,dropped domain,ENST00000442995.4,NM_001199885.1,IPR017593,41.0,,1.0,0.0,True,True
+chr15:clu_17411:HYPK,HYPK,human,dropped domain,ENST00000442995.4,ENST00000458412.2,IPR002244,41.0,,1.0,0.0,False,False
+chr15:clu_17411:HYPK,HYPK,human,dropped domain,ENST00000442995.4,ENST00000458412.2,IPR017593,41.0,,1.0,0.0,False,False
+chr15:clu_17411:HYPK,HYPK,human,added_domain,ENST00000442995.4,ENST00000458412.2,IPR052617,,54.0,0.0,1.0,False,False
+chr15:clu_17411:HYPK,HYPK,human,dropped domain,ENST00000442995.4,ENST00000497142.2,IPR002244,41.0,,1.0,0.0,False,False
+chr15:clu_17411:HYPK,HYPK,human,dropped domain,ENST00000442995.4,ENST00000497142.2,IPR017593,41.0,,1.0,0.0,False,False
+chrX:clu_319,DNASE1L1,human,transcript_doesnt_have_features,ENST00000369807.6,ENST00000393638.5,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000309585.9,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000369809.5,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000931108.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000862487.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000965224.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,transcript_doesnt_have_features,ENST00000369807.6,ENST00000497242.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000862494.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000862495.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000862491.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000862490.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000862486.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000862488.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000862489.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000862485.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000862484.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000862483.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000862482.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000862481.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000014935.7,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000965225.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000965233.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000965227.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000965228.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000965231.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,transcript_doesnt_have_features,ENST00000369807.6,ENST00000447892.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,transcript_doesnt_have_features,ENST00000369807.6,ENST00000451865.5,,,,,,,
+chrX:clu_319,DNASE1L1,human,transcript_doesnt_have_features,ENST00000369807.6,ENST00000412184.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000424626.5,,,,,,,
+chrX:clu_319,DNASE1L1,human,no_unique_features,ENST00000369807.6,ENST00000432135.1,,,,,,,
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000862492.1,cd10282,253.0,253.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000862492.1,pfam03372,242.0,242.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000862492.1,smart00476,272.0,272.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000965230.1,cd10282,253.0,253.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000965230.1,pfam03372,242.0,242.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000965230.1,smart00476,272.0,272.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000965229.1,cd10282,253.0,253.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000965229.1,pfam03372,242.0,242.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000965229.1,smart00476,272.0,272.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000369808.7,cd10282,253.0,253.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000369808.7,pfam03372,242.0,242.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000369808.7,smart00476,272.0,272.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000862493.1,cd10282,253.0,253.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000862493.1,pfam03372,242.0,242.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000862493.1,smart00476,272.0,272.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000965232.1,cd10282,253.0,253.0,1.0,1.0,True,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000965232.1,pfam03372,242.0,242.0,1.0,1.0,True,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000965232.1,smart00476,272.0,272.0,1.0,1.0,True,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000965226.1,cd10282,253.0,253.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000965226.1,pfam03372,242.0,242.0,1.0,1.0,False,False
+chrX:clu_319,DNASE1L1,human,same,ENST00000369807.6,ENST00000965226.1,smart00476,272.0,272.0,1.0,1.0,False,False
+chr3:clu_2426,TOPBP1,human,no_unique_features,ENST00000260810.10,ENST00000881661.1,,,,,,,
+chr3:clu_2426,TOPBP1,human,no_unique_features,ENST00000260810.10,XM_011512357.4,,,,,,,
+chr3:clu_2426,TOPBP1,human,no_unique_features,ENST00000260810.10,XM_047447356.1,,,,,,,
+chr3:clu_2426,TOPBP1,human,transcript_doesnt_have_features,ENST00000260810.10,ENST00000505804.1,,,,,,,
+chr3:clu_2426,TOPBP1,human,transcript_doesnt_have_features,ENST00000260810.10,ENST00000513818.1,,,,,,,
+chr3:clu_2426,TOPBP1,human,transcript_doesnt_have_features,ENST00000260810.10,ENST00000506779.1,,,,,,,
+chr3:clu_2426,TOPBP1,human,transcript_doesnt_have_features,ENST00000260810.10,ENST00000509162.1,,,,,,,
+chr3:clu_2426,TOPBP1,human,transcript_doesnt_have_features,ENST00000260810.10,ENST00000933451.1,,,,,,,
+chr3:clu_2426,TOPBP1,human,no_unique_features,ENST00000260810.10,ENST00000953681.1,,,,,,,
+chr3:clu_2426,TOPBP1,human,no_unique_features,ENST00000260810.10,ENST00000933452.1,,,,,,,
+chr3:clu_2426,TOPBP1,human,transcript_doesnt_have_features,ENST00000260810.10,ENST00000503338.5,,,,,,,
+chr3:clu_2426,TOPBP1,human,transcript_doesnt_have_features,ENST00000260810.10,ENST00000503464.1,,,,,,,
+chr3:clu_2426,TOPBP1,human,dropped domain,ENST00000260810.10,ENST00000881663.1,IPR036420,219.0,,2.0,0.0,True,False
+chr3:clu_2426,TOPBP1,human,added_domain,ENST00000260810.10,ENST00000881663.1,cd17731,,77.0,0.0,1.0,True,False
+chr3:clu_2426,TOPBP1,human,added_domain,ENST00000260810.10,ENST00000881663.1,cd17718,,82.0,0.0,1.0,True,False
+chr3:clu_2426,TOPBP1,human,added_domain,ENST00000260810.10,ENST00000881663.1,IPR001357,,159.0,0.0,4.0,True,False
+chr3:clu_2426,TOPBP1,human,same_domains,ENST00000260810.10,ENST00000642236.1,IPR036420,219.0,219.0,2.0,2.0,False,False
+chr3:clu_2426,TOPBP1,human,dropped domain,ENST00000260810.10,XM_047447358.1,IPR036420,219.0,,2.0,0.0,False,False
+chr3:clu_2426,TOPBP1,human,dropped domain,ENST00000260810.10,XM_047447357.1,IPR036420,219.0,,2.0,0.0,False,False
+chr3:clu_2426,TOPBP1,human,same_domains,ENST00000260810.10,ENST00000881662.1,IPR036420,219.0,219.0,2.0,2.0,False,False
+chr3:clu_2426,TOPBP1,human,dropped domain,ENST00000260810.10,ENST00000572787.1,IPR036420,219.0,,2.0,0.0,False,False
+chr3:clu_2426,TOPBP1,human,dropped domain,ENST00000260810.10,ENST00000511439.5,IPR036420,219.0,,2.0,0.0,False,False
+chr14:clu_9428,TMED8,human,feature_not_mapped,ENST00000216468.8,,,,,,,,
+chr14:clu_9428,TMED8,human,no_unique_features,ENST00000216468.8,NM_001346134.1,,,,,,,
+chr14:clu_9428,TMED8,human,no_unique_features,ENST00000216468.8,ENST00000868372.1,,,,,,,
+chr14:clu_9428,TMED8,human,dropped domain,ENST00000216468.8,XM_017021224.2,IPR009038,165.0,,1.0,0.0,True,False
+chr14:clu_9428,TMED8,human,dropped domain,ENST00000216468.8,NM_001346133.2,IPR009038,165.0,,1.0,0.0,False,True
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704295.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370104.2,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000397962.8,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370119.2,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370105.2,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704343.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857257.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857271.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857256.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001330057.3,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857249.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857251.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857250.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001202466.3,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857267.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857265.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370116.2,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370120.2,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370124.3,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000509513.6,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000381591.5,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857259.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857253.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857270.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857258.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370112.2,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370123.2,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704315.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857272.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370121.2,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972252.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704301.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704303.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,XM_017015594.2,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000558098.4,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704335.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000704336.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000488275.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917037.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000439456.5,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972238.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857255.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972239.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972240.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972241.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857252.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857254.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972242.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972243.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972244.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857260.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857261.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972245.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857262.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857263.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857269.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857264.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917038.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857283.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857266.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857284.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857268.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917039.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972247.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857274.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972248.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857275.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000381584.6,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000602682.6,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704339.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857276.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857277.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857278.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000403354.5,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857279.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857280.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972253.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857281.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704306.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000627286.2,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000402736.5,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704307.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972256.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972254.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000397955.7,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972255.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972249.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972257.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972250.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857282.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972251.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917040.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917041.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972258.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704338.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000704340.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000473115.1,,,,,,,
+chr10:clu_16825,ZMYND11,human,shorter,ENST00000381604.9,ENST00000972246.1,IPR047269,324.0,285.0,1.0,1.0,True,False
+chr20:clu_4032:FAM209A,FAM209A,human,feature_not_mapped,ENST00000371328.5,,,,,,,,
+chr20:clu_4032:FAM209A,FAM209A,human,feature_not_mapped,ENST00000371328.5,,,,,,,,
+chr20:clu_4032:FAM209A,FAM209A,human,feature_not_mapped,ENST00000371328.5,,,,,,,,
+chr20:clu_4032:FAM209A,FAM209A,human,feature_not_mapped,ENST00000371328.5,,,,,,,,
+chr20:clu_4032:FAM209A,FAM209A,human,feature_not_mapped,ENST00000371328.5,,,,,,,,
+chr20:clu_4032:FAM209A,FAM209A,human,feature_not_mapped,ENST00000371328.5,,,,,,,,
+chr20:clu_4032:FAM209A,FAM209A,human,feature_not_mapped,ENST00000371328.5,,,,,,,,
+chr20:clu_4032:FAM209A,FAM209A,human,dropped domain,ENST00000371328.5,XM_047439965.1,IPR027943,171.0,,1.0,0.0,True,False
+chr20:clu_4032:FAM209A,FAM209A,human,dropped domain,ENST00000371328.5,XM_047439964.1,IPR027943,171.0,,1.0,0.0,False,False
+chr20:clu_4032:FAM209A,FAM209A,human,dropped domain,ENST00000371328.5,ENST00000481560.1,IPR027943,171.0,,1.0,0.0,False,False
+chr10:clu_16826,GTPBP4,human,feature_not_mapped,ENST00000360803.9,,,,,,,,
+chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,XM_047424932.1,,,,,,,
+chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000925424.1,,,,,,,
+chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000892149.1,,,,,,,
+chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000892145.1,,,,,,,
+chr10:clu_16826,GTPBP4,human,transcript_doesnt_have_features,ENST00000360803.9,ENST00000925420.1,,,,,,,
+chr10:clu_16826,GTPBP4,human,transcript_doesnt_have_features,ENST00000360803.9,ENST00000892148.1,,,,,,,
+chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000892146.1,,,,,,,
+chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000892147.1,,,,,,,
+chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000925425.1,,,,,,,
+chr10:clu_16826,GTPBP4,human,transcript_doesnt_have_features,ENST00000360803.9,ENST00000925421.1,,,,,,,
+chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000925422.1,,,,,,,
+chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000925423.1,,,,,,,
+chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000892150.1,,,,,,,
+chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000360059.5,,,,,,,
+chr10:clu_16826,GTPBP4,human,transcript_doesnt_have_features,ENST00000360803.9,ENST00000491635.1,,,,,,,
+chr10:clu_16826,GTPBP4,human,transcript_doesnt_have_features,ENST00000360803.9,ENST00000491261.1,,,,,,,
+chr10:clu_16826,GTPBP4,human,transcript_doesnt_have_features,ENST00000360803.9,ENST00000483839.2,,,,,,,
+chr12:clu_6316,GLIPR1,human,no_unique_features,ENST00000266659.8,ENST00000550491.1,,,,,,,
+chr12:clu_6316,GLIPR1,human,dropped domain,ENST00000266659.8,XM_047428131.1,IPR035940,204.0,,1.0,0.0,False,False
+chr12:clu_6316,GLIPR1,human,dropped domain,ENST00000266659.8,XM_047428131.1,IPR001283,158.0,,1.0,0.0,False,False
+chr12:clu_6316,GLIPR1,human,shorter,ENST00000266659.8,ENST00000536703.5,IPR035940,204.0,125.0,1.0,1.0,False,False
+chr12:clu_6316,GLIPR1,human,dropped domain,ENST00000266659.8,ENST00000536703.5,IPR001283,158.0,,1.0,0.0,False,False
+chr12:clu_6316,GLIPR1,human,shorter,ENST00000266659.8,ENST00000456650.7,IPR035940,204.0,130.0,1.0,1.0,True,False
+chr12:clu_6316,GLIPR1,human,shorter,ENST00000266659.8,ENST00000456650.7,IPR001283,158.0,108.0,1.0,1.0,True,False
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000397962.8,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370119.2,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704343.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857257.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857271.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001330057.3,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857249.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857251.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370116.2,,,,,,,
+chr10:clu_16823,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,NM_001370124.3,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000509513.6,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000381591.5,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857259.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370112.2,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704315.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972252.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704301.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000558098.4,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704336.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000488275.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917037.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972238.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972239.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972240.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972241.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857252.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857254.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972242.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972245.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857262.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857263.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857269.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857264.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857283.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857266.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857284.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857268.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917039.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972246.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972248.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857275.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000381584.6,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704339.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857277.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857278.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857280.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972253.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857281.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704306.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000627286.2,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000402736.5,,,,,,,
+chr10:clu_16823,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000972256.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972254.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000397955.7,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972249.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972250.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857282.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972251.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917040.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917041.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972258.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000704340.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000473115.1,,,,,,,
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704295.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704295.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704295.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704295.1,IPR032698,,101.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704295.1,IPR036623,,85.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704295.1,IPR001487,,107.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704295.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704295.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704295.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370104.2,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370104.2,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370104.2,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370105.2,IPR048589,42.0,,1.0,0.0,True,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370105.2,IPR036427,108.0,,1.0,0.0,True,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370105.2,IPR047269,324.0,,1.0,0.0,True,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857256.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857256.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857256.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857256.1,IPR032698,,101.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857256.1,IPR036623,,85.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857256.1,IPR001487,,107.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857256.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857256.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857256.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857250.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857250.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857250.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857250.1,IPR032698,,101.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857250.1,IPR036623,,85.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857250.1,IPR001487,,107.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857250.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857250.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857250.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001202466.3,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001202466.3,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001202466.3,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857267.1,IPR048589,42.0,77.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857267.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857267.1,IPR047269,324.0,352.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857265.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857265.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857265.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857265.1,IPR036623,,85.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857265.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857265.1,IPR001487,,95.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857265.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857265.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370120.2,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370120.2,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370120.2,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857253.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857253.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857253.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857253.1,IPR032698,,101.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857253.1,IPR036623,,85.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857253.1,IPR001487,,107.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857253.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857253.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857253.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857270.1,IPR048589,42.0,77.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857270.1,IPR036427,108.0,114.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857270.1,IPR047269,324.0,454.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857258.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857258.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857258.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857258.1,IPR036623,,85.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857258.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857258.1,IPR001487,,95.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857258.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857258.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370123.2,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370123.2,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370123.2,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857272.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857272.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857272.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857272.1,IPR032698,,101.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857272.1,IPR036623,,85.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857272.1,IPR001487,,107.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857272.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857272.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857272.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370121.2,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370121.2,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370121.2,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704303.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704303.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704303.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704303.1,IPR032698,,101.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704303.1,IPR036623,,85.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704303.1,IPR001487,,107.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704303.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704303.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704303.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,XM_017015594.2,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,XM_017015594.2,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,XM_017015594.2,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704335.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704335.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704335.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704335.1,IPR032698,,101.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704335.1,IPR036623,,85.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704335.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704335.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704335.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704335.1,IPR001487,,107.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000439456.5,IPR048589,42.0,77.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000439456.5,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000439456.5,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857255.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857255.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857255.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857255.1,IPR036623,,85.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857255.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857255.1,IPR001487,,95.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857255.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857255.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000972243.1,IPR048589,42.0,77.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972243.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000972243.1,IPR047269,324.0,351.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972244.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972244.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972244.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000972244.1,IPR032698,,95.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000972244.1,IPR036623,,82.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000972244.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000972244.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000972244.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000972244.1,IPR001487,,107.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857260.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857260.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857260.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857260.1,IPR036623,,85.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857260.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857260.1,IPR001487,,95.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857260.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857260.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857261.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857261.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857261.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857261.1,IPR032698,,95.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857261.1,IPR036623,,82.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857261.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857261.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857261.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857261.1,IPR001487,,107.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000917038.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000917038.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000917038.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000917038.1,IPR036623,,85.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000917038.1,IPR032698,,100.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000917038.1,IPR001487,,106.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000917038.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000917038.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000917038.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972247.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972247.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972247.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000972247.1,IPR036623,,85.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000972247.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000972247.1,IPR001487,,95.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000972247.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000972247.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857274.1,IPR048589,42.0,77.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857274.1,IPR036427,108.0,115.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857274.1,IPR047269,324.0,432.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000602682.6,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000602682.6,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000602682.6,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000602682.6,IPR036623,,85.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000602682.6,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000602682.6,IPR001487,,95.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000602682.6,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000602682.6,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857276.1,IPR048589,42.0,77.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857276.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857276.1,IPR047269,324.0,399.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857276.1,IPR001487,,94.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000403354.5,IPR048589,42.0,77.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,same,ENST00000381604.9,ENST00000403354.5,IPR036427,108.0,108.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,same,ENST00000381604.9,ENST00000403354.5,IPR047269,324.0,324.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857279.1,IPR048589,42.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857279.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857279.1,IPR047269,324.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857279.1,IPR036623,,85.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857279.1,IPR032698,,100.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857279.1,IPR001487,,106.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857279.1,IPR003654,,53.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857279.1,IPR007863,,50.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857279.1,IPR000313,,74.0,0.0,2.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000704307.1,IPR048589,42.0,77.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704307.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000704307.1,IPR047269,324.0,352.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000972255.1,IPR048589,42.0,77.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000972255.1,IPR036427,108.0,115.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000972255.1,IPR047269,324.0,453.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000972257.1,IPR048589,42.0,77.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972257.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000972257.1,IPR047269,324.0,377.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000972257.1,IPR001487,,95.0,0.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000704338.1,IPR048589,42.0,77.0,1.0,1.0,False,False
+chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704338.1,IPR036427,108.0,,1.0,0.0,False,False
+chr10:clu_16823,ZMYND11,human,same,ENST00000381604.9,ENST00000704338.1,IPR047269,324.0,324.0,1.0,1.0,False,False
 chr10:clu_16824,ZMYND11,human,feature_not_mapped,ENST00000381604.9,,,,,,,,
 chr10:clu_16824,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704295.1,,,,,,,
 chr10:clu_16824,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370104.2,,,,,,,
@@ -98,423 +681,28 @@ chr10:clu_16824,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST000009722
 chr10:clu_16824,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000704338.1,,,,,,,
 chr10:clu_16824,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000704340.1,,,,,,,
 chr10:clu_16824,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000473115.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,feature_not_mapped,ENST00000360803.9,,,,,,,,
-chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,XM_047424932.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000925424.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000892149.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000892145.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,transcript_doesnt_have_features,ENST00000360803.9,ENST00000925420.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,transcript_doesnt_have_features,ENST00000360803.9,ENST00000892148.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000892146.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000892147.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000925425.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,transcript_doesnt_have_features,ENST00000360803.9,ENST00000925421.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000925422.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000925423.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000892150.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,no_unique_features,ENST00000360803.9,ENST00000360059.5,,,,,,,
-chr10:clu_16826,GTPBP4,human,transcript_doesnt_have_features,ENST00000360803.9,ENST00000491635.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,transcript_doesnt_have_features,ENST00000360803.9,ENST00000491261.1,,,,,,,
-chr10:clu_16826,GTPBP4,human,transcript_doesnt_have_features,ENST00000360803.9,ENST00000483839.2,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,XM_011533262.3,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000852695.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,XM_047447138.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000852696.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,XM_017005504.3,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,XM_047447140.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,XM_047447139.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000433556.6,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000464087.6,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000492472.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000496179.5,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000462025.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000471995.5,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000474818.5,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000494360.5,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000489437.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000475128.5,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000493993.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000475590.5,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000492430.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000479275.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000464988.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000461242.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000469838.5,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000404526.6,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000852694.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000852693.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000852692.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000852697.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000852700.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000952988.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000852699.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000852698.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000936119.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000936120.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000936121.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000852701.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000952989.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000936122.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000438369.5,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000852702.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,no_unique_features,ENST00000347869.8,ENST00000952990.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000952991.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000437500.5,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000417905.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000395174.6,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000441812.6,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,transcript_doesnt_have_features,ENST00000347869.8,ENST00000474470.1,,,,,,,
-chr3:clu_10461:RBM5,RBM5,human,dropped domain,ENST00000347869.8,ENST00000936118.1,PTHR13948,807.0,,1.0,0.0,True,False
-chr3:clu_10461:RBM5,RBM5,human,dropped domain,ENST00000347869.8,ENST00000936118.1,IPR035979,136.0,,1.0,0.0,True,False
-chr3:clu_10461:RBM5,RBM5,human,dropped domain,ENST00000347869.8,ENST00000936118.1,IPR036443,36.0,,1.0,0.0,True,False
-chr3:clu_10461:RBM5,RBM5,human,dropped domain,ENST00000347869.8,ENST00000936118.1,IPR012677,127.0,,1.0,0.0,True,False
-chr3:clu_10461:RBM5,RBM5,human,dropped domain,ENST00000347869.8,ENST00000936118.1,cd16168,56.0,,1.0,0.0,True,False
-chr3:clu_10461:RBM5,RBM5,human,dropped domain,ENST00000347869.8,ENST00000936118.1,IPR013087,31.0,,1.0,0.0,True,False
-chr3:clu_10461:RBM5,RBM5,human,dropped domain,ENST00000347869.8,ENST00000936118.1,IPR000467,47.0,,1.0,0.0,True,False
-chr3:clu_10461:RBM5,RBM5,human,dropped domain,ENST00000347869.8,ENST00000441305.5,PTHR13948,807.0,,1.0,0.0,False,False
-chr3:clu_10461:RBM5,RBM5,human,dropped domain,ENST00000347869.8,ENST00000441305.5,IPR035979,136.0,,1.0,0.0,False,False
-chr3:clu_10461:RBM5,RBM5,human,dropped domain,ENST00000347869.8,ENST00000441305.5,IPR036443,36.0,,1.0,0.0,False,False
-chr3:clu_10461:RBM5,RBM5,human,longer,ENST00000347869.8,ENST00000441305.5,IPR012677,127.0,132.0,1.0,1.0,False,False
-chr3:clu_10461:RBM5,RBM5,human,dropped domain,ENST00000347869.8,ENST00000441305.5,cd16168,56.0,,1.0,0.0,False,False
-chr3:clu_10461:RBM5,RBM5,human,dropped domain,ENST00000347869.8,ENST00000441305.5,IPR013087,31.0,,1.0,0.0,False,False
-chr3:clu_10461:RBM5,RBM5,human,dropped domain,ENST00000347869.8,ENST00000441305.5,IPR000467,47.0,,1.0,0.0,False,False
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704295.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370104.2,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000397962.8,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370119.2,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370105.2,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704343.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857257.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857271.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857256.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001330057.3,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857249.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857251.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857250.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001202466.3,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857267.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857265.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370116.2,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370120.2,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370124.3,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000509513.6,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000381591.5,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857259.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857253.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857270.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857258.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370112.2,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370123.2,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704315.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857272.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370121.2,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972252.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704301.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704303.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,XM_017015594.2,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000558098.4,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704335.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000704336.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000488275.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917037.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000439456.5,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972238.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857255.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972239.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972240.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972241.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857252.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857254.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972242.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972243.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972244.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857260.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857261.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972245.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857262.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857263.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857269.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857264.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917038.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857283.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857266.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857284.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857268.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917039.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972247.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857274.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972248.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857275.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000381584.6,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000602682.6,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704339.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857276.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857277.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857278.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000403354.5,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857279.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857280.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972253.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857281.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704306.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000627286.2,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000402736.5,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704307.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972256.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972254.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000397955.7,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972255.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972249.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972257.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972250.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857282.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972251.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917040.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917041.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972258.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704338.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000704340.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000473115.1,,,,,,,
-chr10:clu_16825,ZMYND11,human,shorter,ENST00000381604.9,ENST00000972246.1,IPR047269,324.0,285.0,1.0,1.0,True,False
-chr5:clu_3349,DHX29,human,no_unique_features,ENST00000251636.10,ENST00000867274.1,,,,,,,
-chr5:clu_3349,DHX29,human,transcript_doesnt_have_features,ENST00000251636.10,NM_001345965.2,,,,,,,
-chr5:clu_3349,DHX29,human,transcript_doesnt_have_features,ENST00000251636.10,ENST00000513447.1,,,,,,,
-chr5:clu_3349,DHX29,human,transcript_doesnt_have_features,ENST00000251636.10,ENST00000867276.1,,,,,,,
-chr5:clu_3349,DHX29,human,no_unique_features,ENST00000251636.10,ENST00000867273.1,,,,,,,
-chr5:clu_3349,DHX29,human,no_unique_features,ENST00000251636.10,ENST00000962096.1,,,,,,,
-chr5:clu_3349,DHX29,human,no_unique_features,ENST00000251636.10,ENST00000867272.1,,,,,,,
-chr5:clu_3349,DHX29,human,no_unique_features,ENST00000251636.10,ENST00000962095.1,,,,,,,
-chr5:clu_3349,DHX29,human,no_unique_features,ENST00000251636.10,ENST00000912931.1,,,,,,,
-chr5:clu_3349,DHX29,human,transcript_doesnt_have_features,ENST00000251636.10,ENST00000912930.1,,,,,,,
-chr5:clu_3349,DHX29,human,transcript_doesnt_have_features,ENST00000251636.10,ENST00000508346.1,,,,,,,
-chr5:clu_3349,DHX29,human,shorter,ENST00000251636.10,ENST00000867275.1,IPR034730,1369.0,1268.0,1.0,1.0,True,False
-chr5:clu_3349,DHX29,human,same,ENST00000251636.10,ENST00000867275.1,IPR056890,55.0,55.0,1.0,1.0,True,False
-chr5:clu_3349,DHX29,human,same,ENST00000251636.10,ENST00000867275.1,IPR056328,78.0,78.0,1.0,1.0,True,False
-chr5:clu_3349,DHX29,human,longer_domains,ENST00000251636.10,ENST00000867275.1,IPR027417,426.0,429.0,2.0,2.0,True,False
-chr5:clu_3349,DHX29,human,dropped domain,ENST00000251636.10,ENST00000867275.1,IPR011709,87.0,,1.0,0.0,True,False
-chr5:clu_3349,DHX29,human,same,ENST00000251636.10,ENST00000867275.1,IPR059023,58.0,58.0,1.0,1.0,True,False
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000397962.8,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370119.2,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704343.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857257.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857271.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001330057.3,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857249.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857251.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370116.2,,,,,,,
-chr10:clu_16823,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,NM_001370124.3,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000509513.6,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000381591.5,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857259.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,NM_001370112.2,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704315.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972252.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704301.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000558098.4,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704336.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000488275.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917037.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972238.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972239.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972240.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972241.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857252.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857254.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972242.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972245.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857262.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857263.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857269.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857264.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857283.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857266.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857284.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857268.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917039.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972246.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972248.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857275.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000381584.6,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704339.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857277.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857278.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857280.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972253.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857281.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000704306.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000627286.2,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000402736.5,,,,,,,
-chr10:clu_16823,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000972256.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972254.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000397955.7,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972249.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972250.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000857282.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972251.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917040.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000917041.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,no_unique_features,ENST00000381604.9,ENST00000972258.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000704340.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,transcript_doesnt_have_features,ENST00000381604.9,ENST00000473115.1,,,,,,,
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704295.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704295.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704295.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704295.1,IPR003000,,101.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704295.1,IPR026587,,85.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704295.1,IPR001487,,107.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704295.1,IPR026590,,53.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704295.1,IPR017907,,50.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704295.1,IPR000313,,74.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370104.2,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370104.2,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370104.2,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370105.2,IPR048589,42.0,,1.0,0.0,True,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370105.2,IPR036427,108.0,,1.0,0.0,True,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370105.2,IPR047269,324.0,,1.0,0.0,True,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857256.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857256.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857256.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857256.1,IPR003000,,101.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857256.1,IPR026587,,85.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857256.1,IPR001487,,107.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857256.1,IPR026590,,53.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857256.1,IPR017907,,50.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857256.1,IPR000313,,74.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857250.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857250.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857250.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857250.1,IPR003000,,101.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857250.1,IPR026587,,85.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857250.1,IPR001487,,107.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857250.1,IPR026590,,53.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857250.1,IPR017907,,50.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857250.1,IPR000313,,74.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001202466.3,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001202466.3,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001202466.3,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857267.1,IPR048589,42.0,77.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857267.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857267.1,IPR047269,324.0,352.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857265.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857265.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857265.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857265.1,IPR026587,,85.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857265.1,IPR000313,,74.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857265.1,IPR001487,,95.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857265.1,IPR017907,,50.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857265.1,IPR026590,,53.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370120.2,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370120.2,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370120.2,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857253.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857253.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857253.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857253.1,IPR003000,,101.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857253.1,IPR026587,,85.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857253.1,IPR001487,,107.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857253.1,IPR026590,,53.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857253.1,IPR017907,,50.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857253.1,IPR000313,,74.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857270.1,IPR048589,42.0,77.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857270.1,IPR036427,108.0,114.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857270.1,IPR047269,324.0,454.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857258.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857258.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857258.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857258.1,IPR026587,,85.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857258.1,IPR000313,,74.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857258.1,IPR001487,,95.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857258.1,IPR017907,,50.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857258.1,IPR026590,,53.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370123.2,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370123.2,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370123.2,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857272.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857272.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857272.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857272.1,IPR003000,,101.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857272.1,IPR026587,,85.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857272.1,IPR001487,,107.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857272.1,IPR026590,,53.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857272.1,IPR017907,,50.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857272.1,IPR000313,,74.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370121.2,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370121.2,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,NM_001370121.2,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704303.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704303.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704303.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704303.1,IPR003000,,101.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704303.1,IPR026587,,85.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704303.1,IPR001487,,107.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704303.1,IPR026590,,53.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704303.1,IPR017907,,50.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704303.1,IPR000313,,74.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,XM_017015594.2,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,XM_017015594.2,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,XM_017015594.2,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704335.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704335.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704335.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704335.1,IPR003000,,101.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704335.1,IPR026587,,85.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704335.1,IPR026590,,53.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704335.1,IPR000313,,74.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704335.1,IPR017907,,50.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000704335.1,IPR001487,,107.0,0.0,2.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000439456.5,IPR048589,42.0,77.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000439456.5,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000439456.5,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857255.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857255.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857255.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000972243.1,IPR048589,42.0,77.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972243.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000972243.1,IPR047269,324.0,351.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972244.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972244.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972244.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857260.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857260.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857260.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857261.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857261.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857261.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000917038.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000917038.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000917038.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972247.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972247.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972247.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857274.1,IPR048589,42.0,77.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857274.1,IPR036427,108.0,115.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857274.1,IPR047269,324.0,432.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000602682.6,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000602682.6,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000602682.6,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857276.1,IPR048589,42.0,77.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857276.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000857276.1,IPR047269,324.0,399.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000857276.1,IPR001487,,94.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000403354.5,IPR048589,42.0,77.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,same,ENST00000381604.9,ENST00000403354.5,IPR036427,108.0,108.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,same,ENST00000381604.9,ENST00000403354.5,IPR047269,324.0,324.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857279.1,IPR048589,42.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857279.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000857279.1,IPR047269,324.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000704307.1,IPR048589,42.0,77.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704307.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000704307.1,IPR047269,324.0,352.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000972255.1,IPR048589,42.0,77.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000972255.1,IPR036427,108.0,115.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000972255.1,IPR047269,324.0,453.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000972257.1,IPR048589,42.0,77.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000972257.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000972257.1,IPR047269,324.0,377.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,added_domain,ENST00000381604.9,ENST00000972257.1,IPR001487,,95.0,0.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,longer,ENST00000381604.9,ENST00000704338.1,IPR048589,42.0,77.0,1.0,1.0,False,False
-chr10:clu_16823,ZMYND11,human,dropped domain,ENST00000381604.9,ENST00000704338.1,IPR036427,108.0,,1.0,0.0,False,False
-chr10:clu_16823,ZMYND11,human,same,ENST00000381604.9,ENST00000704338.1,IPR047269,324.0,324.0,1.0,1.0,False,False
-chr3:clu_10461:RBM6,RBM6,human,feature_not_mapped,ENST00000266022.9,,,,,,,,
-chr3:clu_10461:RBM6,RBM6,human,feature_not_mapped,ENST00000266022.9,,,,,,,,
-chr3:clu_10461:RBM6,RBM6,human,no_canonical_features,ENST00000266022.9,,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,feature_not_mapped,ENST00000357348.10,,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,feature_not_mapped,ENST00000357348.10,,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,feature_not_mapped,ENST00000357348.10,,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,feature_not_mapped,ENST00000357348.10,,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,feature_not_mapped,ENST00000357348.10,,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,feature_not_mapped,ENST00000357348.10,,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,no_unique_features,ENST00000357348.10,ENST00000023939.8,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,no_unique_features,ENST00000357348.10,ENST00000886934.1,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,no_unique_features,ENST00000357348.10,XM_017027872.2,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,no_unique_features,ENST00000357348.10,XM_047440189.1,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,no_unique_features,ENST00000357348.10,ENST00000477485.1,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,no_unique_features,ENST00000357348.10,ENST00000477573.1,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,no_unique_features,ENST00000357348.10,ENST00000886933.1,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,no_unique_features,ENST00000357348.10,ENST00000886935.1,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,no_unique_features,ENST00000357348.10,ENST00000923345.1,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,no_unique_features,ENST00000357348.10,ENST00000886936.1,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,no_unique_features,ENST00000357348.10,ENST00000886937.1,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,no_unique_features,ENST00000357348.10,ENST00000886938.1,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,no_unique_features,ENST00000357348.10,ENST00000923346.1,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,no_unique_features,ENST00000357348.10,ENST00000449062.1,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,transcript_doesnt_have_features,ENST00000357348.10,ENST00000484084.5,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,transcript_doesnt_have_features,ENST00000357348.10,ENST00000487211.5,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,transcript_doesnt_have_features,ENST00000357348.10,ENST00000466260.1,,,,,,,
+chr20:clu_4032:RTF2,RTF2,human,shorter,ENST00000357348.10,ENST00000395881.7,IPR006735,302.0,207.0,1.0,1.0,True,False
+chr20:clu_4032:RTF2,RTF2,human,same,ENST00000357348.10,ENST00000395881.7,IPR027799,46.0,46.0,1.0,1.0,True,False
