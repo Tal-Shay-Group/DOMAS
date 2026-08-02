@@ -20,8 +20,8 @@ _DEFAULT_NUM_WORKERS = os.cpu_count() or 5
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Analyze junctions and detect domain changes across alternative transcripts.")
-    parser.add_argument("-format", required=False, choices=["hadas", "ioe", "leafcutter", "rmats", "majiq"],
-                         help="Input file format: 'hadas' for a hadas-style comparative "
+    parser.add_argument("-format", required=False, choices=["internal", "ioe", "leafcutter", "rmats", "majiq"],
+                         help="Input file format: 'internal' for the internal comparative "
                               "splicing Excel file, 'ioe' for a SUPPA .ioe file (or a "
                               "directory of them, see -ioe_pattern), 'leafcutter' for a pair "
                               "of leafcutter_ds output files (see -lc_sig / -lc_effect), "
@@ -29,8 +29,8 @@ def parse_args():
                               "[Event].MATS.JC.txt files, passed via -input), 'majiq' for a "
                               "MAJIQ voila TSV file (passed via -input)")
     parser.add_argument("-input", required=False, default=None, type=str,
-                         help="Path to the input for -format hadas/ioe/rmats/majiq (Excel for "
-                              "hadas; a single .ioe file or a directory of .ioe files for ioe; "
+                         help="Path to the input for -format internal/ioe/rmats/majiq (Excel for "
+                              "internal; a single .ioe file or a directory of .ioe files for ioe; "
                               "an rMATS-turbo output directory for rmats; a voila TSV file for "
                               "majiq). Not used with -format leafcutter.")
     parser.add_argument("-lc_sig", required=False, default=None, type=str,
@@ -42,7 +42,7 @@ def parse_args():
     parser.add_argument("-specie", required=False, choices=sorted(alternative_splicing.utils.SPECIE_DB_NAME),
                          help="Species the input was produced from. Allowed values: "
                               "human, mouse, rat. Required for every "
-                              "format except hadas, which is a human/mouse comparison and "
+                              "format except internal, which is a human/mouse comparison and "
                               "carries the species per row. rMATS, MAJIQ and SUPPA files "
                               "contain no species field at all, so it cannot be read from "
                               "them. DOMAS aborts if the gene ids turn out to belong to a "
@@ -51,7 +51,7 @@ def parse_args():
     parser.add_argument("-output_csv", type=str, default="junctions_analysis.csv", help="Path to the output csv")
     parser.add_argument("-gene_ids", type=str, default=None,
                          help="Comma-separated list of gene symbols to generate PDFs for "
-                              "(only honored with -format hadas together with -pdf; "
+                              "(only honored with -format internal together with -pdf; "
                               "default is all genes)")
     parser.add_argument("-ioe_pattern", type=str, default=r"output_prefix_.*_strict.ioe",
                          help="Filename regex used to find .ioe files when -input is a "
@@ -70,9 +70,9 @@ def parse_args():
                               "from the RepresentativeDomains table where available, "
                               "falling back to DomainEvent/DomainType per protein.")
     parser.add_argument("-pdf", action="store_true",
-                         help="Generate a per-gene PDF (only honored with -format hadas; "
+                         help="Generate a per-gene PDF (only honored with -format internal; "
                               "the ioe path never generates PDFs regardless of this flag). "
-                              "Off by default: a full-scale hadas run would otherwise "
+                              "Off by default: a full-scale internal run would otherwise "
                               "produce a PDF per gene.")
     parser.add_argument("-no_stats", action="store_true",
                          help="Skip the results_stats.py report. By default the report "
@@ -102,13 +102,13 @@ def parse_args():
     if not args.format:
         parser.error("-format is required")
 
-    # hadas is a human/mouse comparison and states the species per row, so a single
+    # internal is a human/mouse comparison and states the species per row, so a single
     # -specie cannot describe it. Every other format needs it stated: three of them
     # carry no species field, and inferring it from the gene id prefix fails for
     # genes keyed only by GeneID.
-    if args.format == "hadas":
+    if args.format == "internal":
         if args.specie:
-            parser.error("-specie does not apply to -format hadas: that input is a "
+            parser.error("-specie does not apply to -format internal: that input is a "
                          "human/mouse comparison and carries the species per row.")
     elif not args.specie:
         parser.error(f"-specie is required for -format {args.format} "
@@ -118,13 +118,13 @@ def parse_args():
     if not os.path.exists(args.dochap):
         parser.error(f"DoChaP db not found at {args.dochap}")
 
-    # Reject mixing inputs from different formats: -input (hadas/ioe) must not be
+    # Reject mixing inputs from different formats: -input (internal/ioe) must not be
     # combined with the leafcutter -lc_sig/-lc_effect pair. Exit with -1 per spec.
     input_provided = args.input is not None
     leafcutter_provided = args.lc_sig is not None or args.lc_effect is not None
     if input_provided and leafcutter_provided:
         sys.stderr.write(
-            "Error: mixed input formats - provide either -input (for -format hadas/ioe/rmats/majiq) "
+            "Error: mixed input formats - provide either -input (for -format internal/ioe/rmats/majiq) "
             "OR -lc_sig/-lc_effect (for -format leafcutter), not both.\n")
         sys.exit(-1)
 
@@ -192,7 +192,7 @@ def main():
                 filter_non_comparable=not args.keep_non_comparable,
                 write_all_comparable=args.write_all_comparable,
             )
-        elif args.format == "hadas":
+        elif args.format == "internal":
             print_genes = [g.strip() for g in args.gene_ids.split(',')] if args.gene_ids else None
             alternative_splicing.analyze_hadas_input(
                 con, input_file=args.input, output_csv=args.output_csv,
@@ -222,7 +222,7 @@ def main():
     if not args.no_stats:
         import results_stats
         stats_out_dir = args.stats_out_dir or os.path.dirname(os.path.abspath(args.output_csv))
-        if args.format == "hadas":
+        if args.format == "internal":
             results_stats.generate_report(hadas_file=args.output_csv, out_dir=stats_out_dir)
         else:
             results_stats.generate_report(ioe_file=args.output_csv, out_dir=stats_out_dir)
