@@ -12,12 +12,49 @@ def pytest_addoption(parser):
              "reference-comparison tests instead of deleting them after a "
              "successful comparison.",
     )
+    # pytest options must be double-dashed (its parser rejects single-dash long
+    # names), so the DOMAS CLI's -dochap is spelled --dochap here. --db-path is
+    # the older name for the same thing and still works.
     parser.addoption(
-        "--db-path",
+        "--dochap", "--db-path",
         action="store",
+        dest="dochap",
         default=DEFAULT_DB_PATH,
         help="Path to the DoChaP merged sqlite database to run the tests "
              f"against. Defaults to {DEFAULT_DB_PATH}.",
+    )
+    parser.addoption(
+        "--ioe-input-dir",
+        action="store",
+        default=None,
+        help="Directory of SUPPA .ioe files to run the full-scale ioe comparison "
+             "against (e.g. domas_extra/external_data/H_sapiens). The test is "
+             "skipped unless this and --ioe-output-file are both given.",
+    )
+    parser.addoption(
+        "--ioe-output-file",
+        action="store",
+        default=None,
+        help="CSV the full-scale ioe run is compared against. Created from the "
+             "run when it does not exist yet, so the first invocation "
+             "bootstraps a baseline and later ones compare to it.",
+    )
+    parser.addoption(
+        "--ioe-specie",
+        action="store",
+        default="human",
+        help="Species the --ioe-input-dir data came from (human/mouse/rat). SUPPA "
+             "files carry no species field and DOMAS aborts on a mismatch, so this "
+             "has to match the directory.",
+    )
+    parser.addoption(
+        "--ioe-max-clusters",
+        action="store",
+        type=int,
+        default=0,
+        help="Cap the full-scale ioe run at the first N clusters (0 = no cap). "
+             "A whole H_sapiens directory is a multi-hour run; this makes the "
+             "comparison something you can do in a coffee break.",
     )
     parser.addoption(
         "--run-slow",
@@ -49,4 +86,24 @@ def keep_test_output(request):
 
 @pytest.fixture(scope='module')
 def db_path(request):
-    return request.config.getoption("--db-path")
+    return request.config.getoption("dochap")
+
+
+@pytest.fixture(scope='module')
+def ioe_input_dir(request):
+    return request.config.getoption("--ioe-input-dir")
+
+
+@pytest.fixture(scope='module')
+def ioe_output_file(request):
+    return request.config.getoption("--ioe-output-file")
+
+
+@pytest.fixture(scope='module')
+def ioe_max_clusters(request):
+    return request.config.getoption("--ioe-max-clusters")
+
+
+@pytest.fixture(scope='module')
+def ioe_specie(request):
+    return request.config.getoption("--ioe-specie")

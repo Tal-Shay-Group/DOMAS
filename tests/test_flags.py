@@ -355,6 +355,42 @@ def _compare_or_create_reference(generated_csv, reference_csv):
     pd.testing.assert_frame_equal(df_generated, df_reference, check_dtype=False)
 
 
+def test_full_scale_ioe_compare_against_reference(con, tmp_path, ioe_input_dir,
+                                                   ioe_output_file, ioe_max_clusters,
+                                                   ioe_specie):
+    """Run a directory of real SUPPA .ioe files and compare the result to a stored
+    CSV. Both live outside the repo - a whole H_sapiens directory is ~200 MB of
+    input and its output runs to millions of rows - so the paths are supplied:
+
+        pytest tests/test_flags.py -k full_scale_ioe \\
+            --dochap /path/DB_merged.sqlite \\
+            --ioe-input-dir  ../domas_extra/external_data/H_sapiens \\
+            --ioe-output-file ../domas_extra/ioe_full_results.csv \\
+            --ioe-max-clusters 200
+
+    Skipped unless both paths are given, so the default suite stays self-contained.
+    The output file is created from the run when absent, matching how the in-repo
+    references bootstrap.
+    """
+    if not ioe_input_dir or not ioe_output_file:
+        pytest.skip("needs --ioe-input-dir and --ioe-output-file")
+    if not os.path.isdir(ioe_input_dir):
+        pytest.skip(f"ioe input directory not found at {ioe_input_dir}")
+
+    import alternative_splicing
+
+    generated_csv = str(tmp_path / 'ioe_results.csv')
+    alternative_splicing.analyze_ioe_files(
+        con, input_path=ioe_input_dir, pattern=r"(output_prefix_|events_).*_strict\.ioe",
+        output_csv=generated_csv, specie=ioe_specie, examples_per_event=0,
+        num_workers=4, use_representative_domains=True,
+        max_clusters=ioe_max_clusters, filter_non_comparable=True,
+    )
+
+    assert os.path.exists(generated_csv), "the ioe run produced no output csv"
+    _compare_or_create_reference(generated_csv, ioe_output_file)
+
+
 def test_leafcutter_subset_compare_against_reference(con, keep_test_output):
     """Default (fast) leafcutter golden test: the leafcutter clusters for the
     genes in the rMATS subset (so it covers the same genes as the rMATS test,
