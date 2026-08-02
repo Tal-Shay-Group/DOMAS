@@ -34,6 +34,7 @@ _HMM_ROW_STEP = 0.34            # vertical distance between HMM-track rows
 _HMM_BAR_HEIGHT = 0.14         # height of an HMM element bar
 _HMM_TRACK_GAP = 0.62          # clearance below the domain labels before the HMM track
 _HMM_LABEL_DEPTH = 0.42        # space under the last HMM row for its angled labels
+_ANALYSED_MARK_COLOR = '#1a365d'  # analysed/drawn-only chip inside a domain ellipse
 
 SPECIES_ALIASES = {
     'h_sapiens': 'H_sapiens',
@@ -1091,7 +1092,7 @@ class GeneVisualization:
             return
 
         # HMM enrichment is drawn (track + changed-element table) only when
-        # hmm_by_transcript was supplied; otherwise the PDF is exactly as before.
+        # hmm_by_transcript is supplied.
         hmm_active = bool(self.hmm_by_transcript)
         canonical_transcript = next(
             (t for t in valid_transcripts if t['info'].get('canonical')), None)
@@ -1114,6 +1115,23 @@ class GeneVisualization:
                                          float(transcript['domains']['AA_end'].max()))
         if max_protein_length <= 0:
             max_protein_length = 1.0
+
+        # Every domain the ladder can rank is marked, whether or not this figure
+        # demotes one: the tier is worth reading in its own right, and marking only
+        # demoted figures would leave an unmarked domain meaning either "kept" or
+        # "unrankable", with no way to tell which.
+        ladder_marks_by_transcript = {
+            id(t): self.domain_ladder_marks(t) for t in valid_transcripts
+        }
+        marks_active = any(v for v in ladder_marks_by_transcript.values())
+        # A transcript with no RepresentativeDomains entry falls back to
+        # DomainEvent/DomainType, which states no entry type, so the ladder cannot
+        # rank it and its domains carry no mark. Next to a ranked transcript that
+        # needs explaining, or it reads as an inconsistency rather than a different
+        # annotation source.
+        marks_partial = marks_active and any(
+            ladder_marks_by_transcript[id(t)] is None and len(t['domains']) > 0
+            for t in valid_transcripts)
 
         gene_title = (
             f"{self.gene_name} - {self.gene_data['specie']}  |  "
@@ -1262,8 +1280,8 @@ class GeneVisualization:
                     row = transcript_start_row + i * stride
 
                     ax_results = fig.add_subplot(gs[row, :])
-                    # is_longest_cds/is_most_like_canonical are shown as a tag on the
-                    # label below instead of as redundant True/False table columns.
+                    # is_longest_cds/is_most_like_canonical show as a tag on the
+                    # label below, not as True/False table columns.
                     table_rows = transcript_results[i]
                     if table_rows is not None:
                         table_rows = table_rows.drop(columns=['is_longest_cds', 'is_most_like_canonical'], errors='ignore')
@@ -1287,7 +1305,11 @@ class GeneVisualization:
                     )
 
                     ax_protein = fig.add_subplot(gs[grow:grow + 2, 1])
-                    self._draw_protein_view(ax_protein, transcript, max_protein_length)
+                    self._draw_protein_view(
+                        ax_protein, transcript, max_protein_length,
+                        ladder_marks=(ladder_marks_by_transcript.get(id(transcript))
+                                      if marks_active else None),
+                    )
 
                     ax_label = fig.add_subplot(gs[grow + 2, :])
                     ax_label.axis('off')
@@ -1338,6 +1360,29 @@ class GeneVisualization:
                         "fold (low PAE) tends to be PRESERVED under splicing, an uncertain/multi-domain "
                         "one (high PAE) tends to change. It is a different question from the "
                         "functional/pathogenicity score (impact), which is region_am/constraint-driven.",
+                        fontsize=5.6, style='italic', color='#555555', va='bottom', wrap=True,
+                    )
+
+                if marks_active:
+                    legend = (
+                        "Mark inside each domain — its tier on the InterPro entry-type ladder: "
+                        "1 = Domain/Repeat · 2 = Family/Homologous superfamily · "
+                        "3 = member-DB hit (G3DSA/PTHR/SSF/cd/PF) · S = site/PTM. "
+                        "FILLED = kept, and compared. HOLLOW = removed before the comparison, so no "
+                        "row of the events table can refer to it — a 2 or 3 when more than half of it "
+                        "is already covered by a higher tier, an S unconditionally, and an entry of ANY "
+                        "tier when it duplicates a longer kept entry of the same accession that overlaps it."
+                    )
+                    if marks_partial:
+                        legend += (
+                            " A transcript whose domains carry NO mark has no RepresentativeDomains "
+                            "entry: its annotation comes from DomainEvent/DomainType, which states no "
+                            "entry type, so the ladder cannot rank it and every domain is compared as-is."
+                        )
+                    # Placed above the fold-change note when both are present, so
+                    # neither is written over the other.
+                    fig.text(
+                        0.02, 0.028 if self.fold_change_by_transcript else 0.004, legend,
                         fontsize=5.6, style='italic', color='#555555', va='bottom', wrap=True,
                     )
                 pdf.savefig(fig, bbox_inches='tight', dpi=PDF_RASTER_DPI)
@@ -1609,8 +1654,34 @@ class GeneVisualization:
             )
             ax.add_patch(rect)
     
-    def _draw_protein_view(self, ax, transcript, max_protein_length):
-        """Draw protein/domain view on the right (protein above domains)."""
+    def domain_ladder_marks(self, transcript):
+        """`{row key: (tier, was_kept)}` for `transcript`'s domains, or None when the
+        frame carries no InterPro entry types to rank by.
+
+        compare_domains() runs filter_representative_domains() over the same frame
+        before comparing anything, so a domain the ladder demotes is drawn but can
+        never reach the events table - CACNG3's G3DSA:1.20.140.150, covered 1.00 by
+        IPR051072, is drawn on both transcripts and mentioned on neither. The tier
+        says why; `was_kept` is read back from the filter's own output rather than
+        recomputed, so the mark states what the analysis did.
+        """
+        domains = transcript.get('domains')
+        if domains is None or len(domains) == 0:
+            return None
+        # Imported here, not at module scope: junction_analisys imports this module.
+        from junction_analisys import domain_entry_tiers, filter_representative_domains
+        tiers = domain_entry_tiers(domains)
+        if tiers is None:
+            return None
+        kept = set(filter_representative_domains(domains).index)
+        return {key: (tiers[key], key in kept) for key in domains.index}
+
+    def _draw_protein_view(self, ax, transcript, max_protein_length, ladder_marks=None):
+        """Draw protein/domain view on the right (protein above domains).
+
+        `ladder_marks`, when given, labels each domain with its ladder tier and
+        whether it was kept - see domain_ladder_marks().
+        """
         ax.set_xlim(0, max_protein_length)
         # Keep labels/borders as vector, but rasterize dense protein/domain fills.
         ax.set_rasterization_zorder(2.5)
@@ -1793,6 +1864,30 @@ class GeneVisualization:
                                        facecolor='none', edgecolor='black', linewidth=1.2, zorder=3)
                 ax.add_patch(ellipse_border)
             
+            # Ladder mark: a small rectangle inside the ellipse carrying the
+            # domain's tier (1/2/3/S), filled when the domain reaches
+            # compare_domains() and hollow when the ladder removes it. At 18% of the
+            # width it clears the ellipse edge and the centred length label, and the
+            # ellipse is over 3/4 of full height there, so the chip fits inside.
+            if ladder_marks is not None and row_key in ladder_marks:
+                tier, was_kept = ladder_marks[row_key]
+                # A fixed fraction of the axis, so the digit stays legible at any
+                # domain length; scaling to the domain gives a slab on a 300-aa one
+                # and something unreadable on a 30-aa one.
+                chip_w = max_protein_length * 0.034
+                chip_h = domain_height * 0.55
+                chip_x = domain_center - domain_width / 2 + domain_width * 0.18
+                ax.add_patch(Rectangle(
+                    (chip_x - chip_w / 2, domain_y - chip_h / 2), chip_w, chip_h,
+                    facecolor=_ANALYSED_MARK_COLOR if was_kept else 'white',
+                    edgecolor=_ANALYSED_MARK_COLOR,
+                    linewidth=0.7, zorder=3.6,
+                ))
+                ax.text(chip_x, domain_y, tier,
+                        ha='center', va='center', fontsize=4.2, fontweight='bold',
+                        color='white' if was_kept else _ANALYSED_MARK_COLOR,
+                        zorder=3.7, clip_on=True)
+
             # Domain length (aa) printed in the centre of the ellipse; a white
             # stroke keeps it legible over any fill colour.
             ax.text(domain_center, domain_y, str(int(domain_end_aa - domain_start_aa + 1)),
@@ -1800,9 +1895,8 @@ class GeneVisualization:
                     color='black', zorder=4, clip_on=True,
                     path_effects=[mpe.withStroke(linewidth=1.3, foreground='white')])
 
-            # Every domain gets its own label now - no more picking one
-            # representative per overlap group, since overlapping domains
-            # are on separate rows and no longer draw over each other.
+            # One label per domain: overlapping domains sit on separate rows, so
+            # none is hidden and none has to stand for its group.
             domain_name = self._format_domain_label(domain, compact_mode=False, max_len=DOMAIN_LABEL_MAX_LEN)
             if domain_name:
                 label_items_by_row.setdefault(row_of[row_key], []).append({

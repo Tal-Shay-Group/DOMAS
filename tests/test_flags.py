@@ -137,6 +137,8 @@ def _run_analysis(con, tmp_path, junctions_csv, hadas_format, restrict_pdf_to_co
             num_workers=1,
             restrict_pdf_to_comparable=restrict_pdf_to_comparable,
             use_representative_domains=use_representative_domains,
+        
+            write_all_comparable=True,
         )
     finally:
         os.chdir(cwd_before)
@@ -206,6 +208,8 @@ def _run_case_to_dir(con, case_dir, junctions_csv, hadas_format, restrict_pdf_to
             num_workers=1,
             restrict_pdf_to_comparable=restrict_pdf_to_comparable,
             use_representative_domains=use_representative_domains,
+        
+            write_all_comparable=True,
         )
     finally:
         os.chdir(cwd_before)
@@ -325,6 +329,8 @@ def _run_leafcutter_case_to_dir(con, case_dir, subset):
         create_pdf=False,
         num_workers=1,
         use_representative_domains=True,
+    
+        write_all_comparable=True,
     )
     return output_path
 
@@ -435,6 +441,8 @@ def _run_rmats_case_to_dir(con, case_dir, subset, filter_non_comparable=False):
         num_workers=1,
         use_representative_domains=True,
         filter_non_comparable=filter_non_comparable,
+    
+        write_all_comparable=True,
     )
     return output_path
 
@@ -527,6 +535,8 @@ def _run_majiq_case_to_dir(con, case_dir, subset):
         create_pdf=False,
         num_workers=1,
         use_representative_domains=True,
+    
+        write_all_comparable=True,
     )
     return output_path
 

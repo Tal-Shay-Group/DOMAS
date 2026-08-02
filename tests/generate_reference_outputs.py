@@ -71,6 +71,7 @@ def run_one(con, label, junctions_csv, hadas_format, restrict_pdf_to_comparable,
             num_workers=1,
             restrict_pdf_to_comparable=restrict_pdf_to_comparable,
             use_representative_domains=use_representative_domains,
+            write_all_comparable=True,
         )
     finally:
         os.chdir(cwd_before)

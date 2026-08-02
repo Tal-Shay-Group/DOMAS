@@ -379,6 +379,42 @@ _SITE_ENTRY_TYPES = frozenset({'Active_site', 'Binding_site', 'Conserved_site', 
 _REDUNDANT_COVER = 0.5
 
 
+TIER_PRIMARY, TIER_PARENT, TIER_MEMBER, TIER_SITE = '1', '2', '3', 'S'
+TIER_DESCRIPTIONS = {
+    TIER_PRIMARY: 'InterPro Domain/Repeat',
+    TIER_PARENT: 'InterPro Family/Homologous superfamily',
+    TIER_MEMBER: 'member-DB hit (G3DSA/PTHR/SSF/cd/PF)',
+    TIER_SITE: 'InterPro site/PTM',
+}
+
+
+def domain_entry_tiers(df_domains):
+    """Each row's tier on the ladder filter_representative_domains() applies, as a
+    Series of TIER_* labels indexed like `df_domains`.
+
+    None when the frame carries nothing to rank by - no domain_id/type columns, or
+    type entirely null (DomainEvent/DomainType rows) - the same condition under
+    which the filter returns its input untouched.
+
+    Shared with the PDF, so a domain is labelled with the tier the analysis judged
+    it on rather than one re-derived alongside it.
+    """
+    if df_domains is None or len(df_domains) == 0:
+        return None
+    if 'domain_id' not in df_domains.columns or 'type' not in df_domains.columns:
+        return None
+    if df_domains['type'].isna().all():
+        return None
+
+    is_ipr = df_domains['domain_id'].astype(str).str.startswith('IPR')
+    etype = df_domains['type']
+    tiers = pd.Series(TIER_MEMBER, index=df_domains.index)   # non-IPR by default
+    tiers[is_ipr] = TIER_PARENT                              # IPR, incl. unknown type
+    tiers[is_ipr & etype.isin(_PRIMARY_ENTRY_TYPES)] = TIER_PRIMARY
+    tiers[is_ipr & etype.isin(_SITE_ENTRY_TYPES)] = TIER_SITE
+    return tiers
+
+
 def _aa_overlap(s1, e1, s2, e2):
     """True if [s1,e1] and [s2,e2] overlap by at least one residue."""
     return s1 <= e2 and s2 <= e1
@@ -402,9 +438,8 @@ def _covered_fraction(s, e, intervals):
 
 def filter_representative_domains(df_domains):
     """
-    Reduce a single transcript's representative domains to a clean domain set
-    using the curated InterPro entry `type`, replacing the geometric
-    collapse_contained_domains() heuristic (the 2 AA / 85% overlap rule).
+    Reduce a single transcript's representative domains to a clean domain set,
+    ranked by the curated InterPro entry `type`.
 
     Priority ladder - per region, keep the best available annotation, and drop a
     lower tier only where a higher tier already covers the MAJORITY of it
@@ -428,29 +463,33 @@ def filter_representative_domains(df_domains):
     under different accessions (Pfam family from hmmscan is the stable key), and
     surfacing an event region with no InterPro Domain entry (hmmscan recovers it).
 
-    Requires 'domain_id' and 'type' columns. If either is absent, or `type` is
-    entirely NULL (DomainEvent/DomainType fallback rows, or a DB built before the
-    type column existed), the frame is returned unchanged.
+    Requires 'domain_id' and 'type' columns; a frame without them, or with `type`
+    entirely NULL (DomainEvent/DomainType rows), is returned unchanged.
+
+    Site/PTM removal is unconditional, hence ahead of the single-row shortcut: a
+    residue feature is not a domain however little else the transcript carries.
     """
-    if len(df_domains) <= 1:
-        return df_domains
     if 'domain_id' not in df_domains.columns or 'type' not in df_domains.columns:
         return df_domains
     if df_domains['type'].isna().all():
         return df_domains
 
+    tiers = domain_entry_tiers(df_domains)
+    df_domains = df_domains[tiers != TIER_SITE]
+    if len(df_domains) <= 1:
+        return df_domains
+
     df = df_domains
     dom_id = df['domain_id'].astype(str)
-    is_ipr = dom_id.str.startswith('IPR')
-    etype = df['type']
     starts = df['AA_start']
     ends = df['AA_end']
 
-    is_primary = is_ipr & etype.isin(_PRIMARY_ENTRY_TYPES)
-    is_site = is_ipr & etype.isin(_SITE_ENTRY_TYPES)
-    primary_idx = df.index[is_primary].tolist()
-    parent_idx = df.index[is_ipr & ~is_primary & ~is_site].tolist()  # Family/HSF/unknown-type IPR
-    member_idx = df.index[~is_ipr].tolist()                          # non-IPR member DBs
+    # One definition of the tiers, shared with the PDF - see domain_entry_tiers().
+    # TIER_SITE has no list: those rows are gone by this point.
+    tiers = domain_entry_tiers(df)
+    primary_idx = df.index[tiers == TIER_PRIMARY].tolist()
+    parent_idx = df.index[tiers == TIER_PARENT].tolist()   # Family/HSF/unknown-type IPR
+    member_idx = df.index[tiers == TIER_MEMBER].tolist()   # non-IPR member DBs
 
     keep = list(primary_idx)
     prim_iv = [(starts[i], ends[i]) for i in primary_idx]
@@ -827,7 +866,8 @@ class ClusterAnalysisResult:
                             transcript_domain_length, canonical_domains_number, transcript_domains_number,
                             is_longest_cds, is_most_like_canonical))
 
-    def analyze(self, df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup):
+    def analyze(self, df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup,
+                canonical_rank=None):
         """
         Run the DOMAS algorithm for this cluster:
 
@@ -916,25 +956,39 @@ class ClusterAnalysisResult:
             self.add_event('only_one_transcript')
             logger.debug(f"Only one transcript found for cluster {self.cluster_name}, specie {self.specie}.")
             return
+        # A gene can carry more than one canonical transcript, common outside human:
+        # ~4,800 mouse and ~7,100 rat genes have one transcript flagged by RefSeq
+        # (canonical=1) and a different one by Ensembl (canonical=2). Human rarely
+        # does - MANE makes the two agree, merging them into one canonical=3 row.
+        #
+        # Prefer the transcript both sources agree on (3), then Ensembl's (2), then
+        # RefSeq's (1). DoChaP's CanonicalEnum values rank in that order, so the
+        # higher value wins; ties fall to the lowest id, independent of hash order.
+        ranked_ids = sorted(gene_canonical_ids)
+        if canonical_rank:
+            self.canonical_transcript_id = max(
+                ranked_ids, key=lambda tid: canonical_rank.get(tid, 0))
+        else:
+            self.canonical_transcript_id = ranked_ids[0]
         if len(gene_canonical_ids) > 1:
-            logger.warning(f"Multiple canonical transcripts found for cluster {self.cluster_name}, specie {self.specie}: "
-                f"{sorted(gene_canonical_ids)}. Using the first one (sorted)."
+            logger.warning(
+                f"Multiple canonical transcripts found for cluster {self.cluster_name}, "
+                f"specie {self.specie}: "
+                f"{ {tid: canonical_rank.get(tid) for tid in ranked_ids} if canonical_rank else ranked_ids}. "
+                f"Using {self.canonical_transcript_id} (highest canonical flag, then lowest id)."
             )
-        self.canonical_transcript_id = sorted(gene_canonical_ids)[0]
 
         transcript_exons = {
             transcript_id: exon_lookup(transcript_id)
             for transcript_id in gene_transcript_ids
         }
 
-        # CDS length per transcript, for the longest-CDS tag below: the coding
-        # length in bases, taken as the largest CDS-relative exon offset.
-        # cds_end - cds_start, used previously, is a GENOMIC span that counts the
-        # introns between the first and last coding exon - a median of ~10x the
-        # coding length - so it ranked transcripts partly by intron content rather
-        # than by the size of the protein it was meant to stand in for. Interior
-        # coding exons are wholly coding, so the largest abs_end_CDS equals the
-        # summed exonic CDS (verified equal on 4,000 coding transcripts).
+        # CDS length per transcript, for the longest-CDS tag below: the coding length
+        # in bases, taken as the largest CDS-relative exon offset. Interior coding
+        # exons are wholly coding, so that equals the summed exonic CDS (verified on
+        # 4,000 coding transcripts). NOT cds_end - cds_start, a genomic span that
+        # counts the introns between the first and last coding exon - a median ~10x
+        # the coding length, ranking transcripts partly by intron content.
         cds_length_by_transcript = {}
         for transcript_id, exons in transcript_exons.items():
             length = -1
@@ -1039,7 +1093,7 @@ class ClusterAnalysisResult:
         
 
 def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None, canonical_transcript_ids=None,
-                           gene_strand=None, transcripts_by_gene=None):
+                           gene_strand=None, transcripts_by_gene=None, canonical_rank=None):
     """Analyze a single cluster."""
     _, cluster_df = cluster_tuple
 
@@ -1060,12 +1114,13 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
     ]
 
     df_gene_transcripts = transcripts_by_gene.get(gene_ensembl_id)
-    cluster_result.analyze(df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup)
+    cluster_result.analyze(df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup,
+                           canonical_rank=canonical_rank)
 
     return cluster_result
 
 
-# Events recorded for a transcript/cluster that was NOT a real comparison to the
+# Events recorded for a transcript/cluster that is NOT a real comparison to the
 # canonical transcript: cluster-level non-comparisons (gene/canonical/junction
 # problems) plus per-transcript skips (no junctions / no unique junction). Rows
 # carrying these events are the "non-comparable" / "not chosen" transcripts that
@@ -1077,8 +1132,34 @@ NON_COMPARISON_EVENTS = frozenset({
 })
 
 
+def selected_comparable_rows(df_cluster_results):
+    """One cluster's result rows with the COMPARISON rows reduced to the single
+    transcript the selection rule picks: the one tagged is_most_like_canonical where
+    any is, otherwise the one tagged is_longest_cds. Same priority as
+    results_stats.select_representative_transcript(), applied before writing.
+
+    Non-comparison rows (no junctions, no unique junction, a cluster-level outcome)
+    are left alone - which of those to write is filter_non_comparable's decision. So
+    is a cluster with no tagged row, i.e. no comparable transcript.
+    """
+    if df_cluster_results.empty:
+        return df_cluster_results
+    is_comparison = ~df_cluster_results['event'].isin(NON_COMPARISON_EVENTS)
+    if not is_comparison.any():
+        return df_cluster_results
+
+    comparisons = df_cluster_results[is_comparison]
+    for column in ('is_most_like_canonical', 'is_longest_cds'):
+        tagged = comparisons.loc[comparisons[column] == True, 'transcript_id'].dropna()  # noqa: E712
+        if len(tagged):
+            selected = tagged.iat[0]
+            return df_cluster_results[~is_comparison
+                                      | (df_cluster_results['transcript_id'] == selected)]
+    return df_cluster_results
+
+
 def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_instance=None,
-                       filter_non_comparable=False):
+                       filter_non_comparable=False, write_all_comparable=False):
     """
     Dedicated writer thread that processes results from a queue and writes to CSV.
 
@@ -1087,6 +1168,8 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
 
     filter_non_comparable: if True, rows whose event is in NON_COMPARISON_EVENTS
     (transcripts that were not actually compared to canonical) are dropped.
+    write_all_comparable: if False (the default), the comparison rows of each
+    cluster are reduced to the selected transcript - see selected_comparable_rows().
     """
     log = logger_instance or logger
     output_dir = tempfile.mkdtemp(prefix='domas_csv_')
@@ -1110,6 +1193,9 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
                     df_cluster_results = cluster_result.get_results_df()
                     if df_cluster_results.empty:
                         continue
+
+                    if not write_all_comparable:
+                        df_cluster_results = selected_comparable_rows(df_cluster_results)
 
                     if filter_non_comparable:
                         df_cluster_results = df_cluster_results[
@@ -1184,11 +1270,13 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
 _worker_state = {}
 
 
-def _init_worker(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene):
+def _init_worker(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene,
+                 canonical_rank=None):
     """ProcessPoolExecutor initializer - runs once when each worker process starts."""
     _worker_state['exon_lookup'] = build_exon_lookup(df_exons)
     _worker_state['domain_lookup'] = build_domain_lookup(df_domains)
     _worker_state['canonical_transcript_ids'] = canonical_transcript_ids
+    _worker_state['canonical_rank'] = canonical_rank
     _worker_state['gene_strand'] = gene_strand
     _worker_state['transcripts_by_gene'] = transcripts_by_gene
 
@@ -1207,6 +1295,7 @@ def _process_cluster_chunk(chunk_info):
     exon_lookup = _worker_state['exon_lookup']
     domain_lookup = _worker_state['domain_lookup']
     canonical_transcript_ids = _worker_state['canonical_transcript_ids']
+    canonical_rank = _worker_state.get('canonical_rank')
     gene_strand = _worker_state['gene_strand']
     transcripts_by_gene = _worker_state['transcripts_by_gene']
 
@@ -1222,6 +1311,7 @@ def _process_cluster_chunk(chunk_info):
                 canonical_transcript_ids=canonical_transcript_ids,
                 gene_strand=gene_strand,
                 transcripts_by_gene=transcripts_by_gene,
+                canonical_rank=canonical_rank,
             )
             chunk_results.append(result)
         except (KeyError, ValueError, AttributeError, TypeError) as e:
@@ -1315,7 +1405,13 @@ class JunctionsAnalysis:
         invalid_ids = {'', 'nan', 'None'}
         all_transcript_ids = df_transcripts.transcript_ensembl_id.fillna(df_transcripts.transcript_refseq_id)
         valid_mask = all_transcript_ids.notna() & ~all_transcript_ids.isin(invalid_ids)
-        canonical_transcript_ids = set(all_transcript_ids[valid_mask & (df_transcripts.canonical != 0)])
+        is_canonical = valid_mask & (df_transcripts.canonical != 0)
+        canonical_transcript_ids = set(all_transcript_ids[is_canonical])
+        # id -> DoChaP canonical flag (1 RefSeq / 2 Ensembl / 3 both), so a gene
+        # with several canonical transcripts can prefer the strongest. Built here
+        # rather than passed as a frame: it crosses a process boundary per worker.
+        canonical_rank = dict(zip(all_transcript_ids[is_canonical],
+                                  df_transcripts.canonical[is_canonical].astype(int)))
 
         # Grouped by the combined gene id, so a gene carrying only a GeneID is
         # reachable under the id the junctions frame holds for it. Grouping on
@@ -1326,7 +1422,7 @@ class JunctionsAnalysis:
             gid: g for gid, g in df_transcripts.groupby(utils.combined_gene_ids(df_transcripts))
         }
 
-        return canonical_transcript_ids, transcripts_by_gene
+        return canonical_transcript_ids, canonical_rank, transcripts_by_gene
 
     def _prepare_cluster_groups(self, df_junctions):
         """Group junctions into clusters."""
@@ -1346,7 +1442,8 @@ class JunctionsAnalysis:
 
     def _run_parallel_analysis(self, cluster_groups, df_exons, df_domains, canonical_transcript_ids,
                                gene_strand, transcripts_by_gene, num_workers, output_path,
-                               filter_non_comparable=False):
+                               filter_non_comparable=False, canonical_rank=None,
+                               write_all_comparable=False):
         """Execute cluster analysis in parallel with dedicated writer thread."""
         total = len(cluster_groups)
         actual_workers = min(num_workers, total)
@@ -1389,7 +1486,8 @@ class JunctionsAnalysis:
         # Start dedicated writer thread
         writer_thread = threading.Thread(
             target=_csv_writer_worker,
-            args=(result_queue, output_path, df_results_columns, self.logger, filter_non_comparable),
+            args=(result_queue, output_path, df_results_columns, self.logger,
+                  filter_non_comparable, write_all_comparable),
             daemon=False
         )
         writer_thread.start()
@@ -1406,7 +1504,8 @@ class JunctionsAnalysis:
         with ProcessPoolExecutor(
             max_workers=actual_workers,
             initializer=_init_worker,
-            initargs=(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene),
+            initargs=(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene,
+                      canonical_rank),
         ) as executor:
             # Submit all tasks - df_exons/df_domains are sent once per worker via
             # initargs above, not re-pickled per chunk here.
@@ -1460,10 +1559,9 @@ class JunctionsAnalysis:
     def _generate_pdfs(self, results, print_genes, restrict_to_comparable=False, use_representative_domains=False):
         """Generate PDF visualizations for clusters.
 
-        restrict_to_comparable: if True, each PDF only draws the canonical
-        transcript and the transcripts that were actually compared to it -
-        transcripts skipped during analysis (no junctions, no unique junction,
-        or lost the longest-CDS tie-break) are omitted entirely.
+        restrict_to_comparable: if True, each PDF draws only the canonical
+        transcript and the ones compared to it; transcripts skipped during
+        analysis (no junctions, no unique junction) are omitted entirely.
         use_representative_domains: if True, domains drawn in the PDFs come from
         the RepresentativeDomains table where available (matching the domain
         source used for analysis when the same flag is passed to
@@ -1541,7 +1639,8 @@ class JunctionsAnalysis:
     def analyze_junctions(self, df_junctions, output_path='as_events_junctions_analysis.csv',
                           specie=None, filter_transcript_count=0, create_pdf=True, print_genes=None,
                           num_workers=4, use_ensembl_only=False, restrict_pdf_to_comparable=False,
-                          use_representative_domains=False, filter_non_comparable=False):
+                          use_representative_domains=False, filter_non_comparable=False,
+                          write_all_comparable=False):
         """
         Analyze junctions and detect domain changes across alternative transcripts.
 
@@ -1572,6 +1671,10 @@ class JunctionsAnalysis:
                 DomainEvent/DomainType domains. If False (default), the
                 algorithm is unchanged - domains come from DomainEvent/DomainType
                 only, exactly as before.
+            write_all_comparable: If True, the output CSV keeps a row per compared
+                transcript. If False (default), each cluster's comparison rows are
+                reduced to the one the selection rule picks - is_most_like_canonical
+                where set, otherwise is_longest_cds. Both tags are still written.
             filter_non_comparable: If True, the output CSV contains only rows for
                 transcripts that were actually compared to canonical - rows whose
                 event is a non-comparison / skip event (see NON_COMPARISON_EVENTS)
@@ -1600,7 +1703,7 @@ class JunctionsAnalysis:
         _assert_specie_matches_database(df_junctions, gene_specie)
 
         # Prepare lookup structures
-        canonical_transcript_ids, transcripts_by_gene = \
+        canonical_transcript_ids, canonical_rank, transcripts_by_gene = \
             self._prepare_lookup_structures(df_transcripts, df_exons, df_domains)
 
         # Group junctions into clusters
@@ -1611,6 +1714,7 @@ class JunctionsAnalysis:
             cluster_groups, df_exons, df_domains, canonical_transcript_ids,
             gene_strand, transcripts_by_gene, num_workers,
             output_path, filter_non_comparable=filter_non_comparable,
+            canonical_rank=canonical_rank, write_all_comparable=write_all_comparable,
         )
 
         # Generate PDFs if requested

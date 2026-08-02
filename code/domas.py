@@ -56,10 +56,12 @@ def parse_args():
     parser.add_argument("-ioe_pattern", type=str, default=r"output_prefix_.*_strict.ioe",
                          help="Filename regex used to find .ioe files when -input is a "
                               "directory (only used with -format ioe)")
-    parser.add_argument("-examples_per_event", type=int, default=5,
+    parser.add_argument("-examples_per_event", type=int, default=0,
                          help="Per event type, keep only this many example clusters with "
-                              "the fewest transcripts (0 keeps every cluster); only used "
-                              "when -input is a directory with -format ioe")
+                              "the fewest transcripts; only used when -input is a directory "
+                              "with -format ioe (SUPPA). 0 (default) keeps every cluster; a "
+                              "subset is a debugging convenience, not something to take "
+                              "silently from a SUPPA directory.")
     parser.add_argument("-num_workers", type=int, default=_DEFAULT_NUM_WORKERS,
                          help=f"Number of parallel worker processes (default: this machine's "
                               f"CPU count, {_DEFAULT_NUM_WORKERS})")
@@ -88,6 +90,12 @@ def parse_args():
                               "gene_not_in_db / feature_not_mapped / no_unique_features "
                               "event). By default the output CSV holds only transcripts "
                               "that were actually compared to the canonical transcript.")
+    parser.add_argument("-write_all_comparable", action="store_true",
+                         help="Keep a row for every transcript compared to the canonical "
+                              "one. By default each cluster's comparison rows are reduced "
+                              "to the transcript the selection rule picks - the one tagged "
+                              "is_most_like_canonical, or is_longest_cds where none is. "
+                              "Both tags are written either way.")
 
     args = parser.parse_args()
 
@@ -168,18 +176,21 @@ def main():
                 output_csv=args.output_csv, specie=args.specie, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
                 filter_non_comparable=not args.keep_non_comparable,
+                write_all_comparable=args.write_all_comparable,
             )
         elif args.format == "rmats":
             alternative_splicing.analyze_rmats_input(
                 con, rmats_dir=args.input, output_csv=args.output_csv, specie=args.specie, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
                 filter_non_comparable=not args.keep_non_comparable,
+                write_all_comparable=args.write_all_comparable,
             )
         elif args.format == "majiq":
             alternative_splicing.analyze_voila_input(
                 con, voila_tsv=args.input, output_csv=args.output_csv, specie=args.specie, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
                 filter_non_comparable=not args.keep_non_comparable,
+                write_all_comparable=args.write_all_comparable,
             )
         elif args.format == "hadas":
             print_genes = [g.strip() for g in args.gene_ids.split(',')] if args.gene_ids else None
@@ -188,6 +199,7 @@ def main():
                 print_genes=print_genes, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, create_pdf=args.pdf,
                 max_clusters=args.max_clusters, filter_non_comparable=not args.keep_non_comparable,
+                write_all_comparable=args.write_all_comparable,
             )
         elif os.path.isdir(args.input):
             alternative_splicing.analyze_ioe_files(
@@ -195,12 +207,14 @@ def main():
                 examples_per_event=args.examples_per_event, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
                 filter_non_comparable=not args.keep_non_comparable,
+                write_all_comparable=args.write_all_comparable,
             )
         else:
             alternative_splicing.analyze_ioe_file(
                 con, ioe_file=args.input, output_csv=args.output_csv, specie=args.specie, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
                 filter_non_comparable=not args.keep_non_comparable,
+                write_all_comparable=args.write_all_comparable,
             )
     finally:
         con.close()

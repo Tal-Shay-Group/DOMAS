@@ -45,13 +45,11 @@ def test_hadas_analysis_and_stats_report_flow(con, tmp_path):
     analyzed and reported on.
 
     num_workers=2 deliberately exercises analyze_junctions()'s
-    ProcessPoolExecutor path with more than one worker, which the rest of
-    this suite never does (test_flags.py always uses num_workers=1) - safe
-    here since pytest is itself a properly-guarded multiprocessing entry
-    point, unlike a bare script with module-level code and no
-    `if __name__ == "__main__":` guard (which hangs/crashes under macOS's
-    spawn-based multiprocessing - the actual root cause the one time this
-    flow was run from an ad-hoc script instead of through pytest).
+    ProcessPoolExecutor path with more than one worker, which the rest of this
+    suite never does (test_flags.py always uses num_workers=1). Safe here
+    because pytest is a properly-guarded multiprocessing entry point, unlike a
+    bare script with module-level code and no `if __name__ == "__main__":`
+    guard, which hangs under macOS's spawn-based multiprocessing.
     """
     results_csv = str(tmp_path / 'results.csv')
     analyze_hadas_input(
@@ -59,6 +57,9 @@ def test_hadas_analysis_and_stats_report_flow(con, tmp_path):
         use_representative_domains=True,
         create_pdf=False,
         num_workers=2,
+        # this flow exercises select_representative_transcript(), which needs the
+        # candidates it selects from; the default writes only the selected one
+        write_all_comparable=True,
     )
 
     assert os.path.exists(results_csv), "analyze_hadas_input should have written a results.csv"
@@ -111,8 +112,8 @@ def test_select_representative_transcript_prefers_most_like_canonical():
 
 def test_select_representative_transcript_falls_back_to_longest_cds():
     """No transcript qualifies as most-like-canonical, so no row carries that flag.
-    The cluster must still resolve, via is_longest_cds - this is the path that
-    reproduces the fallback select_most_like_canonical() no longer performs itself."""
+    The cluster must still resolve, via is_longest_cds - the fallback that
+    select_most_like_canonical() leaves to the caller."""
     df = _rep_df([
         ('clu_1', 'ENST_A', False, False),
         ('clu_1', 'ENST_B', False, True),
