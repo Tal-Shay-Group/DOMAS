@@ -1467,6 +1467,42 @@ def test_site_entries_removed_even_where_no_domain_covers_them():
     assert list(kept['domain_id']) == ['IPR000001'], list(kept['domain_id'])
 
 
+def _same_id_kept(span_a, span_b):
+    """AA spans kept after filter_representative_domains() collapses two entries that
+    share one accession."""
+    from junction_analisys import filter_representative_domains
+    df = pd.DataFrame([
+        _typed_domain_row('IPR000001', 'Domain', *span_a),
+        _typed_domain_row('IPR000001', 'Domain', *span_b),
+    ])
+    kept = filter_representative_domains(df)
+    return sorted(zip(kept['AA_start'], kept['AA_end']))
+
+
+def test_same_id_collapsed_when_overlap_is_a_majority_of_the_shorter():
+    """Two entries of one accession overlapping by >= 50% of the shorter are one
+    physical domain - the longer is kept."""
+    # shorter is 100-160 (61 aa); overlap 100-160 is all of it
+    assert _same_id_kept((10, 200), (100, 160)) == [(10, 200)]
+    # shorter is 150-250 (101 aa); overlap 150-200 is 51 aa = 50.5%
+    assert _same_id_kept((10, 200), (150, 250)) == [(10, 200)]
+
+
+def test_same_id_kept_apart_when_overlap_is_below_half_the_shorter():
+    """Below the threshold both survive: two tandem instances of a repeat that share
+    a few boundary residues are two domains, not one. This is what the previous
+    any-overlap rule collapsed."""
+    # shorter is 190-300 (111 aa); overlap 190-200 is 11 aa = 9.9%
+    assert _same_id_kept((10, 200), (190, 300)) == [(10, 200), (190, 300)]
+    # a single shared residue
+    assert _same_id_kept((10, 200), (200, 400)) == [(10, 200), (200, 400)]
+
+
+def test_same_id_disjoint_positions_are_two_domains():
+    """Unchanged by the threshold: no overlap at all stays two domains."""
+    assert _same_id_kept((10, 100), (300, 400)) == [(10, 100), (300, 400)]
+
+
 def test_non_site_tiers_survive_alongside_site_removal():
     """Removing the sites must not disturb the tier ladder: a Family entry that no
     Domain covers is still kept, while the sites go."""

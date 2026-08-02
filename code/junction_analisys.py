@@ -390,6 +390,13 @@ _SITE_ENTRY_TYPES = frozenset({'Active_site', 'Binding_site', 'Conserved_site', 
 # (e.g. TRIB2's two G3DSA kinase lobes over the Pkinase family).
 _REDUNDANT_COVER = 0.5
 
+# Two entries with the SAME accession are treated as one physical domain, and the
+# shorter dropped, only when they overlap by at least this fraction of the shorter
+# one. Any-overlap (a single shared residue) collapsed neighbouring instances of a
+# repeat that merely abut - two tandem copies sharing one boundary residue are two
+# domains, not one - so the test is a majority of the shorter entry.
+_SAME_ID_OVERLAP = 0.5
+
 
 TIER_PRIMARY, TIER_PARENT, TIER_MEMBER, TIER_SITE = '1', '2', '3', 'S'
 TIER_DESCRIPTIONS = {
@@ -432,6 +439,20 @@ def _aa_overlap(s1, e1, s2, e2):
     return s1 <= e2 and s2 <= e1
 
 
+def _aa_overlap_fraction(s1, e1, s2, e2):
+    """Residues shared by [s1,e1] and [s2,e2] as a fraction of the SHORTER of the
+    two - so a short entry sitting inside a long one scores 1.0, not the small
+    fraction of the long one it happens to cover. Coordinates are inclusive, the
+    same convention collapse_contained_domains() uses. 0.0 when they don't overlap."""
+    if not _aa_overlap(s1, e1, s2, e2):
+        return 0.0
+    overlap = min(e1, e2) - max(s1, s2) + 1
+    shorter_length = min(e1 - s1 + 1, e2 - s2 + 1)
+    if shorter_length <= 0:
+        return 0.0
+    return overlap / shorter_length
+
+
 def _covered_fraction(s, e, intervals):
     """Fraction of residues in [s,e] covered by the union of `intervals`."""
     length = e - s + 1
@@ -466,9 +487,10 @@ def filter_representative_domains(df_domains):
                        kept unless the majority is covered by kept PRIMARY+PARENT
       dropped        : InterPro site/PTM types (residue features, not domains)
 
-    Then collapse genuine duplicates: two kept rows with the SAME domain_id that
-    overlap -> keep the longer (same accession at DISJOINT positions, e.g. two
-    RRM instances, is kept as two domains). Return sorted by AA_start.
+    Then collapse genuine duplicates: two kept rows with the SAME domain_id whose
+    overlap covers at least _SAME_ID_OVERLAP of the shorter one -> keep the longer.
+    Same accession at disjoint or barely-touching positions (e.g. two tandem RRM
+    instances) is kept as two domains. Return sorted by AA_start.
 
     Deliberately NOT handled here (left to the HMM/Pfam enrichment layer): cross-
     transcript identity when canonical and compared annotate one physical domain
@@ -513,7 +535,8 @@ def filter_representative_domains(df_domains):
         if _covered_fraction(starts[mi], ends[mi], higher_iv) <= _REDUNDANT_COVER:
             keep.append(mi)
 
-    # collapse genuine duplicates (same accession, overlapping) -> keep the longer
+    # collapse genuine duplicates (same accession, overlapping by a majority of the
+    # shorter entry) -> keep the longer
     keep.sort(key=lambda i: (starts[i], ends[i]))
     dropped = set()
     for a in range(len(keep)):
@@ -524,7 +547,7 @@ def filter_representative_domains(df_domains):
             ib = keep[b]
             if ib in dropped or dom_id[ia] != dom_id[ib]:
                 continue
-            if _aa_overlap(starts[ia], ends[ia], starts[ib], ends[ib]):
+            if _aa_overlap_fraction(starts[ia], ends[ia], starts[ib], ends[ib]) >= _SAME_ID_OVERLAP:
                 len_a = ends[ia] - starts[ia]
                 len_b = ends[ib] - starts[ib]
                 dropped.add(ib if len_a >= len_b else ia)
