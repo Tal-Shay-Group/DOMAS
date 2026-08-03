@@ -29,7 +29,9 @@ import pandas as pd
 import build  # _parse_hmmsearch_domtbl (bitscores)
 from junction_analisys import NON_COMPARISON_EVENTS
 from utils import (calc_spade_score, hmm_change_impact, insertion_impact,
-                   impact_probability, fold_change_probability, fold_change_call)
+                   impact_probability, fold_change_probability, fold_change_call,
+                   fold_change_note, impact_note, missing_features,
+                   NO_ACCESSION_NOTE)
 
 _PRIMARY_FT_SKIP = {'CHAIN', 'SIGNAL', 'Chain', 'Signal'}
 _IMPACT_RANK = {'none': 0, 'gain': 1, 'low': 1, 'moderate': 2, 'high': 3}
@@ -75,6 +77,21 @@ class Enricher:
         row = self.enr.execute(
             "SELECT plddt FROM afdb_plddt WHERE accession=?", (uniprot,)).fetchone()
         return [float(x) for x in row[0].split(',')] if row else None
+
+    def mean_plddt(self, uniprot):
+        """Whole-structure mean pLDDT of the canonical AlphaFold model, or None.
+
+        Used as the fold_change_prob reliability guard: DOMAS never folds the
+        alternative isoform, so it cannot check that model's quality directly - but
+        a protein AlphaFold models poorly overall is one whose isoform it also models
+        poorly, and canonical mean pLDDT identifies that regime at AUC 0.873 on the
+        benchmark. See utils.fold_change_note.
+        """
+        if not uniprot:
+            return None
+        row = self.enr.execute(
+            "SELECT mean_plddt FROM afdb_plddt WHERE accession=?", (uniprot,)).fetchone()
+        return row[0] if row and row[0] is not None else None
 
     def rsa(self, uniprot):
         """Per-residue relative solvent accessibility (0=buried .. 1=exposed) for
@@ -384,10 +401,29 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
                                          score (utils.calc_spade_score, bitscore)
       impact                           : worst per-comparison change severity
                                          (utils.hmm_change_impact)
+      impact_prob / fold_change_prob   : calibrated functional / structural
+                                         probabilities (utils, see their docstrings)
+      fold_change_call                 : change / preserved / uncertain triage
+      fold_change_note                 : why a structural call was withheld (canonical
+                                         AlphaFold model too poor to trust); blank when
+                                         the structure is well resolved
+      functional_sites / region_am_mean: the UniProt and AlphaMissense evidence the
+                                         above are computed FROM
 
     Both are computed from a single hmmsearch over the analysed transcripts plus
     canonical AlphaFold pLDDT; non-comparable rows are left blank. Reads pfam_match
     if you later prefer the cache, but here scans live for the transcripts in play.
+
+    THESE COLUMNS ARE NOT INDEPENDENT EVIDENCE. `impact`, `impact_prob`,
+    `region_am_mean` and `functional_sites` are largely one measurement shown four
+    ways: impact_prob is ~78% rank-correlated with region_am (and beats raw
+    AlphaMissense by only +0.013 AUC), while hmm_change_impact weights on that SAME
+    AlphaMissense value using the same 0.564/0.34 thresholds and on the same functional
+    sites. A row reading impact=high AND impact_prob=0.85 AND region_am_mean=0.72 with
+    functional_sites populated is ONE piece of evidence displayed four times, not four
+    agreeing signals - don't read the agreement as corroboration. The genuinely
+    independent split is functional (impact_prob) vs structural (fold_change_prob):
+    those two correlate at rho -0.05 across the benchmark.
     """
     df = pd.read_csv(results_csv)
     e = Enricher(enrichment_db, pfam_hmm, dochap_con)
@@ -408,7 +444,8 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
     # impact per (canonical, compared): worst severity across changed Pfam
     # families, structure-weighted by UniProt fold-state (else pLDDT) and raised
     # when the changed region hits a UniProt functional residue.
-    impact, func_col, am_col, prob_col, fold_col = {}, {}, {}, {}, {}
+    impact, func_col, am_col, prob_col, fold_col, note_col = {}, {}, {}, {}, {}, {}
+    inote_col, plddt_col = {}, {}
     for canon, comp in {(r['canonical_transcript_id'], r['transcript_id'])
                         for _, r in analyzable[['canonical_transcript_id', 'transcript_id']].dropna().iterrows()}:
         cm = {m[0]: m for m in matches.get(canon, [])}
@@ -492,17 +529,38 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
         # (pathogenicity-relevance), fold_change_prob = structural (P(TM<0.5)).
         loeuf = e.loeuf(uni)
         if reg and reg['canon']:
-            prob_col[(canon, comp)] = impact_probability(
+            # Each score is withheld when ITS dominant feature is missing rather than
+            # emitted off a median-imputed constant (see utils._DOMINANT); the note
+            # records that, plus any secondary feature that was imputed.
+            imiss = missing_features(region_am=region_am, loeuf=loeuf,
+                                     max_cov_loss=max_cov_loss, buried_frac=buried_frac)
+            # distinguish "this protein has no data" from "this transcript has no
+            # accession to look data up by" - the second is a DoChaP mapping gap and
+            # accounts for ~24% of otherwise-comparable human genes, so blaming the
+            # enrichment tables for it would point at the wrong fix.
+            inote_col[(canon, comp)] = NO_ACCESSION_NOTE if uni is None else impact_note(imiss)
+            prob_col[(canon, comp)] = '' if region_am is None else impact_probability(
                 region_am=region_am, loeuf=loeuf, max_cov_loss=max_cov_loss, buried_frac=buried_frac)
-            # fold_change_prob is now PAE-driven (E38): pae_global (whole canonical
+            # fold_change_prob is PAE-driven (E38): pae_global (whole canonical
             # structure) dominates, with identity, max_cov_loss and protein length.
             pae_global = e.pae_global(uni)
             protL = len(seqs.get(canon) or '') or None
-            fold_col[(canon, comp)] = fold_change_probability(
+            fmiss = missing_features(pae_global=pae_global, identity=identity,
+                                     max_cov_loss=max_cov_loss, protL=protL)
+            fold_col[(canon, comp)] = '' if pae_global is None else fold_change_probability(
                 pae_global=pae_global, identity=identity,
                 max_cov_loss=max_cov_loss, protL=protL)
+            # reliability guard: fold_change_prob is calibrated on proteins AlphaFold
+            # resolves well, and DOMAS cannot check the ISOFORM model's quality (it
+            # never folds one). Canonical mean pLDDT is the proxy - below it the call
+            # is downgraded to 'uncertain' and the note carries the reason.
+            plddt_col[(canon, comp)] = e.mean_plddt(uni)
+            note_col[(canon, comp)] = (NO_ACCESSION_NOTE if uni is None
+                                       else fold_change_note(plddt_col[(canon, comp)], missing=fmiss))
         else:
             prob_col[(canon, comp)] = fold_col[(canon, comp)] = ''
+            note_col[(canon, comp)] = 'not scored: pure insertion (no canonical changed region)'
+            inote_col[(canon, comp)] = note_col[(canon, comp)]
 
     def _blank_nc(row, val):
         return '' if row['event_type'] in NON_COMPARISON_EVENTS else val
@@ -512,7 +570,13 @@ def add_scores(results_csv, out_csv, enrichment_db, pfam_hmm, dochap_con):
     df['impact'] = df.apply(lambda r: _blank_nc(r, impact.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df['impact_prob'] = df.apply(lambda r: _blank_nc(r, prob_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df['fold_change_prob'] = df.apply(lambda r: _blank_nc(r, fold_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
-    df['fold_change_call'] = df['fold_change_prob'].apply(lambda v: fold_change_call(v) or '')
+    df['fold_change_note'] = df.apply(lambda r: _blank_nc(r, note_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
+    df['impact_prob_note'] = df.apply(lambda r: _blank_nc(r, inote_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
+    # canonical mean pLDDT drives the one-sided guard inside fold_change_call: a
+    # 'preserved' verdict on a poorly-resolved canonical becomes 'uncertain'
+    _cpl = df.apply(lambda r: _blank_nc(r, plddt_col.get((r['canonical_transcript_id'], r['transcript_id']), None)), axis=1)
+    df['fold_change_call'] = [fold_change_call(p, canonical_plddt=(v if v != '' else None)) or ''
+                              for p, v in zip(df['fold_change_prob'], _cpl)]
     df['functional_sites'] = df.apply(lambda r: _blank_nc(r, func_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df['region_am_mean'] = df.apply(lambda r: _blank_nc(r, am_col.get((r['canonical_transcript_id'], r['transcript_id']), '')), axis=1)
     df.to_csv(out_csv, index=False)

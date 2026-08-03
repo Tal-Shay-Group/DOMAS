@@ -781,6 +781,31 @@ def choose_domain_display_name(names, prefixes=DOMAIN_NAME_PREFIX_PRIORITY):
     return sorted_names[0] if sorted_names else None
 
 
+def _group_description(c_domains, c_idxs, t_domains, t_idxs):
+    """The prose description for one identity group, from whichever source supplied
+    the domains: RepresentativeDomains.description under representative domains,
+    DomainType.description otherwise - both reach here as a `description` column.
+
+    A group can hold several entries (a repeat present twice, a domain split in
+    two), and a dropped or new domain has entries on one side only. Canonical is
+    read first so the description describes the reference where there is one;
+    distinct texts are joined rather than picked between, the way
+    _merge_domain_names() treats merged names.
+    """
+    values = []
+    for df, idxs in ((c_domains, c_idxs), (t_domains, t_idxs)):
+        if 'description' not in df.columns:
+            continue
+        for i in idxs:
+            value = df.at[i, 'description']
+            if pd.isna(value):
+                continue
+            text = str(value).strip()
+            if text and text.lower() not in ('nan', 'none') and text not in values:
+                values.append(text)
+    return '; '.join(values) if values else None
+
+
 def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, transcript_id,
                      canonical_junctions, transcript_junctions, junctions):
     """
@@ -833,6 +858,7 @@ def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, tr
             'event': classify_domain_change(c_count, t_count, c_length, t_length),
             'transcript_id': transcript_id,
             'domain_name': choose_domain_display_name(names),
+            'domain_description': _group_description(c_domains, c_idxs, t_domains, t_idxs),
             'canonical_domain_length': c_length,
             'transcript_domain_length': t_length,
             'canonical_domains_number': c_count,
@@ -895,9 +921,10 @@ class ClusterAnalysisResult:
         self.feature_types = None
         self.events = []
 
-    def add_event(self, event, transcript_id=None, domain_name=None, canonical_domain_length=None, transcript_domain_length=None,
+    def add_event(self, event, transcript_id=None, domain_name=None, domain_description=None,
+                  canonical_domain_length=None, transcript_domain_length=None,
                   canonical_domains_number=None, transcript_domains_number=None, is_longest_cds=None, is_most_like_canonical=None):
-        self.events.append((event, transcript_id, domain_name, canonical_domain_length,
+        self.events.append((event, transcript_id, domain_name, domain_description, canonical_domain_length,
                             transcript_domain_length, canonical_domains_number, transcript_domains_number,
                             is_longest_cds, is_most_like_canonical))
 
@@ -1145,7 +1172,8 @@ class ClusterAnalysisResult:
     def get_results_df(self):
         return pd.DataFrame(
             self.events,
-            columns=['event', 'transcript_id', 'domain_name', 'c_domain_length', 't_domain_length',
+            columns=['event', 'transcript_id', 'domain_name', 'domain_description',
+                        'c_domain_length', 't_domain_length',
                         'c_domains_number', 't_domains_number', 'is_longest_cds', 'is_most_like_canonical']
         )
         
@@ -1535,6 +1563,7 @@ class JunctionsAnalysis:
 
         # Prepare column definitions for CSV
         df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
+                              'domain_description',
                               'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number',
                               'is_longest_cds', 'is_most_like_canonical']
 
@@ -1687,7 +1716,11 @@ class JunctionsAnalysis:
                     protein_only=False,
                     domains_only=False,
                     df_junction=df_cluster_junctions,
-                    df_results=cluster_result.get_results_df(),
+                    # The description is a CSV column, not a PDF one: it is a
+                    # paragraph of InterPro prose per domain, and the PDF draws
+                    # this frame as a narrow per-transcript table.
+                    df_results=cluster_result.get_results_df().drop(
+                        columns=['domain_description'], errors='ignore'),
                     transcript_ids=transcript_ids,
                     no_comparison_note=no_comparison_note,
                 )

@@ -92,8 +92,20 @@ def build_table():
     br = pd.read_csv(os.path.join(HERE, "bench_rich_results.csv"))[["iso", "region_am", "max_cov_loss"]]
     ff = pd.read_csv(os.path.join(HERE, "full_features.csv"))[["iso", "buried_frac"]]
     d = (fp[["iso", "acc", "tm", "canon_lo", "canon_hi", "kind"]]
-         .merge(pae, on="iso").merge(br, on="iso").merge(ff, on="iso"))
-    d = d[d["kind"] != "insertion"].dropna(subset=["canon_lo", "pae_global"]).reset_index(drop=True)
+         .merge(pae, on="iso", how="left")   # left: pae_global/protL feed the STRUCTURAL
+         .merge(br, on="iso").merge(ff, on="iso"))  # model only - an inner join here
+    # would silently shrink the functional set (3,282 -> 3,276) below what
+    # fit_calibrated.py trains on.
+    # Song et al. class the isoform structure by mean pLDDT and restrict their own
+    # metric analyses to high/confident. fold_change_prob is fit on the same subset
+    # (E44): the low/unstructured rows label AlphaFold failure, not fold change.
+    s4 = pd.read_csv(os.path.join(HERE, "table_s4_all.csv")).rename(columns={"isoform": "iso"})
+    d = d.merge(s4[["iso", "class"]], on="iso", how="left")
+    # NB pae_global is required by the STRUCTURAL model only - dropping it globally
+    # would shrink the functional set below what fit_calibrated.py actually trains on
+    # (3,282 -> 3,276), so it is required per-model instead.
+    d = d[d["kind"] != "insertion"].dropna(subset=["canon_lo"]).reset_index(drop=True)
+    d["af_confident"] = d["class"].isin(["high", "confident"]) & d["pae_global"].notna()
     d["canon_lo"] = d["canon_lo"].astype(int); d["canon_hi"] = d["canon_hi"].astype(int)
 
     def ident_rt(r):
@@ -187,7 +199,8 @@ def banded(oof, oofr, yb, yc, lo, hi):
 MODELS = {
     "fold_change": dict(title="fold_change_prob (STRUCTURAL, P(TM<0.5))", tag="foldchange",
                         feats=["pae_global", "identity", "max_cov_loss", "protL"],
-                        bin_t="y_tm", cont_t="tm", sub=None, band=(0.40, 0.60), band_verb="routed to folding"),
+                        bin_t="y_tm", cont_t="tm", sub="af_confident", band=(0.20, 0.50),
+                        band_verb="routed to folding"),
     "impact": dict(title="impact_prob (FUNCTIONAL, P(pathogenic | region overlaps a variant))", tag="impact",
                    feats=["region_am", "loeuf", "max_cov_loss", "buried_frac"],
                    bin_t="y_disc", cont_t=None, sub="variant_overlap", band=(0.40, 0.60), band_verb="abstain"),
@@ -195,6 +208,8 @@ MODELS = {
 
 def run_model(d, key, methods, make_graph, seed):
     m = MODELS[key]; sub = None
+    if m["sub"] == "af_confident":
+        sub = d["af_confident"].values
     if m["sub"] == "variant_overlap":
         d["y_disc"] = d["pat"].astype(int)
         sub = ((d["pat"] == 1) | (d["ben"] == 1)).values

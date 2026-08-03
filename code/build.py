@@ -21,6 +21,7 @@ import re
 import sqlite3
 import subprocess
 import tarfile
+import time
 
 import download  # SPECIES, LICENSES, ALL_SOURCES, _UNIPROT_BASE etc.
 
@@ -291,10 +292,22 @@ def _pae_global_from_json(text):
 
 
 def build_afdb_pae(data_dir, con, species_list):
-    """Whole-structure mean PAE (predicted aligned error) from the AlphaFold DB
-    proteome tars (same source as build_afdb; the tars carry a
-    `-predicted_aligned_error_v*.json.gz` per protein), stored in afdb_pae.
-    `pae_global` is the dominant feature of fold_change_probability (E38). Opt-in."""
+    """Whole-structure mean PAE (predicted aligned error), stored in afdb_pae.
+    `pae_global` is the dominant feature of fold_change_probability (E38). Opt-in.
+
+    WARNING - this path no longer yields anything from a current download. AlphaFold DB
+    v4 proteome tars carried a `-predicted_aligned_error_v4.json.gz` beside each model;
+    the v6 archives (and the re-packed v4 ones) contain ONLY `-model_v6.cif.gz` /
+    `.pdb.gz`, as their README states ("atomic coordinate data in PDB and mmCIF
+    formats"). So this scan finds zero PAE members and writes zero rows.
+
+    The only remaining source is per accession:
+        https://alphafold.ebi.ac.uk/files/AF-<acc>-F1-predicted_aligned_error_v6.json
+    ~660 KB for a 500 aa protein and O(L^2) in length, so ~13 GB of transfer for the
+    ~20.5k human accessions - though only the scalar mean is kept, so storage is
+    negligible. That is how the benchmark's 5,557 accessions were fetched (see
+    alphafold_benchmark/DATA_SOURCES.md 3). A bulk-tar rebuild will NOT refresh
+    afdb_pae; expect the count to stay flat and check the warning this emits."""
     total = 0
     for sp in species_list:
         dataset = download.SPECIES[sp]["afdb"]
@@ -303,8 +316,10 @@ def build_afdb_pae(data_dir, con, species_list):
             print(f"  [afdb_pae] {sp}: missing {raw} - run -download afdb first; skipping")
             continue
         n = 0
+        seen_members = 0
         with tarfile.open(raw, "r") as tar:
             for member in tar:
+                seen_members += 1
                 m = _AF_PAE_NAME.search(member.name)
                 if not m:
                     continue
@@ -320,11 +335,76 @@ def build_afdb_pae(data_dir, con, species_list):
                 if n % 2000 == 0:
                     con.commit(); print(f"  [afdb_pae] {sp}: {n}...")
         con.commit()
+        if n == 0 and seen_members:
+            print(f"  [afdb_pae] {sp}: WARNING - no predicted_aligned_error members in "
+                  f"{raw} ({seen_members:,} members scanned). AlphaFold DB dropped PAE "
+                  f"from the bulk archives; fetch per accession from "
+                  f"https://alphafold.ebi.ac.uk/files/AF-<acc>-F1-predicted_aligned_error_v6.json")
         _record_meta(con, "afdb_pae", dataset, sp, f"{download._AFDB_BASE}/{dataset}.tar",
                      raw, n, notes="mean PAE over the F1 predicted_aligned_error matrix")
         total += n
         print(f"  [afdb_pae] {sp}: {n} proteins")
     return total
+
+
+# AlphaFold DB dropped PAE from the bulk archives (see build_afdb_pae), so the only
+# way to provision it is one accession at a time from the file endpoint.
+_AFDB_FILES = "https://alphafold.ebi.ac.uk/files"
+
+
+def _fetch_pae_mean(acc, version=6, timeout=120, retries=3):
+    """(acc, pae_global, length) for one accession, or (acc, None, 0) if AFDB has no
+    PAE for it. Retries with backoff on throttling / transient server errors."""
+    import urllib.error
+    import urllib.request
+    url = f"{_AFDB_FILES}/AF-{acc}-F1-predicted_aligned_error_v{version}.json"
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "DOMAS-enrichment/1.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return (acc, *_pae_global_from_json(r.read().decode()))
+        except urllib.error.HTTPError as e:
+            if e.code == 404:                      # no PAE published for this accession
+                return acc, None, 0
+            if e.code not in (429, 500, 502, 503, 504) or attempt == retries - 1:
+                return acc, None, 0
+        except Exception:
+            if attempt == retries - 1:
+                return acc, None, 0
+        time.sleep(2 ** attempt)
+    return acc, None, 0
+
+
+def build_afdb_pae_api(con, accessions, workers=5, version=6, log_every=250):
+    """Populate afdb_pae for `accessions` from the AlphaFold DB file endpoint.
+
+    Resumable: accessions already in afdb_pae are skipped, so re-running after an
+    interruption costs nothing. Only the scalar mean is kept - the JSON (~660 KB for a
+    500 aa protein, O(L^2)) is parsed and discarded, so transfer is heavy but storage
+    is negligible.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    con.executescript(_SCHEMA)
+    have = {r[0] for r in con.execute("SELECT accession FROM afdb_pae")}
+    todo = [a for a in dict.fromkeys(accessions) if a and a not in have]
+    print(f"  [afdb_pae:api] {len(todo):,} to fetch ({len(have):,} already present)", flush=True)
+    n = miss = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_fetch_pae_mean, a, version): a for a in todo}
+        for i, fut in enumerate(as_completed(futures), 1):
+            acc, pae, length = fut.result()
+            if pae is None:
+                miss += 1
+            else:
+                con.execute("INSERT OR REPLACE INTO afdb_pae(accession,length,pae_global) "
+                            "VALUES(?,?,?)", (acc, length, pae))
+                n += 1
+            if i % log_every == 0:
+                con.commit()
+                print(f"  [afdb_pae:api] {i:,}/{len(todo):,}  stored={n:,}  no-PAE={miss:,}", flush=True)
+    con.commit()
+    print(f"  [afdb_pae:api] done: {n:,} stored, {miss:,} unavailable", flush=True)
+    return n
 
 
 def build_afdb(data_dir, con, species_list):

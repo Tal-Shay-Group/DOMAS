@@ -25,11 +25,21 @@ import urllib.request
 #   up      : UniProt reference-proteome id "<proteomeID>_<taxon>"
 #   afdb    : AlphaFold DB proteome tar basename (without .tar)
 #   ensembl : Ensembl species directory name under current_fasta/
+# AlphaFold DB re-versioned its proteome archives to v6; the v4 basenames used here
+# until now 404 (the /latest/ directory serves *_v6.tar only). Sizes at v6: human
+# 4.8 GB, mouse 3.5 GB, rat 3.5 GB.
 SPECIES = {
-    "H_sapiens":    {"up": "UP000005640_9606",  "afdb": "UP000005640_9606_HUMAN_v4",  "ensembl": "homo_sapiens"},
-    "M_musculus":   {"up": "UP000000589_10090", "afdb": "UP000000589_10090_MOUSE_v4", "ensembl": "mus_musculus"},
-    "R_norvegicus": {"up": "UP000002494_10116", "afdb": "UP000002494_10116_RAT_v4",   "ensembl": "rattus_norvegicus"},
+    "H_sapiens":    {"up": "UP000005640_9606",  "afdb": "UP000005640_9606_HUMAN_v6",  "ensembl": "homo_sapiens"},
+    "M_musculus":   {"up": "UP000000589_10090", "afdb": "UP000000589_10090_MOUSE_v6", "ensembl": "mus_musculus"},
+    "R_norvegicus": {"up": "UP000002494_10116", "afdb": "UP000002494_10116_RAT_v6",   "ensembl": "rattus_norvegicus"},
 }
+
+# DoChaP also carries D_rerio and X_tropicalis. AlphaFold DB publishes a zebrafish
+# proteome archive (UP000000437_7955_DANRE_v6.tar, 4.6 GB) but NONE for X. tropicalis,
+# so structural enrichment is reachable for zebrafish and unreachable in bulk for frog.
+# Neither is wired into the download/build paths yet (uniprot/ensembl entries would be
+# needed too).
+_AFDB_EXTRA = {"D_rerio": "UP000000437_7955_DANRE_v6"}
 
 _UNIPROT_BASE = ("https://ftp.uniprot.org/pub/databases/uniprot/current_release/"
                  "knowledgebase/reference_proteomes/Eukaryota")

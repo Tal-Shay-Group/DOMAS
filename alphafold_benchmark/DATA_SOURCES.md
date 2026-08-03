@@ -8,8 +8,9 @@ it gave us, and its license/access notes. Large downloads live outside the repo
 
 ## 1. Genome Biology 2025 — the ground-truth dataset
 
-**Paper:** Miller et al., *Predicting the structural impact of human alternative
-splicing*, Genome Biology 2025, doi:10.1186/s13059-025-03744-x.
+**Paper:** Song Y, Zhang C, Omenn GS, O'Meara MJ, Welch JD. *Predicting the structural
+impact of human alternative splicing*, Genome Biology 2025;26:283,
+doi:10.1186/s13059-025-03744-x.
 - PMC: <https://pmc.ncbi.nlm.nih.gov/articles/PMC12442299/>
 - Springer: <https://link.springer.com/article/10.1186/s13059-025-03744-x>
 - Local PDF: `DOMAS/papers/Predicting the structural impact of human alternative splicing.pdf`
@@ -156,7 +157,10 @@ Via web search; catalogued for context / future work:
 | `predict_eval_results.txt` | cross-validated AUC / R² comparison |
 | `clinvar_enrichment_results.txt` | pathogenic vs benign enrichment |
 | `calib_model.json` / `foldchange_model.json` | shipped logistic coefficients for `impact_prob` / `fold_change_prob` |
+| `foldchange_model_allpairs.json` | superseded all-pairs fold fit (kept for the audit trail; see MODEL_CARDS §Revision) |
 | `fit_calibrated.py` / `fit_foldchange.py` | fit + gene-grouped CV for the two scores |
+| `fit_foldchange_hq.py` | **shipped** fold refit on AlphaFold-confident structures only (E44); self-contained — rebuilds from the CSVs here, no scratchpad needed |
+| `am_alone.py` | does `impact_prob` beat raw AlphaMissense? (E45; needs `humsavar.txt`, see §2) |
 | `improve_proto.py` | peak-AM / gnomAD feature prototype (peak rejected) |
 | `ml_compare.py` | model-family comparison (logistic chosen over trees/NN) |
 | `variant_impact_contingency.py` / `variant_impact_by_score_decile.py` | pathogenic/benign × impact tables |

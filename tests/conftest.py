@@ -42,10 +42,11 @@ def pytest_addoption(parser):
     parser.addoption(
         "--ioe-specie",
         action="store",
-        default="human",
-        help="Species the --ioe-input-dir data came from (human/mouse/rat). SUPPA "
-             "files carry no species field and DOMAS aborts on a mismatch, so this "
-             "has to match the directory.",
+        default=None,
+        help="Species the --ioe-input-dir data came from (human/mouse/rat). "
+             "Required whenever --ioe-input-dir is given: SUPPA files carry no "
+             "species field, so a default would just be a guess that DOMAS aborts "
+             "on minutes into the run.",
     )
     parser.addoption(
         "--ioe-max-clusters",
@@ -68,6 +69,14 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     config.addinivalue_line(
         "markers", "slow: slow test, opt in with --run-slow")
+
+    # Fail at argument-parse time rather than minutes into a run, where the
+    # species guard would otherwise abort it.
+    if config.getoption("--ioe-input-dir") and not config.getoption("--ioe-specie"):
+        raise pytest.UsageError(
+            "--ioe-specie is required with --ioe-input-dir (human/mouse/rat): "
+            "SUPPA .ioe files carry no species field, and DOMAS aborts when the "
+            "stated species contradicts the gene ids.")
 
 
 def pytest_collection_modifyitems(config, items):

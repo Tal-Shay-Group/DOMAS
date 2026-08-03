@@ -758,10 +758,27 @@ def insertion_impact(inserted_len, inside_domain, junction_fold_state=None):
 # Calibrated logistic model for the continuous impact probability. Trained on
 # 3,282 isoform changed-regions labelled by UniProt humsavar variant overlap
 # (pathogenic LP/P vs benign LB/B), features standardised, missing values imputed
-# to the training median. 5-fold CV AUC 0.768 and well-calibrated (predicted prob
-# tracks observed pathogenic rate). Coefficients are on standardised features;
-# region_am dominates (+0.80), gnomAD LOEUF is the non-circular add (-0.42, lower
-# LOEUF = more constrained = more pathogenic), burial +0.24, coverage-loss ~0.
+# to the training median. Gene-grouped 5-fold CV AUC 0.766 (every isoform of a gene
+# confined to one fold, so no protein is in both train and test; the random 80/20
+# hold-out gives 0.778 - the gap is the leakage check, not the headline) and
+# well-calibrated (predicted prob tracks observed pathogenic rate). Read it as an
+# enrichment/prioritisation signal, not a per-event classifier.
+#
+# HOW MUCH IS THIS MODEL WORTH OVER ITS DOMINANT FEATURE (E45, measured): ranking the
+# same regions by raw region_am with no model at all gives AUC 0.753, against the
+# model's 0.766 - delta +0.013, gene-clustered bootstrap 95% CI [+0.001, +0.024]. Real
+# but marginal: impact_prob is region-averaged AlphaMissense with a small correction.
+# Nothing leaks (AlphaMissense is not trained on clinical labels; it uses population
+# frequency as weak supervision) but its thresholds were calibrated on ClinVar, which
+# humsavar aggregates, so the 0.766 is largely AlphaMissense's own performance.
+# The AlphaMissense-FREE combination [loeuf, buried_frac, max_cov_loss] reaches 0.715 -
+# that is the number to quote for signal DOMAS contributes independently. Note also
+# max_cov_loss alone = 0.523, i.e. chance: Pfam coverage change, the one thing DOMAS
+# measures natively, carries no functional signal against this label.
+# Reproduce with alphafold_benchmark/am_alone.py.
+# Coefficients are on standardised features; region_am dominates (+0.80), gnomAD
+# LOEUF is the non-circular add (-0.42, lower LOEUF = more constrained = more
+# pathogenic), burial +0.24, coverage-loss ~0.
 # Regenerate with alphafold_benchmark/fit_calibrated.py.
 _IMPACT_PROB_MODEL = {
     'features': ['region_am', 'loeuf', 'max_cov_loss', 'buried_frac'],
@@ -774,13 +791,55 @@ _IMPACT_PROB_MODEL = {
 
 
 def impact_probability(region_am=None, loeuf=None, max_cov_loss=None, buried_frac=None):
-    """Calibrated probability (0-1) that a changed region is pathogenicity-relevant,
-    from a logistic model over mean AlphaMissense (`region_am`), gnomAD gene
-    constraint (`loeuf`), Pfam `max_cov_loss`, and AlphaFold `buried_frac`. This is
-    the *continuous* companion to the categorical `hmm_change_impact`: it does not
-    quantise, and it folds in the gene-level constraint. A missing feature is
-    imputed to the training median (a neutral value), so the score degrades
-    gracefully. See `_IMPACT_PROB_MODEL` for provenance and calibration.
+    """Calibrated probability (0-1) that the region the alternative isoform changes
+    contains a PATHOGENIC missense variant rather than only benign ones - estimated
+    from the constraint on those residues (mean AlphaMissense, gnomAD LOEUF) together
+    with their burial in the canonical fold and the Pfam coverage lost. The functional
+    companion to fold_change_probability (which is structural), and the *continuous*
+    companion to the categorical `hmm_change_impact`: it does not quantise, and it
+    folds in the gene-level constraint.
+
+    Label - the operational definition (alphafold_benchmark/fit_calibrated.py). For a
+    canonical changed span [lo, hi], over UniProt humsavar single-residue variants:
+      pat  - an LP/P (pathogenic) position falls inside the span
+      ben  - an LB/B (benign) position falls inside the span
+      kept - only rows with (pat or ben): a span carrying no classified variant is
+             not a training example at all
+      y    - int(pat), so a span carrying BOTH classes counts as positive
+    Defined for substitutions and deletions; pure insertions are left blank (they
+    have no canonical changed region, and were dropped from training too).
+
+    Conditional in training, unconditional at runtime. Every training row already
+    contained a classified variant - the base rate is P(pathogenic | overlaps a
+    variant) = 0.277. DOMAS then scores EVERY changed region, including ones with no
+    variant evidence at all, so read the output as "how much does this region resemble
+    the pathogenic-variant-carrying ones", not as a literal probability for an
+    arbitrary region.
+
+    What it is NOT: a verdict on the splice event. The label is variant-overlap of a
+    SPAN - whatever survives prefix/suffix trimming in `changed_region`, so its length
+    varies a lot - and one feature (loeuf) is gene-level, shared by every comparison of
+    that gene. The score says "this region is the kind of place pathogenic variants
+    sit", not "this isoform is pathogenic": a prioritisation signal (gene-grouped AUC
+    0.766), not a classifier. Nothing in it involves the isoform's fold, expression or
+    consequence; the fold is fold_change_probability, and the two can disagree in both
+    directions.
+
+    Features (see `_IMPACT_PROB_MODEL`) - note only two are region-specific:
+      region_am    - mean AlphaMissense pathogenicity over the changed residues.
+                     Dominant (+0.80), but partly circular: AlphaMissense is itself
+                     calibrated against clinical variant sets overlapping humsavar.
+      buried_frac  - fraction of the changed residues buried in the canonical
+                     AlphaFold model (RSA < 0.25).
+      loeuf        - gnomAD LoF constraint of the GENE, not the region, so every
+                     comparison of a gene shares this term (-0.42, lower = more
+                     constrained). The non-circular signal.
+      max_cov_loss - max Pfam coverage (%) lost. Coefficient ~0 (-0.07): domain loss
+                     carries essentially no functional signal here, unlike in
+                     fold_change_probability where it is a real term.
+    A missing feature is imputed to the training median (a neutral value), so the
+    score degrades gracefully. See `_IMPACT_PROB_MODEL` for provenance and
+    calibration.
 
     Returns a float in [0, 1], or None if every feature is missing.
     """
@@ -796,43 +855,84 @@ def impact_probability(region_am=None, loeuf=None, max_cov_loss=None, buried_fra
 
 
 # Calibrated logistic model for the fold-change probability (structural axis):
-# P(the alternative isoform has a different fold, TM-score < 0.5). Trained on
-# 10,227 changed-regions labelled by the Genome Biology 2025 AlphaFold TM-scores,
-# features standardised, missing imputed to the training median.
+# P(the alternative isoform has a different fold, TM-score < 0.5). Labels are the
+# Genome Biology 2025 (Song et al.) AlphaFold TM-scores; features standardised,
+# missing imputed to the training median.
 #
-# Feature set rebuilt around AlphaFold **PAE** (E38): `pae_global` (whole canonical
-# structure mean predicted-aligned-error) is by far the strongest fold-change signal
-# and dominates the model (std coef ~ +2). It lifts gene-grouped 5-fold CV from the
-# old 6-feature AUC 0.777 to **AUC 0.894 / accuracy 0.815 / R2 0.659** (the full
-# 10-feature model reaches 0.906; these four capture ~95% of the gain for a fraction
-# of the provisioning). `identity` (trimmed-region sequence identity %) is the #2 term;
-# `max_cov_loss` (max Pfam coverage lost) and `protL` (canonical protein length) add
-# small real signal. Burial / region_am / loeuf were dropped: ~0 marginal here once
-# PAE is in (they drive impact_probability, the functional axis - the fold-vs-function
-# duality). Regenerate with alphafold_benchmark/fit_foldchange_pae.py.
+# Fit on the 6,973 pairs whose ISOFORM structure the source paper classed `high` or
+# `confident` - the same quality filter the paper applies to its own metric analyses
+# (E44). The earlier fit used all 10,227 pairs, but 32% of those are `low` /
+# `unstructured` rows whose TM<0.5 rate is 0.74 vs 0.15 in the confident ones: isoform
+# pLDDT correlates with TM at rho +0.755, so those rows largely label AlphaFold's
+# failure to model the isoform rather than a splicing-induced fold change. Including
+# them inflated the intercept (-1.26 -> -2.51 once removed) and broke calibration on
+# exactly the well-predicted proteins users care about: the old model's top quintile
+# there predicted 0.68 against an observed 0.46, and its 'change' calls were only 55%
+# correct. After the refit the top quintile predicts 0.48 vs observed 0.45 and 'change'
+# calls are 64% correct. Gene-grouped 5-fold CV on the confident set: AUC 0.865 /
+# accuracy 0.871 / R2 0.578 (the all-pairs fit's headline 0.894 was partly the easy
+# low-quality rows). The superseded coefficients are kept in
+# alphafold_benchmark/foldchange_model_allpairs.json.
+#
+# `pae_global` (whole canonical structure mean predicted-aligned-error) still dominates
+# (std coef +1.32, down from +1.96 - some of that weight was the quality confound);
+# `identity` (trimmed-region identity %) is #2; `max_cov_loss` and `protL` add small
+# real signal. Burial / region_am / loeuf are ~0 marginal here once PAE is in (they
+# drive impact_probability, the functional axis - the fold-vs-function duality, and the
+# two scores are empirically independent at rho -0.05).
+# Regenerate with alphafold_benchmark/fit_foldchange_hq.py.
 _FOLD_CHANGE_MODEL = {
     'features': ['pae_global', 'identity', 'max_cov_loss', 'protL'],
-    'median':   [17.1268, 75.0, 11.0, 388.0],
-    'mean':     [16.5883, 66.3577, 33.2236, 379.1839],
-    'std':      [7.1173, 28.0213, 39.2834, 134.3642],
-    'coef':     [1.9553, -0.6826, 0.6514, -0.5351],
-    'intercept': -1.2597,
+    'median':   [13.8059, 78.1609, 10.0, 388.0],
+    'mean':     [13.9957, 69.3368, 31.0288, 381.6161],
+    'std':      [6.218, 26.4663, 37.817, 128.6137],
+    'coef':     [1.3167, -0.5837, 0.5167, -0.5125],
+    'intercept': -2.5145,
 }
 
 
 def fold_change_probability(pae_global=None, identity=None, max_cov_loss=None, protL=None):
-    """Calibrated probability (0-1) that the alternative isoform adopts a DIFFERENT
-    fold (AlphaFold TM-score < 0.5) - the structural companion to
-    impact_probability (which is functional/pathogenicity).
+    """Calibrated probability (0-1) that the canonical and alternative isoforms have
+    DIFFERENT folds - operationally, AlphaFold TM-score < 0.5 - from the rigidity and
+    length of the canonical structure (mean PAE, protein length) together with the
+    extent of the change (sequence identity, maximum Pfam coverage lost). The
+    structural companion to impact_probability (which is functional/pathogenicity).
 
-    Features (see `_FOLD_CHANGE_MODEL`):
+    What TM<0.5 actually means. It is not a clean 'the domain refolds' label: it fires
+    on three different things, and the model cannot tell them apart.
+      1. genuine refolding of the retained sequence;
+      2. rigid-body RE-ORIENTATION of domains that individually keep their folds -
+         the paper's own explanation for most of its high-identity/low-TM outliers
+         ("variation in the linker regions ... different orientation of domains");
+      3. AlphaFold simply failing on the isoform (long IDRs, isolated helices). The
+         refit excludes the worst of these, but the label still carries some.
+    TM is also averaged over BOTH length normalisations, so a large deletion depresses
+    it mechanically: length ratio alone predicts TM<0.5 at AUC 0.676. Read the score as
+    "structurally divergent", not "refolded".
+
+    Calibrated for AlphaFold-CONFIDENT canonical structures (see `_FOLD_CHANGE_MODEL`):
+    training kept only pairs whose isoform model was `high`/`confident` quality. On a
+    floppy, poorly-predicted protein the score is extrapolating - canonical mean pLDDT
+    (afdb_plddt) separates that regime at AUC 0.873 if a guard is ever wanted.
+
+    Defined for substitutions and deletions; pure insertions are left blank (they
+    have no canonical changed region, and were dropped from training too).
+
+    Features (see `_FOLD_CHANGE_MODEL`) - two describe the canonical alone, two
+    compare it to the alternative, so the score cannot be computed from the
+    canonical by itself:
       pae_global   - mean predicted-aligned-error over the canonical AlphaFold
                      structure (higher = floppier/multi-domain -> more fold change).
                      The dominant signal; provisioned via the afdb_pae table.
-      identity     - sequence identity (%) between canonical and alternative protein.
-      max_cov_loss - max Pfam coverage (%) lost in the changed region.
       protL        - canonical protein length (aa).
-    A missing feature is imputed to the training median.
+      identity     - sequence identity (%) between canonical and alternative protein,
+                     from the untouched flanks: how much of the protein survives.
+      max_cov_loss - max Pfam coverage (%) lost in the changed region.
+    Note these carry the EXTENT of the change, not its LOCATION: position along the
+    protein (dist_term / rel_center / frac_before / is_terminal) was evaluated and
+    dropped - pae_global absorbs it (+0.017 AUC before PAE, +0.002 after). Placement
+    enters only indirectly, when the change overlaps a Pfam domain and so shows up in
+    max_cov_loss. A missing feature is imputed to the training median.
 
     Returns a float in [0, 1], or None if every feature is missing.
     """
@@ -847,23 +947,149 @@ def fold_change_probability(pae_global=None, identity=None, max_cov_loss=None, p
     return round(1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, z)))), 4)
 
 
-def fold_change_call(fold_change_prob, low=0.4, high=0.6):
-    """Triage a fold_change_probability into an actionable call. Cheap features
-    top out at ~AUC 0.79 for fold change; the mid-probability band is genuinely
-    ambiguous (~47% real change rate) and is the 'does the remainder refold' class
-    that only actual folding resolves. So route it out rather than force a call:
+_PLDDT_FLOOR = 70.0   # AlphaFold's own "confident" cutoff (below 70 = low confidence)
 
-        prob >= high  -> 'change'     (confident: different fold)
-        prob <= low   -> 'preserved'  (confident: same fold)
+# The feature each score is mostly made of. When it is absent the model would fall back
+# to the training median - a HUMAN BENCHMARK CONSTANT - and still emit a number, which
+# is indistinguishable from a measurement. That is not sporadic missingness: pae_global
+# is absent for ~81% of human genes and 100% of non-human ones (afdb_pae was provisioned
+# for the 5.5k benchmark accessions only), and region_am for every non-human gene
+# (AlphaMissense is human-only). With region_am imputed, impact_prob collapses to a
+# constant 0.22-0.25 whatever else changes; with pae_global imputed, fold_change_prob is
+# systematically pulled towards 'preserved'. So the score is BLANKED instead, and the
+# note says which feature was unavailable.
+_DOMINANT = {'fold_change_prob': 'pae_global', 'impact_prob': 'region_am'}
+_FEATURE_SOURCE = {           # table the value would have come from
+    'pae_global': 'afdb_pae',
+    'region_am': 'am_pathogenicity',
+    'loeuf': 'gene_constraint',
+    'buried_frac': 'afdb_rsa',
+    'identity': 'ensembl_sequence',
+    'protL': 'ensembl_sequence',
+    'max_cov_loss': 'pfam',
+}
+
+
+NO_ACCESSION_NOTE = ('not scored: canonical transcript has no UniProt accession in '
+                     'DoChaP, so no structural or constraint data can be looked up')
+
+
+def missing_features(**values):
+    """Names of the features whose value is absent (None or ''), in the order given."""
+    return tuple(k for k, v in values.items() if v is None or v == '')
+
+
+def _note_parts(missing, score):
+    """Shared note text: whether the score was withheld, and what was imputed."""
+    dominant = _DOMINANT[score]
+    parts = []
+    withheld = dominant in missing
+    if withheld:
+        parts.append(f'not scored: {dominant} unavailable '
+                     f'- no {_FEATURE_SOURCE[dominant]} entry for this protein')
+    others = [m for m in missing if m != dominant]
+    if others:
+        # only claim imputation when a score was actually produced from it
+        parts.append(('also missing: ' if withheld else 'imputed to training median: ')
+                     + ', '.join(others))
+    return parts
+
+
+def impact_note(missing=()):
+    """Reason string for impact_prob: blank when every feature was measured, else why
+    the score was withheld and/or which features fell back to the training median.
+
+    region_am is the dominant feature (+0.80 of a model whose next term is -0.42); with
+    it imputed the score is a constant 0.22-0.25 regardless of the other inputs, so it
+    is withheld rather than emitted. loeuf and buried_frac missing only weaken it, so
+    those are imputed and declared.
+    """
+    return '; '.join(_note_parts(tuple(missing), 'impact_prob'))
+
+
+def fold_change_note(canonical_plddt=None, missing=(), plddt_floor=_PLDDT_FLOOR):
+    """Reason string when fold_change_prob is outside the regime it was calibrated
+    for, or '' when it is inside.
+
+    The model is fit on pairs whose ISOFORM structure AlphaFold resolved well - a
+    quality DOMAS can never check, because it does not fold isoforms (AlphaFold DB
+    holds one model per canonical accession; there is no P12345-2 entry). Canonical
+    mean pLDDT is the available proxy: it predicts the isoform's quality class at AUC
+    0.873, because a protein AlphaFold models poorly is modelled poorly in any isoform.
+
+    Below the floor the score is extrapolating, and its errors are not symmetric: on
+    those proteins a 'preserved' call is wrong 37.6% of the time versus 6.1% inside the
+    regime, while 'change' calls stay 0.946 precise. So fold_change_call downgrades
+    'preserved' (only) to 'uncertain', and this note explains why, rather than emitting
+    a confident-looking "nothing happened" about a structure nobody can trust.
+
+    The note is emitted on EVERY row below the floor, including ones still called
+    'change' or 'uncertain' - it flags an unreliable structure, which is worth knowing
+    regardless of which way the call went.
+
+    Caveat: the proxy is imperfect (AUC 0.873), so it is a reduction in exposure, not a
+    fix. It removes 46% of the unreliable-regime 'preserved' calls; the survivors are no
+    more accurate than before (39.7% wrong). Rows carrying this note deserve a real
+    isoform structure (ESMFold) before any structural claim is made about them.
+
+    Returns '' when canonical_plddt is None (unknown != unreliable - the guard only
+    fires on positive evidence that the canonical model is poor).
+    """
+    missing = tuple(missing)
+    parts = _note_parts(missing, 'fold_change_prob')
+    if _DOMINANT['fold_change_prob'] not in missing:
+        # the reliability guard only matters when a call is actually being made
+        try:
+            v = float(canonical_plddt) if canonical_plddt not in (None, '') else None
+        except (TypeError, ValueError):
+            v = None
+        if v is not None and v < plddt_floor:
+            parts.insert(0, f'canonical structure poorly resolved (mean pLDDT {v:.0f})')
+    return '; '.join(parts)
+
+
+def fold_change_call(fold_change_prob, low=0.2, high=0.5, canonical_plddt=None,
+                     plddt_floor=_PLDDT_FLOOR):
+    """Triage a fold_change_probability into an actionable call. The mid-probability
+    band is genuinely ambiguous - the 'does the remainder refold' class that only
+    actual folding resolves - so route it out rather than force a call:
+
+        prob >= high  -> 'change'     (structurally divergent)
+        prob <= low   -> 'preserved'  (same fold)
         otherwise     -> 'uncertain'  (fold/inspect to resolve)
 
-    Abstaining on 'uncertain' lifts accuracy on the called cases from ~75% (call
-    all) to ~86% (call the confident half). Returns None if prob is None/blank.
+    The band is ASYMMETRIC because the calibrated base rate is 0.150, not 0.5: on the
+    confident set a 0.5 reading is already well above average risk. Re-derived with the
+    refit model (E44); out-of-fold on 6,973 confident pairs it gives called-set accuracy
+    0.911 at 83% coverage, 'preserved' NPV 0.938, and 'change' precision 0.642 at recall
+    0.316. The old 0.4/0.6 band on the old model made 894 'change' calls on the same
+    rows at 0.548 precision - i.e. a coin flip labelled 'confident'; 380 of those now
+    correctly land in 'uncertain'. Widen towards 0.15/0.45 for a stricter called set
+    (same accuracy, 78% coverage).
+
+    canonical_plddt: mean pLDDT of the canonical AlphaFold model. Below `plddt_floor`
+    a 'preserved' call is downgraded to 'uncertain' - see fold_change_note for why.
+    Emit that note alongside the call so the reason travels with the verdict. Pass None
+    (the default) to disable the guard.
+
+    The guard is deliberately ONE-SIDED. 'preserved' asserts that nothing happened
+    structurally, which is only as good as the structure it rests on: below the floor
+    it is wrong 39.7% of the time. 'change' is driven by sequence-level facts (a large
+    deletion, lost Pfam coverage) that hold whether or not the model resolved well, and
+    it stays 0.946 precise there - so guarding it would discard good calls for nothing.
+    Measured on the benchmark, one-sided guarding cuts 'preserved' error 0.100 -> 0.084
+    while keeping all 1,664 'change' calls at 0.851; guarding both sides gives the same
+    'preserved' gain but leaves only 492 'change' calls at 0.744.
+
+    Returns None if prob is None/blank.
     """
     if fold_change_prob is None or fold_change_prob == '':
         return None
     p = float(fold_change_prob)
-    return 'change' if p >= high else 'preserved' if p <= low else 'uncertain'
+    call = 'change' if p >= high else 'preserved' if p <= low else 'uncertain'
+    if call == 'preserved' and fold_change_note(canonical_plddt, plddt_floor=plddt_floor):
+        return 'uncertain'
+    return call
 
 
 def calc_spade_score(domains_by_isoform):
@@ -1138,6 +1364,11 @@ def get_transcript_domains_db(con, transcript_ids, df_transcript=None, df_protei
                                           'transcript_ensembl_id': 'transcript_ensembl_id_version',
                                           'description_y': 'short_description',
                                           'gene_ensembl_id' : 'gene_ensembl_id'})
+    # DomainType.description is what this path already carries as short_description
+    # (description_y above; description_x is the protein's). Expose it under
+    # `description` too, so a domain frame from either source answers to the same
+    # column name and the results CSV does not care which source it came from.
+    merged_df['description'] = merged_df['short_description']
     merged_df = merged_df.drop(columns=['type_id', 'ext_id', 'name', 'other_name', 'description_x'])
     merged_df = merged_df.drop(columns=['transcript_refseq_id_x', 'tx_start', 'tx_end', 'cds_start', 'cds_end', 'exon_count'])
     merged_df = merged_df.drop(columns=['transcript_refseq_id_y','protein_refseq_id'])
@@ -1149,6 +1380,11 @@ def get_transcript_domains_db(con, transcript_ids, df_transcript=None, df_protei
 REPRESENTATIVE_DOMAINS_COLUMNS = [
     'protein_ensembl_id_version', 'transcript_ensembl_id_version', 'protein_interpro_id',
     'gene_ensembl_id', 'canonical', 'AA_start', 'AA_end', 'short_description',
+    # The entry's prose description, reported per domain in the results CSV.
+    # RepresentativeDomains carries its own; the DomainEvent/DomainType path
+    # supplies DomainType.description under the same name, so a frame from
+    # either source answers to 'description'.
+    'description',
     'CDD_id', 'cdd', 'pfam', 'smart', 'tigr', 'interpro',
     # domain_id + InterPro entry `type` are carried through so
     # junction_analisys.filter_representative_domains() can reduce the domain
@@ -1230,6 +1466,10 @@ def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_pr
         'start': 'AA_start',
         'end': 'AA_end',
         'domain_name': 'short_description',
+        # Proteins and RepresentativeDomains both have a `description`, so the
+        # merge suffixes them: _x is the protein's, _y the domain entry's. It is
+        # the domain's that belongs on a domain row.
+        'description_y': 'description',
     })
     merged_df['AA_start'] = merged_df['AA_start'].astype(int)
     merged_df['AA_end'] = merged_df['AA_end'].astype(int)

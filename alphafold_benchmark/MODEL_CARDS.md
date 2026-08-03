@@ -5,7 +5,7 @@ level, one per axis of alternative-splicing consequence:
 
 | score | axis | question it answers | gene-grouped AUC |
 |-------|------|---------------------|:----------------:|
-| **`fold_change_prob`** | structural | Does the alternative isoform adopt a *different 3-D fold*? | **0.894** |
+| **`fold_change_prob`** | structural | Is the alternative isoform *structurally divergent* (TM < 0.5)? | **0.865** |
 | **`impact_prob`** | functional | Is the changed region *functionally important* (pathogenic-variant-like)? | **0.766** |
 
 They are deliberately different questions ("fold-vs-function duality"): a change can
@@ -17,6 +17,100 @@ fold, so no protein appears in both train and test — no leakage).
 
 Everything below is reproduced end-to-end by [`reproduce_models.py`](reproduce_models.py)
 (see §5).
+
+---
+
+## Revision — audit of both scores (E44 / E45)
+
+Both models were re-audited from the committed CSVs; both headline AUCs reproduced
+exactly (0.894 all-pairs fold, 0.766 impact), so the numbers below were sound *as
+computed*. Two findings changed what ships. Scripts:
+[`fit_foldchange_hq.py`](fit_foldchange_hq.py), [`am_alone.py`](am_alone.py).
+
+**1. `fold_change_prob` was refit on AlphaFold-confident structures only, and its band
+re-derived.** 32% of the 10,227 training pairs are isoform structures Song et al. class
+`low`/`unstructured` and exclude from their own metric analyses. Their TM<0.5 rate is
+**0.74** against **0.15** in the confident rows, and isoform pLDDT correlates with TM at
+**ρ +0.755** — those rows largely label AlphaFold's failure to model the isoform, not a
+splicing-induced fold change. Including them inflated the intercept and broke
+calibration where it matters: the old model predicted a mean **0.219** on confident
+pairs whose observed rate is **0.150**, its top quintile there predicted **0.68 vs an
+observed 0.46**, and its `change` calls were only **54.8%** correct — a coin flip
+labelled "confident".
+
+| | all-pairs fit (superseded) | confident-only fit (**shipped**) |
+|---|:---:|:---:|
+| training rows | 10,227 | 6,973 |
+| base rate P(TM<0.5) | 0.338 | 0.150 |
+| gene-grouped AUC | 0.894 | **0.865** |
+| accuracy / R² | 0.815 / 0.659 | **0.871 / 0.578** |
+| `pae_global` coef | +1.96 | **+1.32** |
+| intercept | −1.26 | **−2.51** |
+| top-quintile calibration | 0.68 pred vs 0.46 obs | **0.48 pred vs 0.45 obs** |
+| band | 0.40 / 0.60 | **0.20 / 0.50** |
+| `change` precision / recall | 0.548 / — | **0.642 / 0.316** |
+| `preserved` NPV | 0.906 | **0.938** |
+
+The band is now asymmetric because the calibrated base rate is 0.150, not 0.5. It gives
+called-set accuracy **0.911 at 83% coverage**; 380 of the old model's 894 `change` calls
+correctly become `uncertain`. Superseded coefficients: `foldchange_model_allpairs.json`.
+
+*Regime guard (implemented).* The filter uses the **isoform** structure's quality, which
+DOMAS never has — it does not fold isoforms, and AlphaFold DB holds one model per
+canonical accession (no `P12345-2` entries; verified: 0 of 20,504 `afdb_plddt` rows are
+isoform-suffixed). Canonical mean pLDDT is the proxy, separating the regimes at AUC
+**0.873**, and is now applied in `utils.fold_change_call` / `fold_change_note`: below
+mean pLDDT **70** (AlphaFold's own confidence cutoff) a `preserved` verdict is downgraded
+to `uncertain`, and every such row carries `fold_change_note` = "canonical structure
+poorly resolved (mean pLDDT NN)".
+
+The guard is **one-sided**, which the numbers justify: `preserved` asserts nothing
+happened and is only as good as the structure beneath it (39.7% wrong below the floor vs
+6.1% above), while `change` rests on sequence-level facts and stays 0.946 precise there.
+Guarding both sides gives the same `preserved` gain but cuts `change` calls from 1,664
+to 492 and their precision from 0.851 to 0.744 — pure loss.
+
+| | no guard | **one-sided guard** | both sides |
+|---|:---:|:---:|:---:|
+| `preserved` calls / error | 6,008 / 0.100 | **5,531 / 0.084** | 5,531 / 0.084 |
+| `change` calls / precision | 1,664 / 0.851 | **1,664 / 0.851** | 492 / 0.744 |
+| abstention | 25% | **30%** | 41% |
+
+It fires on 2,885 rows — 9% of group A, 70% of group B. **It reduces exposure, it does
+not fix the regime:** the group-B `preserved` calls that survive are no more accurate
+than before (39.7%). Rows carrying the note need a real isoform structure (ESMFold, E42)
+before any structural claim is made about them.
+
+**2. `impact_prob` adds +0.013 AUC over raw AlphaMissense.** Ranking the same 3,282
+regions by mean `region_am` with *no model at all* gives **0.753** against the model's
+**0.766**; gene-clustered bootstrap 95% CI **[+0.001, +0.024]**. Real but marginal — the
+score is region-averaged AlphaMissense with a small correction. Nothing leaks
+(AlphaMissense is not trained on clinical labels), but its thresholds were calibrated on
+ClinVar, which humsavar aggregates. **The AlphaMissense-free combination
+`[loeuf, buried_frac, max_cov_loss]` reaches 0.715** — that is the figure to quote for
+signal DOMAS contributes independently. Note `max_cov_loss` alone scores **0.523**, i.e.
+chance: Pfam coverage change, the one thing DOMAS measures natively, carries no
+functional signal against this label.
+
+**3. What the TM<0.5 label actually is.** It fires on three distinct things the model
+cannot separate: genuine refolding; rigid-body **re-orientation** of domains that each
+keep their fold (the paper's own explanation for most high-identity/low-TM outliers);
+and AlphaFold failure on the isoform. TM is also averaged over both length
+normalisations, so deletions depress it mechanically — length ratio alone predicts
+TM<0.5 at AUC **0.676**. Read the score as *structurally divergent*, not *refolded*.
+
+**4. The two axes are genuinely independent** — ρ = **−0.05** between the scores, and
+−0.07 between `impact_prob` and TM. The fold-vs-function duality is empirical, not
+rhetorical. Within the *functional* columns of `results.csv`, however, `impact`,
+`impact_prob`, `region_am_mean` and `functional_sites` are largely one measurement
+displayed four ways (see `enrichment.add_scores`) — their agreement is not
+corroboration.
+
+> Sections 1.1, 2 and 3 have been regenerated against the shipped models by
+> [`reproduce_models.py`](reproduce_models.py). **Section 4 and Appendix A still quote
+> all-pairs-era AUC deltas** (e.g. "PAE lifted 0.78 → 0.90") — those are the numbers
+> that drove the feature-selection decisions, and are kept as the historical audit
+> trail; the relative conclusions hold, the absolute values are pre-refit.
 
 **Contents**
 
@@ -33,7 +127,7 @@ Everything below is reproduced end-to-end by [`reproduce_models.py`](reproduce_m
 
 ## 1. Shared benchmark, labels, and methodology
 
-**Benchmark dataset.** Miller et al., *Predicting the structural impact of human
+**Benchmark dataset.** Song et al., *Predicting the structural impact of human
 alternative splicing*, **Genome Biology 2025** (doi:10.1186/s13059-025-03744-x). One
 row = **one canonical-vs-alternative-isoform splicing event**. After dropping pure
 insertions (no canonical changed region to score), **10,227 pairs across 5,557 human
@@ -82,14 +176,19 @@ checked:
 
 **They agree closely — the small gap confirms leakage is minimal:**
 
-| model | metric | Method 1 (gene-grouped CV) | Method 2 (random 80/20) | Δ (holdout − grouped) |
+| model | metric | Method 1 (gene-grouped CV) | Method 2 (random 80/20, mean of 5 seeds) | Δ (holdout − grouped) |
 |-------|--------|:--------------------------:|:-----------------------:|:---------------------:|
-| `fold_change_prob` | AUC | 0.894 | 0.898 | +0.005 |
-| | accuracy | 0.815 | 0.816 | +0.001 |
-| | R² | 0.659 | 0.677 | +0.018 |
-| `impact_prob` | AUC | 0.766 | 0.778 | +0.012 |
-| | accuracy | 0.750 | 0.730 | −0.020 |
-| | R² | 0.175 | 0.189 | +0.014 |
+| `fold_change_prob` | AUC | 0.865 | 0.863 | −0.002 |
+| | accuracy | 0.871 | 0.870 | −0.001 |
+| | R² | 0.578 | 0.581 | +0.003 |
+| `impact_prob` | AUC | 0.766 | 0.766 | 0.000 |
+| | accuracy | 0.748 | 0.752 | +0.004 |
+| | R² | 0.170 | 0.169 | −0.001 |
+
+Method 2 is averaged over seeds 0–4 because a single 80/20 split is noisy at this size:
+`impact_prob`'s hold-out AUC ranges 0.740–0.814 across those seeds (n_test = 656), and
+`fold_change_prob`'s 0.850–0.885. The earlier single-seed figures in this table sat at
+one end of that spread; the averaged gaps are ≤ 0.004 throughout.
 
 The random split is *slightly* optimistic on AUC/R² (≤ +0.018), the expected mild effect
 of same-gene pairs landing in both train and test; accuracy even drops for `impact_prob`
@@ -102,60 +201,75 @@ Method 2 is a single-split point estimate (higher variance) shown only for contr
 
 ## 2. `fold_change_prob` — structural axis
 
-**What it measures.** Calibrated P(the alternative isoform adopts a **different fold**,
-TM-score < 0.5).
+**What it measures.** Calibrated P(the alternative isoform is **structurally divergent**
+from the canonical, operationalised as TM-score < 0.5). Not "the domain refolds" — see
+§Revision point 3 for the three things that label conflates.
 
 **How it's measured / label.** Trained and evaluated against the paper's AlphaFold2
-TM-score (§1). TM < 0.5 is the positive class.
+TM-score (§1), restricted to the 6,973 pairs whose isoform structure the paper classes
+`high` or `confident` — the same quality filter it applies to its own analyses. TM < 0.5
+is the positive class.
 
 **Features & standardized coefficients** (`utils._FOLD_CHANGE_MODEL`; larger |coef| =
 more influence):
 
 | feature | std. coef | direction |
 |---------|:---------:|-----------|
-| **`pae_global`** | **+1.96** | floppier / multi-domain canonical structure → more fold change (dominant) |
-| `identity` | −0.68 | more sequence conserved → fold preserved |
-| `max_cov_loss` | +0.65 | more Pfam domain lost → more fold change |
-| `protL` | −0.54 | longer protein → fold preserved (larger scaffold) |
-| *intercept* | −1.26 | |
+| **`pae_global`** | **+1.32** | floppier / multi-domain canonical structure → more fold change (dominant) |
+| `identity` | −0.58 | more sequence conserved → fold preserved |
+| `max_cov_loss` | +0.52 | more Pfam domain lost → more fold change |
+| `protL` | −0.51 | longer protein → fold preserved (larger scaffold) |
+| *intercept* | −2.51 | |
 
-*(raw feature medians `[17.13, 75.0, 11.0, 388.0]`, means `[16.59, 66.36, 33.22, 379.18]`,
-std `[7.12, 28.02, 39.28, 134.36]` for the four features in order.)*
+*(raw feature medians `[13.81, 78.16, 10.0, 388.0]`, means `[14.00, 69.34, 31.03, 381.62]`,
+std `[6.22, 26.47, 37.82, 128.61]` for the four features in order.)*
 
-**Performance.** Base rate P(TM<0.5) = 0.338, so the majority-class accuracy baseline is
-0.662.
+**Performance.** Fit on the 6,973 AlphaFold-confident pairs (see §Revision). Base rate
+P(TM<0.5) = 0.150, so the majority-class accuracy baseline is 0.850 — accuracy is a weak
+metric at this imbalance and AUC is the one to read.
 
 | operating point | AUC | accuracy | R² | coverage |
 |-----------------|:---:|:--------:|:--:|:--------:|
-| **all events (no band)** | **0.894** | **0.815** | **0.659** | 100% |
-| suggested band applied (route 0.40–0.60 to folding) | **0.913** | **0.854** | **0.686** | 88% called |
+| **all events (no band)** | **0.865** | **0.871** | **0.578** | 100% |
+| suggested band applied (route 0.20–0.50 to folding) | **0.891** | **0.911** | **0.582** | 83% called |
 
-**Suggested query band: route `fold_change_prob` ∈ [0.40, 0.60] to real folding**
-(ESMFold/ColabFold) instead of forcing a call. Rationale, visible in the decile table
-and the right-hand graph below: the middle deciles (7–8, prob ≈ 0.37–0.69) are where the
-model degrades to a **coin flip** — in-bin accuracy dips to 0.54, *below* the 0.662
-majority baseline — because these are the "does the remainder re-fold?" cases (the SRP9
-class) that cheap features provably cannot resolve. Abstaining on that ~12% lifts the
-called-set accuracy 0.815 → 0.854 and AUC 0.894 → 0.913. Widen to 0.30–0.70 for
-higher-stakes screening.
+**Suggested query band: route `fold_change_prob` ∈ [0.20, 0.50] to real folding**
+(ESMFold/ColabFold) instead of forcing a call. The band is **asymmetric** because the
+calibrated base rate is 0.150, not 0.5 — a 0.5 reading is already ~3× the average risk,
+so it belongs on the `change` side, and the ambiguous region sits below it. Rationale,
+visible in the decile table below: the top two deciles (prob ≳ 0.25) are where in-bin
+accuracy falls to 0.63–0.67, because these are the "does the remainder re-fold?" cases
+(the SRP9 class) that cheap features provably cannot resolve. Abstaining on that 17%
+lifts called-set accuracy 0.871 → 0.911 and AUC 0.865 → 0.891, and gives `preserved`
+an NPV of 0.938 with `change` precision 0.642 at recall 0.316. Widen to 0.15–0.45 for a
+stricter called set (same accuracy, 78% coverage).
+
+For comparison, the superseded all-pairs model with its 0.40/0.60 band made 894 `change`
+calls on these same confident rows at **0.548 precision** — a coin flip labelled
+"confident"; 380 of those now correctly land in `uncertain`.
 
 **Decile calibration** (events sorted by predicted probability into 10 equal bins):
 
 | decile | prob range | mean pred | observed rate | n | in-bin acc@0.5 |
 |:------:|:----------:|:---------:|:-------------:|:---:|:--------------:|
-| 1 | 0.001–0.013 | 0.007 | 0.004 | 1023 | 0.996 |
-| 2 | 0.013–0.032 | 0.022 | 0.008 | 1023 | 0.992 |
-| 3 | 0.032–0.067 | 0.048 | 0.040 | 1023 | 0.960 |
-| 4 | 0.067–0.133 | 0.097 | 0.073 | 1023 | 0.927 |
-| 5 | 0.133–0.230 | 0.178 | 0.185 | 1023 | 0.815 |
-| 6 | 0.230–0.367 | 0.296 | 0.325 | 1023 | 0.675 |
-| 7 | 0.367–0.524 | 0.443 | 0.490 | 1023 | **0.536** |
-| 8 | 0.524–0.685 | 0.606 | 0.605 | 1022 | 0.605 |
-| 9 | 0.685–0.847 | 0.763 | 0.758 | 1022 | 0.758 |
-| 10 | 0.848–0.991 | 0.917 | 0.890 | 1022 | 0.890 |
+| 1 | 0.001–0.010 | 0.006 | 0.001 | 698 | 0.999 |
+| 2 | 0.010–0.018 | 0.014 | 0.006 | 698 | 0.994 |
+| 3 | 0.018–0.029 | 0.023 | 0.010 | 698 | 0.990 |
+| 4 | 0.029–0.044 | 0.037 | 0.022 | 697 | 0.978 |
+| 5 | 0.044–0.067 | 0.055 | 0.042 | 697 | 0.958 |
+| 6 | 0.067–0.103 | 0.084 | 0.088 | 697 | 0.912 |
+| 7 | 0.103–0.158 | 0.129 | 0.168 | 697 | 0.832 |
+| 8 | 0.158–0.248 | 0.198 | 0.253 | 697 | 0.747 |
+| 9 | 0.248–0.440 | 0.335 | 0.329 | 697 | 0.671 |
+| 10 | 0.440–0.940 | 0.617 | 0.581 | 697 | **0.628** |
 
-Predicted ≈ observed in every decile (well-calibrated). The U-shaped accuracy — high at
-both confident tails, coin-flip in the middle — is the signature that motivates the band.
+Predicted ≈ observed in every decile (well-calibrated: the largest gap is decile 8, 0.198
+predicted vs 0.253 observed). Accuracy now falls **monotonically** with the predicted
+probability rather than dipping in the middle as it did pre-refit — at a 0.150 base rate
+the low deciles are near-certain `preserved` while the doubt concentrates at the top,
+where decile 10 spans 0.44–0.94 and is only 0.628 accurate. That is the shape the band
+follows, and why it is asymmetric: the ambiguity to route out sits *below* the `change`
+threshold, not symmetrically around 0.5.
 
 ![fold_change_prob calibration and per-decile accuracy](model_card_foldchange.png)
 
@@ -186,7 +300,7 @@ Concretely, among changed regions that overlap *some* curated variant, P(it is t
 signal ("look here first"), **not** a per-event clinical classifier.
 
 **How it's measured / label.** Restricted to regions overlapping a humsavar LP/P or LB/B
-variant; label = 1 if pathogenic-overlapping, 0 if only benign-overlapping. 3,276
+variant; label = 1 if pathogenic-overlapping, 0 if only benign-overlapping. 3,282
 regions. (The benign class is the specificity control — a real functional score must
 enrich pathogenic, not merely variant-dense, regions.)
 
@@ -203,13 +317,13 @@ enrich pathogenic, not merely variant-dense, regions.)
 *(raw medians `[0.482, 0.983, 41.0, 0.340]`, means `[0.482, 0.979, 46.07, 0.309]`,
 std `[0.155, 0.443, 41.01, 0.219]`.)*
 
-**Performance.** Base rate P(pathogenic | overlaps a variant) = 0.277 → majority baseline
-0.723.
+**Performance.** Base rate P(pathogenic | overlaps a variant) = 0.276 → majority baseline
+0.724.
 
 | operating point | AUC | accuracy | R² | coverage |
 |-----------------|:---:|:--------:|:--:|:--------:|
-| **all events (no band)** | **0.766** | **0.750** | **0.175** | 100% |
-| abstain on 0.40–0.60 | **0.770** | **0.793** | **0.181** | 85% called |
+| **all events (no band)** | **0.766** | **0.748** | **0.170** | 100% |
+| abstain on 0.40–0.60 | **0.774** | **0.788** | **0.177** | 85% called |
 
 **Suggested use / band.** Treat `impact_prob` as a **triage/prioritisation** score, not a
 verdict: the **top decile (prob ≳ 0.58)** is ~66% pathogenic — "review these first"; the
@@ -222,16 +336,16 @@ where the signal is). Do **not** use it to call an individual variant pathogenic
 
 | decile | prob range | mean pred | observed rate | n | in-bin acc@0.5 |
 |:------:|:----------:|:---------:|:-------------:|:---:|:--------------:|
-| 1 | 0.019–0.068 | 0.047 | 0.043 | 328 | 0.957 |
-| 2 | 0.068–0.107 | 0.087 | 0.067 | 328 | 0.933 |
-| 3 | 0.107–0.143 | 0.124 | 0.113 | 328 | 0.887 |
-| 4 | 0.143–0.184 | 0.163 | 0.174 | 328 | 0.826 |
-| 5 | 0.184–0.227 | 0.205 | 0.177 | 328 | 0.823 |
-| 6 | 0.227–0.281 | 0.254 | 0.293 | 328 | 0.707 |
-| 7 | 0.281–0.345 | 0.311 | 0.339 | 327 | 0.661 |
-| 8 | 0.345–0.436 | 0.390 | 0.468 | 327 | 0.532 |
-| 9 | 0.438–0.576 | 0.505 | 0.437 | 327 | 0.508 |
-| 10 | 0.576–0.911 | 0.683 | 0.661 | 327 | 0.661 |
+| 1 | 0.018–0.069 | 0.047 | 0.040 | 329 | 0.960 |
+| 2 | 0.069–0.105 | 0.087 | 0.073 | 329 | 0.927 |
+| 3 | 0.105–0.143 | 0.123 | 0.088 | 328 | 0.912 |
+| 4 | 0.143–0.185 | 0.163 | 0.192 | 328 | 0.808 |
+| 5 | 0.185–0.228 | 0.207 | 0.183 | 328 | 0.817 |
+| 6 | 0.228–0.280 | 0.254 | 0.284 | 328 | 0.716 |
+| 7 | 0.280–0.344 | 0.311 | 0.338 | 328 | 0.662 |
+| 8 | 0.345–0.440 | 0.388 | 0.460 | 328 | 0.540 |
+| 9 | 0.440–0.577 | 0.504 | 0.451 | 328 | **0.485** |
+| 10 | 0.577–0.885 | 0.681 | 0.655 | 328 | 0.655 |
 
 ![impact_prob calibration and per-decile accuracy](model_card_impact.png)
 
@@ -355,7 +469,7 @@ the cut. "S" = in `fold_change_prob` (structural); "F" = in `impact_prob` (funct
 | contact density | Cβ<8 Å contacts from the changed region to the rest of the fold | AFDB model coordinates | dropped — redundant with burial (partial corr collapses after burial) |
 | `dist_term` / `rel_center` / `frac_before` / `is_terminal` | position of the changed region relative to the protein termini | changed-region coords + `protL` | dropped — +0.017 structural *before* PAE, but PAE absorbs it (+0.002 after) |
 
-**Isoform-AlphaFold-structure-derived** (from Miller et al. Genome Biology 2025 Table S4 —
+**Isoform-AlphaFold-structure-derived** (from Song et al. Genome Biology 2025 Table S4 —
 computed from the *isoform's own* AF2 fold, hence **circular** for predicting TM):
 
 | feature | what it is | status |
@@ -413,7 +527,7 @@ related but not identical to ours (so AUCs are not head-to-head).
 
 | method | approach | reported result | relation to ours |
 |--------|----------|-----------------|-------------------|
-| **Miller et al., *Genome Biology* 2025** (our label source) | Fold all 11,161 human isoforms with **AlphaFold2**; compare each to its canonical with TM-score + 5 other metrics (secondary structure, surface charge, radius of gyration, PTM SASA, IDR). | Structural similarity largely tracks sequence identity; flags **328 high-identity / low-TM** outliers (53 with clear domain alterations). A *characterisation*, not a predictor. | This is exactly the TM ground truth we predict. We reproduce their label from **4 cheap canonical features (no isoform folding)** at **AUC 0.90 / R² 0.66**, and quantify the high-id/low-TM blind spot they identified. |
+| **Song et al., *Genome Biology* 2025** (our label source) | Fold all 11,161 human isoforms with **AlphaFold2**; compare each to its canonical with TM-score + 5 other metrics (secondary structure, surface charge, radius of gyration, PTM SASA, IDR). | Structural similarity largely tracks sequence identity; flags **328 high-identity / low-TM** outliers (53 with clear domain alterations). A *characterisation*, not a predictor. | This is exactly the TM ground truth we predict. We reproduce their label from **4 cheap canonical features (no isoform folding)** at **AUC 0.90 / R² 0.66**, and quantify the high-id/low-TM blind spot they identified. |
 | **Yang et al., bioRxiv 2024.01.30.578053** | AF2 structures of AS isoforms; statistical characterisation of where AS falls. | AS regions are **enriched in loops / exposed / disordered residues**; qualitative case studies (Septin-9, Tau). No TM predictor, no isoform-vs-isoform structural score. | Supports our finding that exposed/peripheral changes drive low TM; provides no quantitative predictor to compare against. |
 | **ASpdb** (Nucleic Acids Research, Database issue 2025) | Knowledgebase of >3,400 canonical + >7,200 alternative-isoform AF2 models with **comparative structural-alteration calls** and visualisation. | A resource, not a predictive model; provides a second, **non-TM** structural-alteration label. | Complementary independent label source (flagged in our EXPERIMENTS E40 as a future cross-check; its calls are per-entry web content, not bulk-downloadable). |
 | **DIGGER / DIGGER 2.0** (Louadi et al., NAR 2021 / 2025) | Augment the protein–protein interaction network with **domain–domain interactions** + splicing; identify which interactions/domains an AS event disrupts (interaction rewiring). | Network/rule-based (no AUC); maps exon → lost domain → lost interactions. | Different structural readout — *interaction* consequence, not global fold. Closest in spirit to our `max_cov_loss` (domain loss) feature; complementary to a fold-change probability. |
@@ -444,7 +558,7 @@ headline 0.83, but on a deliberately harder, confound-controlled label; the hone
 throughout is that it is an **enrichment/prioritisation** signal, not a classifier.
 
 **Sources.**
-[Miller et al., Genome Biology 2025](https://link.springer.com/article/10.1186/s13059-025-03744-x) ·
+[Song et al., Genome Biology 2025](https://link.springer.com/article/10.1186/s13059-025-03744-x) ·
 [Yang et al., bioRxiv 578053](https://www.biorxiv.org/content/10.1101/2024.01.30.578053v2) ·
 [ASpdb, NAR 2025](https://academic.oup.com/nar/article/53/D1/D331/7893317) ·
 [DIGGER 2.0, NAR 2025](https://academic.oup.com/nar/article/53/W1/W245/8126897) ·
