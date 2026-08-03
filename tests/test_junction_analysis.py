@@ -290,13 +290,13 @@ def test_find_matching_junction_indices_non_adjacent_exons_do_not_match():
 
 @pytest.mark.parametrize('c_count,t_count,c_length,t_length,expected', [
     (0, 1, None, 50, 'added_domain'),
-    (1, 0, 50, None, 'dropped domain'),
-    (1, 1, 50, 50, 'same'),
+    (1, 0, 50, None, 'dropped_domain'),
+    (1, 1, 50, 50, 'unchanged'),
     (1, 1, 50, 80, 'longer'),
     (1, 1, 80, 50, 'shorter'),
-    (1, 2, 50, 90, 'split domain'),
-    (2, 1, 90, 50, 'merged domain'),
-    (2, 2, 100, 100, 'same_domains'),
+    (1, 2, 50, 90, 'split_domain'),
+    (2, 1, 90, 50, 'merged_domain'),
+    (2, 2, 100, 100, 'unchanged_domains'),
     (2, 2, 100, 150, 'longer_domains'),
     (2, 2, 150, 100, 'shorter_domains'),
     (2, 3, 100, 100, 'increased_domain_number'),
@@ -532,6 +532,10 @@ def test_analyze_junction_compares_all_and_tags_longest_cds_deterministically():
     cluster_result.analyze(
         df_gene_transcripts, canonical_transcript_ids={'CANON'},
         exon_lookup=exon_lookup, domain_lookup=domain_lookup,
+        # Without this only the selected transcript is compared, which is what
+        # test_flags.py's write_all_comparable test covers; here the point is that
+        # BOTH are compared and exactly one is tagged.
+        write_all_comparable=True,
     )
 
     df_results = cluster_result.get_results_df()
@@ -1260,26 +1264,27 @@ def test_specie_derived_for_the_tool_formats():
     assert list(out['specie']) == ['human', 'mouse', 'rat']
 
 
-def test_retired_species_are_rejected_not_silently_analysed():
-    """zebrafish and frog were dropped (no MANE/RefSeq Select, so no canonical to
-    compare against). Their ids must still be derivable: an underived species is
-    indistinguishable from a GeneID-keyed gene, which normalize lets pass, so
-    dropping the prefixes would turn a hard stop into a silent wrong-species run."""
+def test_zebrafish_and_frog_are_supported():
+    """zebrafish and frog were dropped for a while, because NCBI marks no
+    representative transcript for them and DoChaP can therefore leave a gene with
+    no canonical. The longest-CDS stand-in covers that case, so they are analysed
+    like any other species - both derived from the gene-id prefix and stated."""
     import utils
     assert utils.specie_from_gene_id('ENSDARG3') == 'zebrafish'
     assert utils.specie_from_gene_id('ENSXETG4') == 'frog'
+    assert utils.SPECIE_DB_NAME['zebrafish'] == 'D_rerio'
+    assert utils.SPECIE_DB_NAME['frog'] == 'X_tropicalis'
 
     def frame(gene_id):
         return pd.DataFrame({'gene_ensembl_id': [gene_id], 'start_position': [1],
                              'end_position': [2], 'cluster_name': ['c']})
 
     # derived from the ids, with no -specie stated
-    with pytest.raises(ValueError, match='no longer supported'):
-        utils.normalize_junctions_frame(frame('ENSDARG3'))
-    # asked for explicitly
-    with pytest.raises(ValueError, match='no longer supported'):
-        utils.normalize_junctions_frame(frame('ENSG1'), specie='frog')
-    # stated as a supported species, but the ids say otherwise
+    assert list(utils.normalize_junctions_frame(frame('ENSDARG3'))['specie']) == ['zebrafish']
+    # asked for explicitly, on a gene id that names no species
+    assert list(utils.normalize_junctions_frame(
+        frame('12345'), specie='frog')['specie']) == ['frog']
+    # the conflict check still applies: ids from another species stop the run
     with pytest.raises(ValueError, match='does not match'):
         utils.normalize_junctions_frame(frame('ENSDARG3'), specie='human')
 

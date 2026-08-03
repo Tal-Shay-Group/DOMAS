@@ -119,6 +119,13 @@ def transcript_choice_table(df):
     gcols = ["specie", "cluster"] if "specie" in analyzed.columns else ["cluster"]
     nuniq = analyzed.groupby(gcols, observed=True, dropna=False)["transcript_id"].nunique()
 
+    # A CSV written without -write_all_comparable carries neither tag column: only
+    # the chosen transcript was compared, so every cluster holds exactly one and
+    # there is no rule breakdown to report.
+    if not {"is_most_like_canonical", "is_longest_cds"} <= set(analyzed.columns):
+        return pd.DataFrame({"n_transcripts": nuniq.to_numpy(),
+                             "rule": "pre-selected at write time"}, index=nuniq.index)
+
     # index of clusters carrying each tag (cheap: .size().index, not .groups)
     most_like_idx = (analyzed[analyzed["is_most_like_canonical"] == True]
                      .groupby(gcols, observed=True, dropna=False).size().index)

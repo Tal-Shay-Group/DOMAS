@@ -745,7 +745,7 @@ def total_covered_length(df, idxs, start_col='AA_start', end_col='AA_end'):
 
 def classify_length_pair(t_length, c_length):
     if t_length == c_length:
-        return 'same'
+        return 'unchanged'
     return 'longer' if t_length > c_length else 'shorter'
 
 
@@ -757,13 +757,13 @@ def classify_domain_change(c_count, t_count, c_length, t_length):
     if c_count == 0:
         return 'added_domain'
     if t_count == 0:
-        return 'dropped domain'
+        return 'dropped_domain'
     if c_count == 1 and t_count == 1:
         return classify_length_pair(t_length, c_length)
     if c_count == 1:
-        return 'split domain'
+        return 'split_domain'
     if t_count == 1:
-        return 'merged domain'
+        return 'merged_domain'
     if c_count == t_count:
         return classify_length_pair(t_length, c_length) + '_domains'
     return 'increased_domain_number' if c_count < t_count else 'reduced_domain_number'
@@ -818,12 +818,12 @@ def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, tr
     transitively.
 
     Yields one event dict per group, classified as:
-    - C=0, T>0          -> 'new domain'
-    - C>0, T=0          -> 'dropped domain'
-    - C=1, T=1          -> 'same' / 'longer' / 'shorter' (by length)
-    - C=1, T>1          -> 'split domain'
-    - C>1, T=1          -> 'merged domain'
-    - C>1, T>1, C==T    -> 'same_domains' / 'longer_domains' / 'shorter_domains' (by total length)
+    - C=0, T>0          -> 'added_domain'
+    - C>0, T=0          -> 'dropped_domain'
+    - C=1, T=1          -> 'unchanged' / 'longer' / 'shorter' (by length)
+    - C=1, T>1          -> 'split_domain'
+    - C>1, T=1          -> 'merged_domain'
+    - C>1, T>1, C==T    -> 'unchanged_domains' / 'longer_domains' / 'shorter_domains' (by total length)
     - C>1, T>1, C<T     -> 'increased_domain_number'
     - C>1, T>1, C>T     -> 'reduced_domain_number'
     """
@@ -929,7 +929,7 @@ class ClusterAnalysisResult:
                             is_longest_cds, is_most_like_canonical))
 
     def analyze(self, df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup,
-                canonical_rank=None):
+                canonical_rank=None, write_all_comparable=False):
         """
         Run the DOMAS algorithm for this cluster:
 
@@ -1122,7 +1122,9 @@ class ClusterAnalysisResult:
 
             comparable_transcript_ids.append(transcript_id)
 
-        # For tagging only - every comparable transcript is compared below regardless.
+        # Which transcript the selection rule picks. Under write_all_comparable it
+        # only tags the rows; otherwise it also decides which single transcript is
+        # compared at all, so the work for the rest is never done.
         longest_cds_transcript_id = None
         most_like_canonical_transcript_id = None
         if comparable_transcript_ids:
@@ -1140,6 +1142,16 @@ class ClusterAnalysisResult:
                 selection_candidates, self.canonical_transcript_id, transcript_exons,
                 self.junctions, cds_length_by_transcript,
             )
+
+        # Same priority as selected_comparable_rows() and
+        # results_stats.select_representative_transcript(): most-like-canonical
+        # where one qualifies, else longest-CDS. Applied here rather than at write
+        # time so the domains of the transcripts that would be discarded are never
+        # fetched or compared.
+        if not write_all_comparable:
+            selected = most_like_canonical_transcript_id or longest_cds_transcript_id
+            if selected is not None:
+                comparable_transcript_ids = [selected]
 
         for transcript_id in comparable_transcript_ids:
             junction_idxs = transcript_junctions[transcript_id]
@@ -1179,7 +1191,8 @@ class ClusterAnalysisResult:
         
 
 def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None, canonical_transcript_ids=None,
-                           gene_strand=None, transcripts_by_gene=None, canonical_rank=None):
+                           gene_strand=None, transcripts_by_gene=None, canonical_rank=None,
+                           write_all_comparable=False):
     """Analyze a single cluster."""
     _, cluster_df = cluster_tuple
 
@@ -1201,7 +1214,8 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
 
     df_gene_transcripts = transcripts_by_gene.get(gene_ensembl_id)
     cluster_result.analyze(df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup,
-                           canonical_rank=canonical_rank)
+                           canonical_rank=canonical_rank,
+                           write_all_comparable=write_all_comparable)
 
     return cluster_result
 
@@ -1357,7 +1371,7 @@ _worker_state = {}
 
 
 def _init_worker(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene,
-                 canonical_rank=None):
+                 canonical_rank=None, write_all_comparable=False):
     """ProcessPoolExecutor initializer - runs once when each worker process starts."""
     _worker_state['exon_lookup'] = build_exon_lookup(df_exons)
     _worker_state['domain_lookup'] = build_domain_lookup(df_domains)
@@ -1365,6 +1379,7 @@ def _init_worker(df_exons, df_domains, canonical_transcript_ids, gene_strand, tr
     _worker_state['canonical_rank'] = canonical_rank
     _worker_state['gene_strand'] = gene_strand
     _worker_state['transcripts_by_gene'] = transcripts_by_gene
+    _worker_state['write_all_comparable'] = write_all_comparable
 
 
 def _process_cluster_chunk(chunk_info):
@@ -1384,6 +1399,7 @@ def _process_cluster_chunk(chunk_info):
     canonical_rank = _worker_state.get('canonical_rank')
     gene_strand = _worker_state['gene_strand']
     transcripts_by_gene = _worker_state['transcripts_by_gene']
+    write_all_comparable = _worker_state.get('write_all_comparable', False)
 
     chunk_results = []
     processed_in_chunk = 0
@@ -1398,6 +1414,7 @@ def _process_cluster_chunk(chunk_info):
                 gene_strand=gene_strand,
                 transcripts_by_gene=transcripts_by_gene,
                 canonical_rank=canonical_rank,
+                write_all_comparable=write_all_comparable,
             )
             chunk_results.append(result)
         except (KeyError, ValueError, AttributeError, TypeError) as e:
@@ -1561,11 +1578,15 @@ class JunctionsAnalysis:
         self.logger.info(f"Total clusters: {total}")
         self.logger.info(f"Processing {total_chunks} chunks (~{chunk_size} clusters per chunk)")
 
-        # Prepare column definitions for CSV
+        # Prepare column definitions for CSV. The two selection flags are written
+        # only under write_all_comparable, where several transcripts share a
+        # cluster and the reader needs to know which one the rule picked. With one
+        # comparison row per cluster they would be True on every row of it.
         df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
                               'domain_description',
-                              'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number',
-                              'is_longest_cds', 'is_most_like_canonical']
+                              'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
+        if write_all_comparable:
+            df_results_columns += ['is_longest_cds', 'is_most_like_canonical']
 
         # Create queue for results (backpressure if writer lags)
         result_queue = queue.Queue(maxsize=actual_workers * 2)
@@ -1592,7 +1613,7 @@ class JunctionsAnalysis:
             max_workers=actual_workers,
             initializer=_init_worker,
             initargs=(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene,
-                      canonical_rank),
+                      canonical_rank, write_all_comparable),
         ) as executor:
             # Submit all tasks - df_exons/df_domains are sent once per worker via
             # initargs above, not re-pickled per chunk here.
@@ -1762,10 +1783,12 @@ class JunctionsAnalysis:
                 DomainEvent/DomainType domains. If False (default), the
                 algorithm is unchanged - domains come from DomainEvent/DomainType
                 only, exactly as before.
-            write_all_comparable: If True, the output CSV keeps a row per compared
-                transcript. If False (default), each cluster's comparison rows are
-                reduced to the one the selection rule picks - is_most_like_canonical
-                where set, otherwise is_longest_cds. Both tags are still written.
+            write_all_comparable: If True, every comparable transcript is compared
+                to the canonical one and the CSV keeps a row per transcript, with
+                the is_most_like_canonical / is_longest_cds columns naming the one
+                the selection rule picks. If False (default), only that transcript
+                is compared - so the domains of the others are never fetched - and
+                the two columns are omitted, being True on every written row.
             filter_non_comparable: If True, the output CSV contains only rows for
                 transcripts that were actually compared to canonical - rows whose
                 event is a non-comparison / skip event (see NON_COMPARISON_EVENTS)

@@ -114,13 +114,13 @@ UNANALYZABLE_TYPES = [
 ]
 
 ANALYZED_TYPES = [
-    "dropped domain",
+    "dropped_domain",
     "added_domain",
     "shorter",
     "longer",
-    "same",
-    "split domain",
-    "merged domain",
+    "unchanged",
+    "split_domain",
+    "merged_domain",
     "reduced_domain_number",
     "increased_domain_number",
 ]
@@ -206,10 +206,10 @@ def event_sort_key(event_type):
 SHORT_LABELS = {
     "no_gene_specified": "no gene named",
     "gene_not_in_db": "not in DB",
-    "dropped domain": "dropped",
+    "dropped_domain": "dropped",
     "added_domain": "added",
-    "split domain": "split",
-    "merged domain": "merged",
+    "split_domain": "split",
+    "merged_domain": "merged",
     # Not "fewer/more copies" - that phrasing is already the stacked-bar
     # legend text in domain_count_change() for a different, row-level
     # concept (this is the row's classified outcome type).
@@ -377,9 +377,18 @@ def normalize_event_types(df):
     nor unanalyzable.
     """
     df["event_type"] = df["event_type"].replace({
-        "same_domains": "same",
+        "unchanged_domains": "unchanged",
         "longer_domains": "longer",
         "shorter_domains": "shorter",
+        # Pre-rename classification labels, from before the vocabulary was made
+        # uniform (underscores throughout, "unchanged" rather than "same") to
+        # match Table S5. Kept so an older results.csv still lands inside
+        # ANALYZED_TYPES instead of tripping the unknown-event_type check.
+        "dropped domain": "dropped_domain",
+        "split domain": "split_domain",
+        "merged domain": "merged_domain",
+        "same": "unchanged",
+        "same_domains": "unchanged",
         # Pre-rename labels, from before an event became a set of features rather
         # than of junctions. Mapped so a results.csv produced by an older run still
         # lands inside UNANALYZABLE_TYPES instead of counting as neither.
@@ -479,6 +488,13 @@ def select_representative_transcript(df, on_ambiguous="raise"):
     if analyzed_df.empty:
         return analyzed_df
 
+    # A results.csv written without -write_all_comparable carries neither tag
+    # column, because only the chosen transcript was compared in the first place -
+    # the selection this function performs has already been made, so there is
+    # nothing left to choose between and no cluster can be ambiguous.
+    if not {"is_most_like_canonical", "is_longest_cds"} <= set(analyzed_df.columns):
+        return analyzed_df
+
     group_cols = ["specie", "cluster"] if "specie" in analyzed_df.columns else ["cluster"]
 
     most_like_pick = (
@@ -520,7 +536,7 @@ def select_representative_transcript(df, on_ambiguous="raise"):
 # 1. EVENT-TYPE DISTRIBUTION
 # ══════════════════════════════════════════════════════════════════════════════
 
-DOMAIN_SWAP_COMBO = frozenset({"added_domain", "dropped domain"})
+DOMAIN_SWAP_COMBO = frozenset({"added_domain", "dropped_domain"})
 
 
 def _collapse_to_cluster_label(sub_df, group_cols):
@@ -1760,12 +1776,12 @@ def _severity_values(df):
     what was blowing up memory on a multi-million-row IOE file.
     """
     et = df["event_type"]
-    dropped_vals = np.zeros(int((et == "dropped domain").sum()))
+    dropped_vals = np.zeros(int((et == "dropped_domain").sum()))
 
     c = df.get("c_domain_length")
     t = df.get("t_domain_length")
     if c is not None and t is not None:
-        valid_mask = et.isin(["shorter", "longer", "same"]) & c.notna() & t.notna() & (c > 0)
+        valid_mask = et.isin(["shorter", "longer", "unchanged"]) & c.notna() & t.notna() & (c > 0)
         other_vals = (100 * t[valid_mask] / c[valid_mask]).to_numpy(dtype=float)
     else:
         other_vals = np.array([])

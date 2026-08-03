@@ -26,7 +26,9 @@ TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 CODE_DIR = os.path.normpath(os.path.join(TESTS_DIR, '..', 'code'))
 sys.path.insert(0, CODE_DIR)
 
-from junction_analisys import JunctionsAnalysis, ClusterAnalysisResult  # noqa: E402
+from junction_analisys import (  # noqa: E402
+    JunctionsAnalysis, ClusterAnalysisResult, NON_COMPARISON_EVENTS,
+)
 from alternative_splicing import (  # noqa: E402
     hadas_read_input_file, read_junctions_csv, leafcutter_read_input_files,
 )
@@ -143,6 +145,56 @@ def _run_analysis(con, tmp_path, junctions_csv, hadas_format, restrict_pdf_to_co
     finally:
         os.chdir(cwd_before)
     return results, output_path
+
+
+def test_write_all_comparable_off_keeps_one_transcript_and_drops_the_tags(con, tmp_path):
+    """The default (-write_all_comparable not given): each cluster is reduced to the
+    one transcript the selection rule picks, and the two tag columns are not written.
+
+    Every other test in the suite passes write_all_comparable=True, so this is the
+    only place the default path is exercised. Both halves matter: the reduction is
+    now applied before the comparison - the discarded transcripts' domains are never
+    fetched - so a regression there would silently change which rows exist, and the
+    columns would be True on every remaining row if they were still written.
+    """
+    analysis = JunctionsAnalysis(con)
+    df_junctions = _load_junctions(con, IOE_CSV, hadas_format=False)
+    output_path = str(tmp_path / 'results.csv')
+    analysis.analyze_junctions(
+        df_junctions=df_junctions,
+        output_path=output_path,
+        create_pdf=False,
+        num_workers=1,
+        use_representative_domains=True,
+    )
+
+    df = pd.read_csv(output_path)
+    assert 'is_longest_cds' not in df.columns
+    assert 'is_most_like_canonical' not in df.columns
+
+    comparisons = df[~df['event_type'].isin(NON_COMPARISON_EVENTS)]
+    assert len(comparisons) > 0, "Expected at least one compared transcript"
+    per_cluster = comparisons.groupby('cluster')['transcript_id'].nunique()
+    assert (per_cluster == 1).all(), (
+        f"Clusters with more than one compared transcript: "
+        f"{per_cluster[per_cluster > 1].to_dict()}")
+
+    # The same run with the flag on must compare at least as many transcripts,
+    # and keep the tags - otherwise the reduction above proves nothing.
+    all_path = str(tmp_path / 'results_all.csv')
+    analysis.analyze_junctions(
+        df_junctions=_load_junctions(con, IOE_CSV, hadas_format=False),
+        output_path=all_path,
+        create_pdf=False,
+        num_workers=1,
+        use_representative_domains=True,
+        write_all_comparable=True,
+    )
+    df_all = pd.read_csv(all_path)
+    assert 'is_longest_cds' in df_all.columns
+    assert 'is_most_like_canonical' in df_all.columns
+    all_comparisons = df_all[~df_all['event_type'].isin(NON_COMPARISON_EVENTS)]
+    assert all_comparisons['transcript_id'].nunique() >= comparisons['transcript_id'].nunique()
 
 
 @pytest.mark.parametrize('restrict_pdf_to_comparable,use_representative_domains', FLAG_COMBINATIONS)

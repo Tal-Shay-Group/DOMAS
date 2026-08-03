@@ -91,11 +91,12 @@ def parse_args():
                               "event). By default the output CSV holds only transcripts "
                               "that were actually compared to the canonical transcript.")
     parser.add_argument("-write_all_comparable", action="store_true",
-                         help="Keep a row for every transcript compared to the canonical "
-                              "one. By default each cluster's comparison rows are reduced "
-                              "to the transcript the selection rule picks - the one tagged "
-                              "is_most_like_canonical, or is_longest_cds where none is. "
-                              "Both tags are written either way.")
+                         help="Compare every comparable transcript to the canonical one and "
+                              "keep a row for each, adding the is_most_like_canonical and "
+                              "is_longest_cds columns that say which one the selection rule "
+                              "picks. By default only that transcript is compared - the one "
+                              "most like the canonical, or the longest-CDS one where none "
+                              "qualifies - and the two columns are omitted.")
 
     args = parser.parse_args()
 

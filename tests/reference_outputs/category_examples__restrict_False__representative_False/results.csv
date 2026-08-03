@@ -15,8 +15,8 @@ AF_ENSG00000130032_X_265953,PRRG3,human,transcript_doesnt_have_features,ENST0000
 AF_ENSG00000130032_X_265953,PRRG3,human,no_unique_features,ENST00000674457.1,ENST00000674374.1,,,,,,,,
 AF_ENSG00000130032_X_265953,PRRG3,human,no_unique_features,ENST00000674457.1,ENST00000370354.5,,,,,,,,
 AF_ENSG00000130032_X_265953,PRRG3,human,transcript_doesnt_have_features,ENST00000674457.1,ENST00000448324.1,,,,,,,,
-AF_ENSG00000130032_X_265953,PRRG3,human,same_domains,ENST00000674457.1,ENST00000884468.1,IPR000294,Vitamin K-dependent carboxylation/gamma-carboxyglutamic (GLA) domain; Domain containing Gla (gamma-carboxyglutamate) residues; Gamma-carboxyglutamic acid-rich (GLA) domain,64.0,64.0,2.0,2.0,True,False
-AF_ENSG00000130032_X_265953,PRRG3,human,same_domains,ENST00000674457.1,ENST00000370353.3,IPR000294,Vitamin K-dependent carboxylation/gamma-carboxyglutamic (GLA) domain; Domain containing Gla (gamma-carboxyglutamate) residues; Gamma-carboxyglutamic acid-rich (GLA) domain,64.0,64.0,2.0,2.0,False,True
+AF_ENSG00000130032_X_265953,PRRG3,human,unchanged_domains,ENST00000674457.1,ENST00000884468.1,IPR000294,Vitamin K-dependent carboxylation/gamma-carboxyglutamic (GLA) domain; Domain containing Gla (gamma-carboxyglutamate) residues; Gamma-carboxyglutamic acid-rich (GLA) domain,64.0,64.0,2.0,2.0,True,False
+AF_ENSG00000130032_X_265953,PRRG3,human,unchanged_domains,ENST00000674457.1,ENST00000370353.3,IPR000294,Vitamin K-dependent carboxylation/gamma-carboxyglutamic (GLA) domain; Domain containing Gla (gamma-carboxyglutamate) residues; Gamma-carboxyglutamic acid-rich (GLA) domain,64.0,64.0,2.0,2.0,False,True
 A5_ENSG00000120693_13_48938,SMAD9,human,no_unique_features,ENST00000379826.5,XM_006719827.4,,,,,,,,
 A5_ENSG00000120693_13_48938,SMAD9,human,transcript_doesnt_have_features,ENST00000379826.5,XM_005266404.4,,,,,,,,
 A5_ENSG00000120693_13_48938,SMAD9,human,transcript_doesnt_have_features,ENST00000379826.5,ENST00000871574.1,,,,,,,,
@@ -50,8 +50,8 @@ A5_ENSG00000120693_13_48938,SMAD9,human,transcript_doesnt_have_features,ENST0000
 A5_ENSG00000120693_13_48938,SMAD9,human,no_unique_features,ENST00000379826.5,ENST00000871583.1,,,,,,,,
 A5_ENSG00000120693_13_48938,SMAD9,human,transcript_doesnt_have_features,ENST00000379826.5,ENST00000399275.7,,,,,,,,
 A5_ENSG00000120693_13_48938,SMAD9,human,transcript_doesnt_have_features,ENST00000379826.5,ENST00000483941.2,,,,,,,,
-A5_ENSG00000120693_13_48938,SMAD9,human,dropped domain,ENST00000379826.5,ENST00000962421.1,pfam03154,Atrophin-1 family,119.0,,1.0,0.0,True,False
-A5_ENSG00000120693_13_48938,SMAD9,human,same,ENST00000379826.5,ENST00000962421.1,smart00523,,110.0,110.0,1.0,1.0,True,False
+A5_ENSG00000120693_13_48938,SMAD9,human,dropped_domain,ENST00000379826.5,ENST00000962421.1,pfam03154,Atrophin-1 family,119.0,,1.0,0.0,True,False
+A5_ENSG00000120693_13_48938,SMAD9,human,unchanged,ENST00000379826.5,ENST00000962421.1,smart00523,,110.0,110.0,1.0,1.0,True,False
 SE_ENSG00000186472_7_56618,PCLO,human,no_unique_features,ENST00000333891.14,XM_017012006.3,,,,,,,,
 SE_ENSG00000186472_7_56618,PCLO,human,no_unique_features,ENST00000333891.14,XM_047420211.1,,,,,,,,
 SE_ENSG00000186472_7_56618,PCLO,human,no_unique_features,ENST00000333891.14,XM_047420210.1,,,,,,,,
@@ -63,8 +63,8 @@ SE_ENSG00000186472_7_56618,PCLO,human,transcript_doesnt_have_features,ENST000003
 SE_ENSG00000186472_7_56618,PCLO,human,transcript_doesnt_have_features,ENST00000333891.14,ENST00000432078.2,,,,,,,,
 SE_ENSG00000186472_7_56618,PCLO,human,no_unique_features,ENST00000333891.14,ENST00000426442.6,,,,,,,,
 SE_ENSG00000186472_7_56618,PCLO,human,transcript_doesnt_have_features,ENST00000333891.14,ENST00000461143.1,,,,,,,,
-SE_ENSG00000186472_7_56618,PCLO,human,dropped domain,ENST00000333891.14,ENST00000413807.6,IPR029364,"ALK and LTK ligand 1/2; PDZ domain of Rab3-interacting molecule 1 (RIM), RIM2, piccolo and related domains",96.0,,1.0,0.0,True,False
-SE_ENSG00000186472_7_56618,PCLO,human,dropped domain,ENST00000333891.14,ENST00000413807.6,IPR001478,"PDZ domain; Domain present in PSD-95, Dlg, and ZO-1/2",83.0,,2.0,0.0,True,False
+SE_ENSG00000186472_7_56618,PCLO,human,dropped_domain,ENST00000333891.14,ENST00000413807.6,IPR029364,"ALK and LTK ligand 1/2; PDZ domain of Rab3-interacting molecule 1 (RIM), RIM2, piccolo and related domains",96.0,,1.0,0.0,True,False
+SE_ENSG00000186472_7_56618,PCLO,human,dropped_domain,ENST00000333891.14,ENST00000413807.6,IPR001478,"PDZ domain; Domain present in PSD-95, Dlg, and ZO-1/2",83.0,,2.0,0.0,True,False
 SE_ENSG00000096060_6_50561,FKBP5,human,no_unique_features,ENST00000357266.9,ENST00000536438.5,,,,,,,,
 SE_ENSG00000096060_6_50561,FKBP5,human,no_unique_features,ENST00000357266.9,ENST00000539068.5,,,,,,,,
 SE_ENSG00000096060_6_50561,FKBP5,human,transcript_doesnt_have_features,ENST00000357266.9,ENST00000542713.1,,,,,,,,
@@ -136,8 +136,8 @@ SE_ENSG00000096060_6_50561,FKBP5,human,no_unique_features,ENST00000357266.9,ENST
 SE_ENSG00000096060_6_50561,FKBP5,human,no_unique_features,ENST00000357266.9,ENST00000956391.1,,,,,,,,
 SE_ENSG00000096060_6_50561,FKBP5,human,no_unique_features,ENST00000357266.9,ENST00000893148.1,,,,,,,,
 SE_ENSG00000096060_6_50561,FKBP5,human,no_unique_features,ENST00000357266.9,ENST00000893097.1,,,,,,,,
-SE_ENSG00000096060_6_50561,FKBP5,human,dropped domain,ENST00000357266.9,ENST00000893102.1,pfam00515,Tetratricopeptide repeat,30.0,,1.0,0.0,True,False
-SE_ENSG00000096060_6_50561,FKBP5,human,dropped domain,ENST00000357266.9,ENST00000893102.1,smart00028,Tetratricopeptide repeats,34.0,,1.0,0.0,True,False
+SE_ENSG00000096060_6_50561,FKBP5,human,dropped_domain,ENST00000357266.9,ENST00000893102.1,pfam00515,Tetratricopeptide repeat,30.0,,1.0,0.0,True,False
+SE_ENSG00000096060_6_50561,FKBP5,human,dropped_domain,ENST00000357266.9,ENST00000893102.1,smart00028,Tetratricopeptide repeats,34.0,,1.0,0.0,True,False
 A3_ENSG00000174498_15_57252,IGDCC3,human,no_unique_features,ENST00000327987.9,ENST00000863890.1,,,,,,,,
 A3_ENSG00000174498_15_57252,IGDCC3,human,no_unique_features,ENST00000327987.9,XM_011522244.2,,,,,,,,
 A3_ENSG00000174498_15_57252,IGDCC3,human,no_unique_features,ENST00000327987.9,XM_011522243.1,,,,,,,,
@@ -157,16 +157,16 @@ A3_ENSG00000174498_15_57252,IGDCC3,human,no_unique_features,ENST00000327987.9,EN
 A3_ENSG00000174498_15_57252,IGDCC3,human,no_unique_features,ENST00000327987.9,ENST00000558354.5,,,,,,,,
 A3_ENSG00000174498_15_57252,IGDCC3,human,transcript_doesnt_have_features,ENST00000327987.9,ENST00000559058.1,,,,,,,,
 A3_ENSG00000174498_15_57252,IGDCC3,human,no_unique_features,ENST00000327987.9,ENST00000559231.1,,,,,,,,
-A3_ENSG00000174498_15_57252,IGDCC3,human,merged domain,ENST00000327987.9,ENST00000920202.1,pfam13927,Immunoglobulin domain,73.0,72.0,2.0,1.0,True,False
-A3_ENSG00000174498_15_57252,IGDCC3,human,same,ENST00000327987.9,ENST00000920202.1,pfam07679,Immunoglobulin I-set domain,87.0,87.0,1.0,1.0,True,False
-A3_ENSG00000174498_15_57252,IGDCC3,human,same,ENST00000327987.9,ENST00000920202.1,cd00096,Immunoglobulin domain,66.0,66.0,1.0,1.0,True,False
-A3_ENSG00000174498_15_57252,IGDCC3,human,same_domains,ENST00000327987.9,ENST00000920202.1,smart00409,,167.0,167.0,2.0,2.0,True,False
-A3_ENSG00000174498_15_57252,IGDCC3,human,same_domains,ENST00000327987.9,ENST00000920202.1,smart00408,,131.0,131.0,2.0,2.0,True,False
-A3_ENSG00000174498_15_57252,IGDCC3,human,merged domain,ENST00000327987.9,ENST00000920210.1,pfam13927,Immunoglobulin domain,73.0,72.0,2.0,1.0,False,False
-A3_ENSG00000174498_15_57252,IGDCC3,human,same,ENST00000327987.9,ENST00000920210.1,pfam07679,Immunoglobulin I-set domain,87.0,87.0,1.0,1.0,False,False
-A3_ENSG00000174498_15_57252,IGDCC3,human,same,ENST00000327987.9,ENST00000920210.1,cd00096,Immunoglobulin domain,66.0,66.0,1.0,1.0,False,False
-A3_ENSG00000174498_15_57252,IGDCC3,human,same_domains,ENST00000327987.9,ENST00000920210.1,smart00409,,167.0,167.0,2.0,2.0,False,False
-A3_ENSG00000174498_15_57252,IGDCC3,human,same_domains,ENST00000327987.9,ENST00000920210.1,smart00408,,131.0,131.0,2.0,2.0,False,False
+A3_ENSG00000174498_15_57252,IGDCC3,human,merged_domain,ENST00000327987.9,ENST00000920202.1,pfam13927,Immunoglobulin domain,73.0,72.0,2.0,1.0,True,False
+A3_ENSG00000174498_15_57252,IGDCC3,human,unchanged,ENST00000327987.9,ENST00000920202.1,pfam07679,Immunoglobulin I-set domain,87.0,87.0,1.0,1.0,True,False
+A3_ENSG00000174498_15_57252,IGDCC3,human,unchanged,ENST00000327987.9,ENST00000920202.1,cd00096,Immunoglobulin domain,66.0,66.0,1.0,1.0,True,False
+A3_ENSG00000174498_15_57252,IGDCC3,human,unchanged_domains,ENST00000327987.9,ENST00000920202.1,smart00409,,167.0,167.0,2.0,2.0,True,False
+A3_ENSG00000174498_15_57252,IGDCC3,human,unchanged_domains,ENST00000327987.9,ENST00000920202.1,smart00408,,131.0,131.0,2.0,2.0,True,False
+A3_ENSG00000174498_15_57252,IGDCC3,human,merged_domain,ENST00000327987.9,ENST00000920210.1,pfam13927,Immunoglobulin domain,73.0,72.0,2.0,1.0,False,False
+A3_ENSG00000174498_15_57252,IGDCC3,human,unchanged,ENST00000327987.9,ENST00000920210.1,pfam07679,Immunoglobulin I-set domain,87.0,87.0,1.0,1.0,False,False
+A3_ENSG00000174498_15_57252,IGDCC3,human,unchanged,ENST00000327987.9,ENST00000920210.1,cd00096,Immunoglobulin domain,66.0,66.0,1.0,1.0,False,False
+A3_ENSG00000174498_15_57252,IGDCC3,human,unchanged_domains,ENST00000327987.9,ENST00000920210.1,smart00409,,167.0,167.0,2.0,2.0,False,False
+A3_ENSG00000174498_15_57252,IGDCC3,human,unchanged_domains,ENST00000327987.9,ENST00000920210.1,smart00408,,131.0,131.0,2.0,2.0,False,False
 A3_ENSG00000167548_12_47709,KMT2D,human,transcript_doesnt_have_features,ENST00000301067.12,ENST00000682693.1,,,,,,,,
 A3_ENSG00000167548_12_47709,KMT2D,human,transcript_doesnt_have_features,ENST00000301067.12,ENST00000682886.1,,,,,,,,
 A3_ENSG00000167548_12_47709,KMT2D,human,transcript_doesnt_have_features,ENST00000301067.12,ENST00000681974.1,,,,,,,,
@@ -200,8 +200,8 @@ A3_ENSG00000167548_12_47709,KMT2D,human,transcript_doesnt_have_features,ENST0000
 A3_ENSG00000167548_12_47709,KMT2D,human,transcript_doesnt_have_features,ENST00000301067.12,ENST00000686968.1,,,,,,,,
 A3_ENSG00000167548_12_47709,KMT2D,human,transcript_doesnt_have_features,ENST00000301067.12,ENST00000692465.1,,,,,,,,
 A3_ENSG00000167548_12_47709,KMT2D,human,transcript_doesnt_have_features,ENST00000301067.12,ENST00000549743.1,,,,,,,,
-A3_ENSG00000167548_12_47709,KMT2D,human,same,ENST00000301067.12,ENST00000689944.1,IPR048696,"MAP kinase kinase; SHQ1-like, CS domain",84.0,84.0,1.0,1.0,True,False
-A3_ENSG00000167548_12_47709,KMT2D,human,same,ENST00000301067.12,ENST00000689944.1,smart00398,,69.0,69.0,1.0,1.0,True,False
+A3_ENSG00000167548_12_47709,KMT2D,human,unchanged,ENST00000301067.12,ENST00000689944.1,IPR048696,"MAP kinase kinase; SHQ1-like, CS domain",84.0,84.0,1.0,1.0,True,False
+A3_ENSG00000167548_12_47709,KMT2D,human,unchanged,ENST00000301067.12,ENST00000689944.1,smart00398,,69.0,69.0,1.0,1.0,True,False
 A5_ENSG00000173041_7_26967,ZNF680,human,no_unique_features,ENST00000309683.11,XM_024446743.1,,,,,,,,
 A5_ENSG00000173041_7_26967,ZNF680,human,no_unique_features,ENST00000309683.11,XM_047420309.1,,,,,,,,
 A5_ENSG00000173041_7_26967,ZNF680,human,transcript_doesnt_have_features,ENST00000309683.11,XM_047420310.1,,,,,,,,
@@ -215,7 +215,7 @@ A5_ENSG00000173041_7_26967,ZNF680,human,transcript_doesnt_have_features,ENST0000
 A5_ENSG00000173041_7_26967,ZNF680,human,transcript_doesnt_have_features,ENST00000309683.11,ENST00000476563.1,,,,,,,,
 A5_ENSG00000173041_7_26967,ZNF680,human,transcript_doesnt_have_features,ENST00000309683.11,ENST00000473601.1,,,,,,,,
 A5_ENSG00000173041_7_26967,ZNF680,human,longer,ENST00000309683.11,ENST00000920524.1,smart00349,krueppel associated box,61.0,75.0,1.0,1.0,True,False
-A5_ENSG00000173041_7_26967,ZNF680,human,dropped domain,ENST00000309683.11,ENST00000920524.1,pfam01352,KRAB box,42.0,,1.0,0.0,True,False
+A5_ENSG00000173041_7_26967,ZNF680,human,dropped_domain,ENST00000309683.11,ENST00000920524.1,pfam01352,KRAB box,42.0,,1.0,0.0,True,False
 MX_ENSG00000106327_7_20291,TFR2,human,no_unique_features,ENST00000223051.8,NM_001206855.3,,,,,,,,
 MX_ENSG00000106327_7_20291,TFR2,human,transcript_doesnt_have_features,ENST00000223051.8,ENST00000465294.5,,,,,,,,
 MX_ENSG00000106327_7_20291,TFR2,human,transcript_doesnt_have_features,ENST00000223051.8,ENST00000462090.5,,,,,,,,
@@ -298,14 +298,14 @@ MX_ENSG00000106327_7_20291,TFR2,human,no_unique_features,ENST00000223051.8,ENST0
 MX_ENSG00000106327_7_20291,TFR2,human,no_unique_features,ENST00000223051.8,ENST00000855233.1,,,,,,,,
 MX_ENSG00000106327_7_20291,TFR2,human,no_unique_features,ENST00000223051.8,ENST00000958153.1,,,,,,,,
 MX_ENSG00000106327_7_20291,TFR2,human,no_unique_features,ENST00000223051.8,ENST00000958154.1,,,,,,,,
-MX_ENSG00000106327_7_20291,TFR2,human,dropped domain,ENST00000223051.8,ENST00000855256.1,cd02128,"Protease-associated domain containing proteins like transferrin receptor (TfR). This group contains various PA domain-containing proteins similar to human TfR1 and TfR2. TfR1 and TfR2 are type II membrane proteins, belonging to the peptidase M28 family",191.0,,1.0,0.0,False,False
+MX_ENSG00000106327_7_20291,TFR2,human,dropped_domain,ENST00000223051.8,ENST00000855256.1,cd02128,"Protease-associated domain containing proteins like transferrin receptor (TfR). This group contains various PA domain-containing proteins similar to human TfR1 and TfR2. TfR1 and TfR2 are type II membrane proteins, belonging to the peptidase M28 family",191.0,,1.0,0.0,False,False
 MX_ENSG00000106327_7_20291,TFR2,human,longer,ENST00000223051.8,ENST00000855256.1,cd09848,M28 Zn-peptidase Transferrin Receptor family,234.0,436.0,1.0,1.0,False,False
-MX_ENSG00000106327_7_20291,TFR2,human,dropped domain,ENST00000223051.8,ENST00000855256.1,pfam02225,,69.0,,1.0,0.0,False,False
-MX_ENSG00000106327_7_20291,TFR2,human,same,ENST00000223051.8,ENST00000855256.1,pfam04389,,203.0,203.0,1.0,1.0,False,False
-MX_ENSG00000106327_7_20291,TFR2,human,dropped domain,ENST00000223051.8,ENST00000855264.1,cd02128,"Protease-associated domain containing proteins like transferrin receptor (TfR). This group contains various PA domain-containing proteins similar to human TfR1 and TfR2. TfR1 and TfR2 are type II membrane proteins, belonging to the peptidase M28 family",191.0,,1.0,0.0,True,False
+MX_ENSG00000106327_7_20291,TFR2,human,dropped_domain,ENST00000223051.8,ENST00000855256.1,pfam02225,,69.0,,1.0,0.0,False,False
+MX_ENSG00000106327_7_20291,TFR2,human,unchanged,ENST00000223051.8,ENST00000855256.1,pfam04389,,203.0,203.0,1.0,1.0,False,False
+MX_ENSG00000106327_7_20291,TFR2,human,dropped_domain,ENST00000223051.8,ENST00000855264.1,cd02128,"Protease-associated domain containing proteins like transferrin receptor (TfR). This group contains various PA domain-containing proteins similar to human TfR1 and TfR2. TfR1 and TfR2 are type II membrane proteins, belonging to the peptidase M28 family",191.0,,1.0,0.0,True,False
 MX_ENSG00000106327_7_20291,TFR2,human,longer,ENST00000223051.8,ENST00000855264.1,cd09848,M28 Zn-peptidase Transferrin Receptor family,234.0,440.0,1.0,1.0,True,False
-MX_ENSG00000106327_7_20291,TFR2,human,dropped domain,ENST00000223051.8,ENST00000855264.1,pfam02225,,69.0,,1.0,0.0,True,False
-MX_ENSG00000106327_7_20291,TFR2,human,same,ENST00000223051.8,ENST00000855264.1,pfam04389,,203.0,203.0,1.0,1.0,True,False
+MX_ENSG00000106327_7_20291,TFR2,human,dropped_domain,ENST00000223051.8,ENST00000855264.1,pfam02225,,69.0,,1.0,0.0,True,False
+MX_ENSG00000106327_7_20291,TFR2,human,unchanged,ENST00000223051.8,ENST00000855264.1,pfam04389,,203.0,203.0,1.0,1.0,True,False
 SE_ENSG00000137642_11_80338,SORL1,human,transcript_doesnt_have_features,ENST00000260197.12,ENST00000529445.1,,,,,,,,
 SE_ENSG00000137642_11_80338,SORL1,human,transcript_doesnt_have_features,ENST00000260197.12,ENST00000524873.1,,,,,,,,
 SE_ENSG00000137642_11_80338,SORL1,human,transcript_doesnt_have_features,ENST00000260197.12,ENST00000528339.5,,,,,,,,
@@ -319,9 +319,9 @@ SE_ENSG00000137642_11_80338,SORL1,human,transcript_doesnt_have_features,ENST0000
 SE_ENSG00000137642_11_80338,SORL1,human,transcript_doesnt_have_features,ENST00000260197.12,ENST00000534286.5,,,,,,,,
 SE_ENSG00000137642_11_80338,SORL1,human,transcript_doesnt_have_features,ENST00000260197.12,ENST00000527934.1,,,,,,,,
 SE_ENSG00000137642_11_80338,SORL1,human,no_unique_features,ENST00000260197.12,ENST00000532451.1,,,,,,,,
-SE_ENSG00000137642_11_80338,SORL1,human,merged domain,ENST00000260197.12,ENST00000905167.1,smart00602,VPS10 domain,634.0,637.0,2.0,1.0,True,False
-SE_ENSG00000137642_11_80338,SORL1,human,same,ENST00000260197.12,ENST00000905167.1,pfam15901,,165.0,165.0,1.0,1.0,True,False
-SE_ENSG00000137642_11_80338,SORL1,human,same,ENST00000260197.12,ENST00000905167.1,pfam15902,,453.0,453.0,1.0,1.0,True,False
+SE_ENSG00000137642_11_80338,SORL1,human,merged_domain,ENST00000260197.12,ENST00000905167.1,smart00602,VPS10 domain,634.0,637.0,2.0,1.0,True,False
+SE_ENSG00000137642_11_80338,SORL1,human,unchanged,ENST00000260197.12,ENST00000905167.1,pfam15901,,165.0,165.0,1.0,1.0,True,False
+SE_ENSG00000137642_11_80338,SORL1,human,unchanged,ENST00000260197.12,ENST00000905167.1,pfam15902,,453.0,453.0,1.0,1.0,True,False
 A5_ENSG00000204859_1_2357,ZBTB48,human,no_unique_features,ENST00000377674.9,ENST00000902996.1,,,,,,,,
 A5_ENSG00000204859_1_2357,ZBTB48,human,transcript_doesnt_have_features,ENST00000377674.9,XM_047418868.1,,,,,,,,
 A5_ENSG00000204859_1_2357,ZBTB48,human,transcript_doesnt_have_features,ENST00000377674.9,XM_047418867.1,,,,,,,,
@@ -353,8 +353,8 @@ A5_ENSG00000204859_1_2357,ZBTB48,human,transcript_doesnt_have_features,ENST00000
 A5_ENSG00000204859_1_2357,ZBTB48,human,no_unique_features,ENST00000377674.9,ENST00000915767.1,,,,,,,,
 A5_ENSG00000204859_1_2357,ZBTB48,human,transcript_doesnt_have_features,ENST00000377674.9,ENST00000488936.1,,,,,,,,
 A5_ENSG00000204859_1_2357,ZBTB48,human,transcript_doesnt_have_features,ENST00000377674.9,ENST00000466813.1,,,,,,,,
-A5_ENSG00000204859_1_2357,ZBTB48,human,dropped domain,ENST00000377674.9,ENST00000902995.1,pfam13465,Zinc-finger double domain,24.0,,1.0,0.0,True,False
-A5_ENSG00000204859_1_2357,ZBTB48,human,same,ENST00000377674.9,ENST00000902995.1,smart00355,zinc finger,23.0,23.0,1.0,1.0,True,False
+A5_ENSG00000204859_1_2357,ZBTB48,human,dropped_domain,ENST00000377674.9,ENST00000902995.1,pfam13465,Zinc-finger double domain,24.0,,1.0,0.0,True,False
+A5_ENSG00000204859_1_2357,ZBTB48,human,unchanged,ENST00000377674.9,ENST00000902995.1,smart00355,zinc finger,23.0,23.0,1.0,1.0,True,False
 SE_ENSG00000082438_2_17267,COBLL1,human,no_unique_features,ENST00000652658.2,NM_001365671.1,,,,,,,,
 SE_ENSG00000082438_2_17267,COBLL1,human,no_unique_features,ENST00000652658.2,NM_001365670.2,,,,,,,,
 SE_ENSG00000082438_2_17267,COBLL1,human,no_unique_features,ENST00000652658.2,ENST00000861278.1,,,,,,,,
@@ -400,8 +400,8 @@ SE_ENSG00000082438_2_17267,COBLL1,human,transcript_doesnt_have_features,ENST0000
 SE_ENSG00000082438_2_17267,COBLL1,human,no_unique_features,ENST00000652658.2,ENST00000434366.5,,,,,,,,
 SE_ENSG00000082438_2_17267,COBLL1,human,transcript_doesnt_have_features,ENST00000652658.2,ENST00000452626.5,,,,,,,,
 SE_ENSG00000082438_2_17267,COBLL1,human,transcript_doesnt_have_features,ENST00000652658.2,ENST00000493921.1,,,,,,,,
-SE_ENSG00000082438_2_17267,COBLL1,human,same,ENST00000652658.2,ENST00000629362.2,pfam02196,Raf-like Ras-binding domain,67.0,67.0,1.0,1.0,True,False
-SE_ENSG00000082438_2_17267,COBLL1,human,dropped domain,ENST00000652658.2,ENST00000445474.2,pfam02196,Raf-like Ras-binding domain,67.0,,1.0,0.0,False,False
+SE_ENSG00000082438_2_17267,COBLL1,human,unchanged,ENST00000652658.2,ENST00000629362.2,pfam02196,Raf-like Ras-binding domain,67.0,67.0,1.0,1.0,True,False
+SE_ENSG00000082438_2_17267,COBLL1,human,dropped_domain,ENST00000652658.2,ENST00000445474.2,pfam02196,Raf-like Ras-binding domain,67.0,,1.0,0.0,False,False
 A3_ENSG00000038219_4_19796,BOD1L1,human,no_unique_features,ENST00000040738.10,ENST00000507943.2,,,,,,,,
 A3_ENSG00000038219_4_19796,BOD1L1,human,no_unique_features,ENST00000040738.10,XM_011513829.3,,,,,,,,
 A3_ENSG00000038219_4_19796,BOD1L1,human,no_unique_features,ENST00000040738.10,XM_011513827.3,,,,,,,,
@@ -436,11 +436,11 @@ SE_ENSG00000139263_12_93994,LRIG3,human,transcript_doesnt_have_features,ENST0000
 SE_ENSG00000139263_12_93994,LRIG3,human,transcript_doesnt_have_features,ENST00000320743.8,ENST00000900032.1,,,,,,,,
 SE_ENSG00000139263_12_93994,LRIG3,human,transcript_doesnt_have_features,ENST00000320743.8,ENST00000550825.1,,,,,,,,
 SE_ENSG00000139263_12_93994,LRIG3,human,transcript_doesnt_have_features,ENST00000320743.8,ENST00000552267.1,,,,,,,,
-SE_ENSG00000139263_12_93994,LRIG3,human,same,ENST00000320743.8,ENST00000433272.6,tigr00864,polycystin cation channel protein,79.0,79.0,1.0,1.0,True,False
-SE_ENSG00000139263_12_93994,LRIG3,human,dropped domain,ENST00000320743.8,ENST00000433272.6,IPR001611,Leucine rich repeat; Leucine-rich repeat; Repeat_domain,56.0,,1.0,0.0,True,False
-SE_ENSG00000139263_12_93994,LRIG3,human,dropped domain,ENST00000320743.8,ENST00000433272.6,smart00369,,24.0,,1.0,0.0,True,False
-SE_ENSG00000139263_12_93994,LRIG3,human,dropped domain,ENST00000320743.8,ENST00000433272.6,smart00365,,22.0,,1.0,0.0,True,False
-SE_ENSG00000139263_12_93994,LRIG3,human,dropped domain,ENST00000320743.8,ENST00000433272.6,IPR000483,"Leucine rich repeat C-terminal domain; Cysteine-rich flanking region, C-terminal",51.0,,1.0,0.0,True,False
+SE_ENSG00000139263_12_93994,LRIG3,human,unchanged,ENST00000320743.8,ENST00000433272.6,tigr00864,polycystin cation channel protein,79.0,79.0,1.0,1.0,True,False
+SE_ENSG00000139263_12_93994,LRIG3,human,dropped_domain,ENST00000320743.8,ENST00000433272.6,IPR001611,Leucine rich repeat; Leucine-rich repeat; Repeat_domain,56.0,,1.0,0.0,True,False
+SE_ENSG00000139263_12_93994,LRIG3,human,dropped_domain,ENST00000320743.8,ENST00000433272.6,smart00369,,24.0,,1.0,0.0,True,False
+SE_ENSG00000139263_12_93994,LRIG3,human,dropped_domain,ENST00000320743.8,ENST00000433272.6,smart00365,,22.0,,1.0,0.0,True,False
+SE_ENSG00000139263_12_93994,LRIG3,human,dropped_domain,ENST00000320743.8,ENST00000433272.6,IPR000483,"Leucine rich repeat C-terminal domain; Cysteine-rich flanking region, C-terminal",51.0,,1.0,0.0,True,False
 AF_ENSG00000183020_11_335988,AP2A2,human,transcript_doesnt_have_features,ENST00000448903.7,XM_047426480.1,,,,,,,,
 AF_ENSG00000183020_11_335988,AP2A2,human,transcript_doesnt_have_features,ENST00000448903.7,XM_047426479.1,,,,,,,,
 AF_ENSG00000183020_11_335988,AP2A2,human,no_unique_features,ENST00000448903.7,ENST00000332231.9,,,,,,,,
@@ -490,7 +490,7 @@ AF_ENSG00000183020_11_335988,AP2A2,human,transcript_doesnt_have_features,ENST000
 AF_ENSG00000183020_11_335988,AP2A2,human,no_unique_features,ENST00000448903.7,ENST00000529858.6,,,,,,,,
 AF_ENSG00000183020_11_335988,AP2A2,human,transcript_doesnt_have_features,ENST00000448903.7,ENST00000525891.5,,,,,,,,
 AF_ENSG00000183020_11_335988,AP2A2,human,transcript_doesnt_have_features,ENST00000448903.7,ENST00000529438.5,,,,,,,,
-AF_ENSG00000183020_11_335988,AP2A2,human,merged domain,ENST00000448903.7,ENST00000530801.6,pfam01602,Adaptin N terminal region,562.0,194.0,2.0,1.0,True,False
+AF_ENSG00000183020_11_335988,AP2A2,human,merged_domain,ENST00000448903.7,ENST00000530801.6,pfam01602,Adaptin N terminal region,562.0,194.0,2.0,1.0,True,False
 A3_ENSG00000051341_3_16572,POLQ,human,no_unique_features,ENST00000264233.6,ENST00000932952.1,,,,,,,,
 A3_ENSG00000051341_3_16572,POLQ,human,no_unique_features,ENST00000264233.6,ENST00000932953.1,,,,,,,,
 A3_ENSG00000051341_3_16572,POLQ,human,transcript_doesnt_have_features,ENST00000264233.6,ENST00000683498.1,,,,,,,,
@@ -525,7 +525,7 @@ SE_ENSG00000183431_1_12957,SF3A3,human,transcript_doesnt_have_features,ENST00000
 SE_ENSG00000183431_1_12957,SF3A3,human,transcript_doesnt_have_features,ENST00000373019.5,ENST00000470585.5,,,,,,,,
 SE_ENSG00000183431_1_12957,SF3A3,human,transcript_doesnt_have_features,ENST00000373019.5,ENST00000488934.1,,,,,,,,
 SE_ENSG00000183431_1_12957,SF3A3,human,transcript_doesnt_have_features,ENST00000373019.5,ENST00000462258.1,,,,,,,,
-SE_ENSG00000183431_1_12957,SF3A3,human,split domain,ENST00000373019.5,ENST00000896916.1,pfam11931,SF3a60/Prp9 C-terminal,120.0,132.0,1.0,2.0,True,False
+SE_ENSG00000183431_1_12957,SF3A3,human,split_domain,ENST00000373019.5,ENST00000896916.1,pfam11931,SF3a60/Prp9 C-terminal,120.0,132.0,1.0,2.0,True,False
 A3_ENSG00000162889_1_2034,MAPKAPK2,human,transcript_doesnt_have_features,ENST00000367103.4,ENST00000294981.8,,,,,,,,
 A3_ENSG00000162889_1_2034,MAPKAPK2,human,transcript_doesnt_have_features,ENST00000367103.4,XM_005273353.4,,,,,,,,
 A3_ENSG00000162889_1_2034,MAPKAPK2,human,no_unique_features,ENST00000367103.4,XM_017002810.2,,,,,,,,
@@ -536,7 +536,7 @@ A3_ENSG00000162889_1_2034,MAPKAPK2,human,no_unique_features,ENST00000367103.4,EN
 A3_ENSG00000162889_1_2034,MAPKAPK2,human,transcript_doesnt_have_features,ENST00000367103.4,ENST00000493447.1,,,,,,,,
 A3_ENSG00000162889_1_2034,MAPKAPK2,human,transcript_doesnt_have_features,ENST00000367103.4,ENST00000479009.1,,,,,,,,
 A3_ENSG00000162889_1_2034,MAPKAPK2,human,shorter,ENST00000367103.4,ENST00000943401.1,cd14170,"Catalytic domain of the Serine/Threonine kinase, Mitogen-activated protein kinase-activated protein kinase 2",303.0,302.0,1.0,1.0,True,True
-A3_ENSG00000162889_1_2034,MAPKAPK2,human,same_domains,ENST00000367103.4,ENST00000943401.1,IPR000719,"Protein kinase domain; Serine/Threonine protein kinases, catalytic domain",262.0,262.0,2.0,2.0,True,True
+A3_ENSG00000162889_1_2034,MAPKAPK2,human,unchanged_domains,ENST00000367103.4,ENST00000943401.1,IPR000719,"Protein kinase domain; Serine/Threonine protein kinases, catalytic domain",262.0,262.0,2.0,2.0,True,True
 SE_ENSG00000131127_4_36180,ZNF141,human,no_unique_features,ENST00000240499.8,ENST00000512994.5,,,,,,,,
 SE_ENSG00000131127_4_36180,ZNF141,human,transcript_doesnt_have_features,ENST00000240499.8,NM_001348277.2,,,,,,,,
 SE_ENSG00000131127_4_36180,ZNF141,human,no_unique_features,ENST00000240499.8,NM_001348280.2,,,,,,,,
@@ -548,10 +548,10 @@ SE_ENSG00000131127_4_36180,ZNF141,human,no_unique_features,ENST00000240499.8,ENS
 SE_ENSG00000131127_4_36180,ZNF141,human,transcript_doesnt_have_features,ENST00000240499.8,ENST00000366506.4,,,,,,,,
 SE_ENSG00000131127_4_36180,ZNF141,human,no_unique_features,ENST00000240499.8,ENST00000503699.1,,,,,,,,
 SE_ENSG00000131127_4_36180,ZNF141,human,transcript_doesnt_have_features,ENST00000240499.8,ENST00000579770.1,,,,,,,,
-SE_ENSG00000131127_4_36180,ZNF141,human,dropped domain,ENST00000240499.8,XM_011513562.4,smart00349,krueppel associated box,61.0,,1.0,0.0,True,False
-SE_ENSG00000131127_4_36180,ZNF141,human,dropped domain,ENST00000240499.8,XM_011513562.4,pfam01352,KRAB box,41.0,,1.0,0.0,True,False
+SE_ENSG00000131127_4_36180,ZNF141,human,dropped_domain,ENST00000240499.8,XM_011513562.4,smart00349,krueppel associated box,61.0,,1.0,0.0,True,False
+SE_ENSG00000131127_4_36180,ZNF141,human,dropped_domain,ENST00000240499.8,XM_011513562.4,pfam01352,KRAB box,41.0,,1.0,0.0,True,False
 SE_ENSG00000131127_4_36180,ZNF141,human,longer,ENST00000240499.8,ENST00000885053.1,smart00349,krueppel associated box,61.0,62.0,1.0,1.0,False,False
-SE_ENSG00000131127_4_36180,ZNF141,human,dropped domain,ENST00000240499.8,ENST00000885053.1,pfam01352,KRAB box,41.0,,1.0,0.0,False,False
+SE_ENSG00000131127_4_36180,ZNF141,human,dropped_domain,ENST00000240499.8,ENST00000885053.1,pfam01352,KRAB box,41.0,,1.0,0.0,False,False
 A3_ENSG00000184640_17_64919,SEPTIN9,human,no_unique_features,ENST00000427177.6,ENST00000591198.5,,,,,,,,
 A3_ENSG00000184640_17_64919,SEPTIN9,human,no_unique_features,ENST00000427177.6,ENST00000449803.6,,,,,,,,
 A3_ENSG00000184640_17_64919,SEPTIN9,human,no_unique_features,ENST00000427177.6,ENST00000329047.13,,,,,,,,
@@ -619,7 +619,7 @@ A5_ENSG00000113594_5_22085,LIFR,human,transcript_doesnt_have_features,ENST000004
 A5_ENSG00000113594_5_22085,LIFR,human,transcript_doesnt_have_features,ENST00000453190.7,ENST00000511561.1,,,,,,,,
 A5_ENSG00000113594_5_22085,LIFR,human,transcript_doesnt_have_features,ENST00000453190.7,ENST00000503088.1,,,,,,,,
 A5_ENSG00000113594_5_22085,LIFR,human,transcript_doesnt_have_features,ENST00000453190.7,ENST00000507786.1,,,,,,,,
-A5_ENSG00000113594_5_22085,LIFR,human,dropped domain,ENST00000453190.7,ENST00000929709.1,cd00063,One of three types of internal repeats found in the plasma protein fibronectin. Its tenth fibronectin type III repeat contains an RGD cell recognition sequence in a flexible loop between 2 strands. Approximately 2% of all...; Fibronectin type 3 domain,93.0,,1.0,0.0,True,False
+A5_ENSG00000113594_5_22085,LIFR,human,dropped_domain,ENST00000453190.7,ENST00000929709.1,cd00063,One of three types of internal repeats found in the plasma protein fibronectin. Its tenth fibronectin type III repeat contains an RGD cell recognition sequence in a flexible loop between 2 strands. Approximately 2% of all...; Fibronectin type 3 domain,93.0,,1.0,0.0,True,False
 A5_ENSG00000113594_5_22085,LIFR,human,shorter,ENST00000453190.7,ENST00000929709.1,smart00060,Fibronectin type 3 domain,97.0,71.0,1.0,1.0,True,False
 A3_ENSG00000011028_17_64306,MRC2,human,no_unique_features,ENST00000303375.10,XM_047437208.1,,,,,,,,
 A3_ENSG00000011028_17_64306,MRC2,human,no_unique_features,ENST00000303375.10,XM_011525543.2,,,,,,,,
@@ -628,8 +628,8 @@ A3_ENSG00000011028_17_64306,MRC2,human,no_unique_features,ENST00000303375.10,ENS
 A3_ENSG00000011028_17_64306,MRC2,human,transcript_doesnt_have_features,ENST00000303375.10,ENST00000584682.1,,,,,,,,
 A3_ENSG00000011028_17_64306,MRC2,human,no_unique_features,ENST00000303375.10,ENST00000579432.1,,,,,,,,
 A3_ENSG00000011028_17_64306,MRC2,human,transcript_doesnt_have_features,ENST00000303375.10,ENST00000580916.1,,,,,,,,
-A3_ENSG00000011028_17_64306,MRC2,human,dropped domain,ENST00000303375.10,ENST00000446119.2,IPR001304,C-type lectin (CTL) or carbohydrate-recognition domain (CRD); C-type lectin-like; Lectin C-type domain,266.0,,5.0,0.0,True,False
-A3_ENSG00000011028_17_64306,MRC2,human,dropped domain,ENST00000303375.10,ENST00000446119.2,cd00037,C-type lectin (CTL)/C-type lectin-like (CTLD) domain,244.0,,2.0,0.0,True,False
+A3_ENSG00000011028_17_64306,MRC2,human,dropped_domain,ENST00000303375.10,ENST00000446119.2,IPR001304,C-type lectin (CTL) or carbohydrate-recognition domain (CRD); C-type lectin-like; Lectin C-type domain,266.0,,5.0,0.0,True,False
+A3_ENSG00000011028_17_64306,MRC2,human,dropped_domain,ENST00000303375.10,ENST00000446119.2,cd00037,C-type lectin (CTL)/C-type lectin-like (CTLD) domain,244.0,,2.0,0.0,True,False
 A3_ENSG00000111713_12_48323,GYS2,human,no_unique_features,ENST00000261195.3,XM_024448960.2,,,,,,,,
 A3_ENSG00000111713_12_48323,GYS2,human,no_unique_features,ENST00000261195.3,XM_006719063.4,,,,,,,,
 A3_ENSG00000111713_12_48323,GYS2,human,transcript_doesnt_have_features,ENST00000261195.3,XM_017019245.3,,,,,,,,
@@ -657,4 +657,4 @@ SE_ENSG00000121904_1_6997,CSMD2,human,transcript_doesnt_have_features,ENST000003
 SE_ENSG00000121904_1_6997,CSMD2,human,no_unique_features,ENST00000373381.9,ENST00000373377.1,,,,,,,,
 SE_ENSG00000121904_1_6997,CSMD2,human,transcript_doesnt_have_features,ENST00000373381.9,ENST00000338325.1,,,,,,,,
 SE_ENSG00000121904_1_6997,CSMD2,human,transcript_doesnt_have_features,ENST00000373381.9,ENST00000471438.2,,,,,,,,
-SE_ENSG00000121904_1_6997,CSMD2,human,same_domains,ENST00000373381.9,ENST00000373388.7,IPR000859,"not found in prokaryotes, plants and yeast; extracellular domain; Domain first found in C1r, C1s, uEGF, and bone morphogenetic protein; present in proteins mostly known to be involved in development; CUB domain",109.0,109.0,3.0,3.0,True,False
+SE_ENSG00000121904_1_6997,CSMD2,human,unchanged_domains,ENST00000373381.9,ENST00000373388.7,IPR000859,"not found in prokaryotes, plants and yeast; extracellular domain; Domain first found in C1r, C1s, uEGF, and bone morphogenetic protein; present in proteins mostly known to be involved in development; CUB domain",109.0,109.0,3.0,3.0,True,False
