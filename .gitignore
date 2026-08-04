@@ -28,3 +28,6 @@ domas_paper/
 # Large full-run golden (slow test) — kept local only, regenerate on demand
 tests/reference_outputs/leafcutter_full__representative_True/
 alphafold_benchmark/repro_data/
+
+# run_examples.sh default output directory
+run_examples_output/
