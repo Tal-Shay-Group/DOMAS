@@ -1410,6 +1410,15 @@ _worker_state = {}
 def _init_worker(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene,
                  canonical_rank=None, write_all_comparable=False):
     """ProcessPoolExecutor initializer - runs once when each worker process starts."""
+    # A spawned worker starts with no logging configuration, so its records would
+    # otherwise reach logging's last-resort handler and the console. domas.py
+    # names the run's log file in the environment; append to it.
+    log_file = os.environ.get('DOMAS_LOG_FILE')
+    if log_file:
+        logging.basicConfig(
+            filename=log_file, filemode='a', level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s %(message)s", force=True,
+        )
     _worker_state['exon_lookup'] = build_exon_lookup(df_exons)
     _worker_state['domain_lookup'] = build_domain_lookup(df_domains)
     _worker_state['canonical_transcript_ids'] = canonical_transcript_ids

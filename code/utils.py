@@ -741,7 +741,7 @@ def _read_transcripts_and_proteins(con, transcript_ids):
 
 
 def get_transcript_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
-    print('Starting getting domains from dochap')
+    logger.info('Reading domains from DomainEvent/DomainType')
     if df_transcript is None or df_protein is None:
         df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
     proteins_ids = np.unique(df_protein.protein_ensembl_id.values).tolist()
@@ -779,8 +779,7 @@ def get_transcript_domains_db(con, transcript_ids, df_transcript=None, df_protei
     merged_df = merged_df.drop(columns=['type_id', 'ext_id', 'name', 'other_name', 'description_x'])
     merged_df = merged_df.drop(columns=['transcript_refseq_id_x', 'tx_start', 'tx_end', 'cds_start', 'cds_end', 'exon_count'])
     merged_df = merged_df.drop(columns=['transcript_refseq_id_y','protein_refseq_id'])
-    print('Done getting domains from dochap')
-    print(f'df columns: {merged_df.columns}')
+    logger.info('Read %d domain rows from DomainEvent/DomainType', len(merged_df))
     return merged_df
 
 
@@ -829,13 +828,13 @@ def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_pr
     that actually have a RepresentativeDomains entry - see get_domains_db() for combining
     it with the DomainEvent/DomainType fallback for proteins that don't.
     """
-    print('Starting getting domains from RepresentativeDomains')
+    logger.info('Reading domains from RepresentativeDomains')
     if df_transcript is None or df_protein is None:
         df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
 
     if 'protein_interpro_id' not in df_protein.columns:
-        print('Proteins table has no protein_interpro_id column '
-              '(InterProRepresentativeDomains.py has not been run against this DB).')
+        logger.warning('Proteins table has no protein_interpro_id column '
+                       '(InterProRepresentativeDomains.py has not been run against this DB).')
         return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
 
     df_protein = df_protein.dropna(subset=['protein_interpro_id'])
@@ -847,7 +846,7 @@ def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_pr
     try:
         df_rep = pd.read_sql_query('select * from RepresentativeDomains', con)
     except (sqlite3.OperationalError, pd.errors.DatabaseError):
-        print('RepresentativeDomains table not found in this DB.')
+        logger.warning('RepresentativeDomains table not found in this DB.')
         return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
 
     df_rep = df_rep[df_rep.protein_interpro_id.isin(interpro_ids)]
@@ -880,7 +879,7 @@ def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_pr
     merged_df['AA_start'] = merged_df['AA_start'].astype(int)
     merged_df['AA_end'] = merged_df['AA_end'].astype(int)
 
-    print('Done getting domains from RepresentativeDomains')
+    logger.info('Read %d domain rows from RepresentativeDomains', len(merged_df))
     return merged_df[REPRESENTATIVE_DOMAINS_COLUMNS]
 
 

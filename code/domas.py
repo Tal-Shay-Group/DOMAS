@@ -156,11 +156,6 @@ def parse_args():
 
 
 def main():
-    # JunctionsAnalysis logs progress every 10,000 clusters at INFO. Nothing
-    # else in this call chain configures a handler, and an unconfigured logger
-    # drops everything below WARNING, so those records need this to appear.
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-
     args = parse_args()
 
     # -output_csv may name a directory that does not exist yet; the analysis
@@ -168,6 +163,23 @@ def main():
     # failing at the end with the results already computed.
     output_dir = os.path.dirname(os.path.abspath(args.output_csv))
     os.makedirs(output_dir, exist_ok=True)
+
+    # One handler, a file beside the output CSV. Every module logs through
+    # logging.getLogger(__name__), so this is the only place a destination is
+    # chosen and the run leaves nothing on the console.
+    log_file = os.path.join(output_dir, 'domas.log')
+    logging.basicConfig(
+        filename=log_file,
+        filemode='w',
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        force=True,
+    )
+    # Clusters are analysed in worker processes, which are spawned and so start
+    # with no logging configuration of their own. Naming the file in the
+    # environment - inherited by the children - keeps their records in the same
+    # log instead of the console (see junction_analisys._init_worker).
+    os.environ['DOMAS_LOG_FILE'] = log_file
 
     con = sqlite3.connect(args.dochap)
     try:

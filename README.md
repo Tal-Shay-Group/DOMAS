@@ -114,6 +114,10 @@ DoChaP database is not in this repository, so pass its path:
 there. DOMAS creates the directory if it does not exist. The whole set takes about two
 minutes; add `-stats` to a command to get the statistics report as well.
 
+Each run also writes `domas.log` beside its `-output_csv` and prints nothing to the
+console. The four examples share one output directory, so only the last run's log
+survives.
+
 The script is four `domas.py` command lines, one per format — copy the one you need and
 swap in your own input.
 

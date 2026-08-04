@@ -416,7 +416,7 @@ mouse_relevant_columns_names = [
 def hadas_read_input_file(con, input_path):
     try:
         df = pd.read_excel(input_path)
-        print("Completed reading input file.")
+        logger.info("Completed reading input file.")
         # create human df with relevant columns and parsed junction coordinates
         df_h = df[human_relevant_columns_names].copy()
         df_h[['chromosome', 'start_position', 'end_position']] = df_h['h_junction'].str.split(':', expand=True)
@@ -452,10 +452,10 @@ def hadas_read_input_file(con, input_path):
                      'start_position', 'end_position', 'specie', 'cluster_name']]
         merged_df = pd.concat([df_h, df_m], ignore_index=True)
 
-        print("Completed parsing junctions.")
+        logger.info("Completed parsing junctions.")
         return merged_df
     except Exception as e:
-        print(f"Error reading input file: {e}")
+        logger.error("Error reading input file: %s", e)
         raise(e)
 
 
