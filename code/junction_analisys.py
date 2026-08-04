@@ -1619,8 +1619,8 @@ class JunctionsAnalysis:
             for idx, (_, group_df) in enumerate(cluster_groups)
         }
 
-        self.logger.info(f"Starting analysis with {actual_workers} workers + 1 writer thread")
-        self.logger.info(f"Total clusters: {total}")
+        self.logger.log(utils.PROGRESS,
+                        f"Analyzing {total} clusters with {actual_workers} workers")
         self.logger.info(f"Processing {total_chunks} chunks (~{chunk_size} clusters per chunk)")
 
         # Prepare column definitions for CSV. The two selection flags are written
@@ -1673,8 +1673,9 @@ class JunctionsAnalysis:
 
                 if processed_count % 10000 == 0:
                     cur_time = time.perf_counter()
-                    self.logger.info(
-                        f"[Main] Analyzed {processed_count}/{total} clusters. "
+                    self.logger.log(
+                        utils.PROGRESS,
+                        f"Analyzed {processed_count}/{total} clusters. "
                         f"Last 10000 took {cur_time - last_time:.2f}s. "
                         f"ETA: {(cur_time - last_time) * (total - processed_count) / 10000 / 60:.1f}min"
                     )
@@ -1688,7 +1689,8 @@ class JunctionsAnalysis:
             key=lambda r: original_order.get(_group_identity(r.cluster_name, r.specie if has_specie_column else None), total)
         )
 
-        self.logger.info(f"[Main] Analysis complete: processed {processed_count}/{total} clusters")
+        self.logger.log(utils.PROGRESS,
+                        f"Analysis complete: {processed_count}/{total} clusters")
         return all_results
 
     # Events recorded for a transcript that was NOT actually compared to the
@@ -1848,7 +1850,7 @@ class JunctionsAnalysis:
         df_junctions = self._filter_junctions_by_transcript_count(df_junctions, filter_transcript_count)
 
         gene_ids = df_junctions.gene_ensembl_id.unique().tolist()
-        self.logger.info(f"Analyzing {len(gene_ids)} genes")
+        self.logger.log(utils.PROGRESS, f"Analyzing {len(gene_ids)} genes")
 
         # Load data from database
         df_genes, df_transcripts, df_domains, df_exons, gene_strand, gene_specie = self._load_database_data(

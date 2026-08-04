@@ -14,6 +14,7 @@ import sqlite3
 import sys
 
 import alternative_splicing
+import utils
 
 _DEFAULT_NUM_WORKERS = os.cpu_count() or 5
 
@@ -180,6 +181,13 @@ def main():
     # environment - inherited by the children - keeps their records in the same
     # log instead of the console (see junction_analisys._init_worker).
     os.environ['DOMAS_LOG_FILE'] = log_file
+
+    # Progress on the console: milestones, warnings and errors only. Everything
+    # at INFO - per-chunk writes, per-cluster reasons - stays in the log file.
+    console = logging.StreamHandler(sys.stdout)
+    console.setLevel(utils.PROGRESS)
+    console.setFormatter(logging.Formatter("%(message)s"))
+    logging.getLogger().addHandler(console)
 
     con = sqlite3.connect(args.dochap)
     try:

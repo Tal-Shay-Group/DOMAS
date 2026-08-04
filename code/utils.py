@@ -6,6 +6,12 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# Milestones worth putting on the console. Sits between INFO and WARNING so a
+# console handler set to this level shows progress, warnings and errors, while
+# the log file set to INFO keeps the per-chunk detail as well.
+PROGRESS = 25
+logging.addLevelName(PROGRESS, 'PROGRESS')
+
 
 # rMATS-turbo per-event files, junction-count variant. JCEC carries identical
 # coordinates, so JC is enough for DOMAS's coordinate mapping.
@@ -741,7 +747,7 @@ def _read_transcripts_and_proteins(con, transcript_ids):
 
 
 def get_transcript_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
-    logger.info('Reading domains from DomainEvent/DomainType')
+    logger.log(PROGRESS, 'Reading domains from DomainEvent/DomainType')
     if df_transcript is None or df_protein is None:
         df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
     proteins_ids = np.unique(df_protein.protein_ensembl_id.values).tolist()
@@ -779,7 +785,7 @@ def get_transcript_domains_db(con, transcript_ids, df_transcript=None, df_protei
     merged_df = merged_df.drop(columns=['type_id', 'ext_id', 'name', 'other_name', 'description_x'])
     merged_df = merged_df.drop(columns=['transcript_refseq_id_x', 'tx_start', 'tx_end', 'cds_start', 'cds_end', 'exon_count'])
     merged_df = merged_df.drop(columns=['transcript_refseq_id_y','protein_refseq_id'])
-    logger.info('Read %d domain rows from DomainEvent/DomainType', len(merged_df))
+    logger.log(PROGRESS, 'Read %d domain rows from DomainEvent/DomainType', len(merged_df))
     return merged_df
 
 
@@ -828,7 +834,7 @@ def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_pr
     that actually have a RepresentativeDomains entry - see get_domains_db() for combining
     it with the DomainEvent/DomainType fallback for proteins that don't.
     """
-    logger.info('Reading domains from RepresentativeDomains')
+    logger.log(PROGRESS, 'Reading domains from RepresentativeDomains')
     if df_transcript is None or df_protein is None:
         df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
 
@@ -879,7 +885,7 @@ def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_pr
     merged_df['AA_start'] = merged_df['AA_start'].astype(int)
     merged_df['AA_end'] = merged_df['AA_end'].astype(int)
 
-    logger.info('Read %d domain rows from RepresentativeDomains', len(merged_df))
+    logger.log(PROGRESS, 'Read %d domain rows from RepresentativeDomains', len(merged_df))
     return merged_df[REPRESENTATIVE_DOMAINS_COLUMNS]
 
 
