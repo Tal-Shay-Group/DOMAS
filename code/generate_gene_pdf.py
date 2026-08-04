@@ -14,7 +14,6 @@ import pandas as pd
 import sqlite3
 
 import utils
-from utils import hmm_change_impact  # analysis-flow scoring lives in utils, not here
 
 
 # Color palette from DoChap-web
@@ -30,10 +29,6 @@ DOCHAP_COLORS = [
 DOMAIN_LABEL_MAX_LEN = 14
 PDF_RASTER_DPI = 110
 DOMAIN_STRIP_COUNT = 80
-_HMM_ROW_STEP = 0.34            # vertical distance between HMM-track rows
-_HMM_BAR_HEIGHT = 0.14         # height of an HMM element bar
-_HMM_TRACK_GAP = 0.62          # clearance below the domain labels before the HMM track
-_HMM_LABEL_DEPTH = 0.42        # space under the last HMM row for its angled labels
 _ANALYSED_MARK_COLOR = '#1a365d'  # analysed/drawn-only chip inside a domain ellipse
 
 SPECIES_ALIASES = {
@@ -111,35 +106,6 @@ def _drop_undrawable_domains(df_domains):
     return df_domains[keep].reset_index(drop=True)
 
 
-def _pack_intervals(elements):
-    """Greedy interval-scheduling row assignment for HMM elements (each a dict
-    with 'start'/'end'). Returns a list of row indices parallel to `elements`."""
-    order = sorted(range(len(elements)), key=lambda i: (elements[i]['start'], elements[i]['end']))
-    row_last_end = []
-    row_of = [0] * len(elements)
-    for i in order:
-        s, e = elements[i]['start'], elements[i]['end']
-        row = next((r for r, last in enumerate(row_last_end) if s > last), None)
-        if row is None:
-            row_last_end.append(e)
-            row_of[i] = len(row_last_end) - 1
-        else:
-            row_last_end[row] = e
-            row_of[i] = row
-    return row_of
-
-
-def _plddt_color(plddt):
-    """AlphaFold pLDDT confidence palette (same bands the AFDB viewer uses)."""
-    if plddt is None:
-        return '#B9C2CC'          # unknown / no model
-    if plddt >= 90:
-        return '#0053D6'          # very high
-    if plddt >= 70:
-        return '#65CBF3'          # confident
-    if plddt >= 50:
-        return '#FFDB13'          # low
-    return '#FF7D45'              # very low
 
 
 def prepare_gene_data_bulk(conn, gene_ensembl_ids, use_representative_domains=False):
@@ -322,16 +288,9 @@ class GeneVisualization:
         self.color_index = 0
         self._preloaded = preloaded
         self.species_hint = None
-        # Optional HMM (Pfam) enrichment, keyed by transcript_ensembl_id:
-        #   {tx_id: [{'name', 'start', 'end', 'cov', 'plddt'(or None)}, ...]}
-        # When present, _draw_protein_view() draws an HMM track under the domain
-        # ellipses and create_pdf() adds a changed-HMM-elements table under each
-        # results table. When empty, the PDF is drawn exactly as before.
-        self.hmm_by_transcript = {}
         # Optional calibrated fold-change probability per transcript (vs canonical),
         # keyed by transcript_ensembl_id -> float in [0,1] (P(TM<0.5), the
         # structural companion score). Shown on the transcript label when present.
-        self.fold_change_by_transcript = {}
 
     def _normalize_species_value(self, species_value):
         """Normalize common species aliases to the values used in the DB."""
@@ -839,149 +798,10 @@ class GeneVisualization:
                 cell.set_facecolor('#F1F1F1')
                 cell.set_text_props(weight='bold')
 
-    # ── HMM (Pfam) enrichment track + table ────────────────────────────────
-    def _hmm_elements_for(self, transcript):
-        """HMM elements for a transcript, drawable ones only (finite coords)."""
-        tid = transcript['info'].get('transcript_ensembl_id')
-        elems = self.hmm_by_transcript.get(tid) or []
-        return [e for e in elems
-                if e.get('start') is not None and e.get('end') is not None]
 
-    def _draw_hmm_track(self, ax, hmm_elems, hmm_rows, top, max_protein_length):
-        """Draw the HMM (Pfam) elements as a labelled track of bars, coloured by
-        AlphaFold pLDDT, below the domain ellipses on the same protein axis. Bars
-        share a row when they don't overlap; labels are staggered across lanes
-        (like the domain labels) so neighbouring elements never collide. pLDDT is
-        carried by the bar colour, so the label only needs name + HMM coverage.
-        `top` is the y of the track's first row, computed by the caller so it
-        clears the domain labels above it."""
-        ax.text(0, top + 0.14, 'HMM (Pfam)', fontsize=5.6, style='italic',
-                color='#444444', va='bottom', ha='left')
-        min_w = max(6.0, max_protein_length * 0.015)
-        elems_by_row = {}
-        for e, r in zip(hmm_elems, hmm_rows):
-            y = top - r * _HMM_ROW_STEP
-            s, en = float(e['start']), float(e['end'])
-            w = max(en - s, min_w)
-            cx = (s + en) / 2
-            bar = FancyBboxPatch(
-                (cx - w / 2, y - _HMM_BAR_HEIGHT / 2), w, _HMM_BAR_HEIGHT,
-                boxstyle='round,pad=0,rounding_size=0.06',
-                facecolor=_plddt_color(e.get('plddt')), edgecolor='#333333',
-                linewidth=0.8, zorder=3, mutation_aspect=0.3,
-            )
-            ax.add_patch(bar)
-            # aligned length (aa) in the centre of the bar
-            ax.text(cx, y, str(int(en - s + 1)), ha='center', va='center',
-                    fontsize=4.6, fontweight='bold', color='black', zorder=5,
-                    clip_on=True, path_effects=[mpe.withStroke(linewidth=1.0, foreground='white')])
-            elems_by_row.setdefault(r, []).append((cx, e))
 
-        for r, elems in elems_by_row.items():
-            row_y = top - r * _HMM_ROW_STEP
-            # one label per Pfam family in the row (repeated motifs like 3
-            # zinc fingers collapse to "zf-C2H2 x3" so labels don't crowd).
-            by_fam = {}
-            for cx, e in elems:
-                by_fam.setdefault(e['name'], []).append((cx, e.get('cov')))
-            items = []
-            for fam, hits in by_fam.items():
-                center = sum(c for c, _ in hits) / len(hits)
-                covs = [c for _, c in hits if c is not None]
-                cnt = f" x{len(hits)}" if len(hits) > 1 else ""
-                if covs and min(covs) == max(covs):
-                    cov_txt = f" {int(min(covs))}%"
-                elif covs:
-                    cov_txt = f" {int(min(covs))}-{int(max(covs))}%"
-                else:
-                    cov_txt = ""
-                items.append({'center': center, 'text': fam + cnt + cov_txt, 'width': 1.0})
-            placed = self._compute_domain_label_positions(
-                items, max_protein_length, row_y - _HMM_BAR_HEIGHT / 2 - 0.03,
-                lane_step=0.055, lanes=3)
-            for lab in placed:
-                ax.plot([lab['center'], lab['center']],
-                        [row_y - _HMM_BAR_HEIGHT / 2, lab['label_y'] + 0.01],
-                        color='gray', linewidth=0.4, zorder=4, alpha=0.7)
-                # angled so neighbouring element names don't overlap; same
-                # bold black as the domain labels for legibility.
-                ax.text(lab['center'], lab['label_y'], lab['text'], ha='right',
-                        va='top', rotation=28, rotation_mode='anchor',
-                        fontsize=5.2, fontweight='bold', color='black',
-                        zorder=5, clip_on=True)
 
-    @staticmethod
-    def _hmm_family_summary(elems):
-        """Aggregate HMM elements per Pfam family ->
-        {family: (total_len, mean_plddt|None, max_cov|None)}. Coverage is the
-        best (max) model coverage among the family's hits."""
-        by = {}
-        for e in elems or []:
-            if e.get('start') is None or e.get('end') is None:
-                continue
-            ln = int(e['end']) - int(e['start']) + 1
-            by.setdefault(e['name'], []).append((ln, e.get('plddt'), e.get('cov')))
-        out = {}
-        for fam, hits in by.items():
-            total = sum(ln for ln, _, _ in hits)
-            pls = [(ln, pl) for ln, pl, _ in hits if pl is not None]
-            mean_pl = round(sum(ln * pl for ln, pl in pls) / sum(ln for ln, _ in pls), 1) if pls else None
-            covs = [cov for _, _, cov in hits if cov is not None]
-            max_cov = max(covs) if covs else None
-            out[fam] = (total, mean_pl, max_cov)
-        return out
 
-    def _changed_hmm_table(self, canonical_transcript, transcript):
-        """DataFrame of HMM families that CHANGED between the canonical and this
-        transcript: name, canonical length, alt length, canonical pLDDT, alt pLDDT.
-        Returns None if nothing changed or there's no HMM data / it's the canonical."""
-        if canonical_transcript is None:
-            return None
-        if transcript['info'].get('transcript_ensembl_id') == \
-                canonical_transcript['info'].get('transcript_ensembl_id'):
-            return None
-        canon = self._hmm_family_summary(self._hmm_elements_for(canonical_transcript))
-        alt = self._hmm_family_summary(self._hmm_elements_for(transcript))
-        if not canon and not alt:
-            return None
-        rows = []
-        for fam in sorted(set(canon) | set(alt)):
-            c_len, c_pl, c_cov = canon.get(fam, (None, None, None))
-            a_len, a_pl, a_cov = alt.get(fam, (None, None, None))
-            if c_len == a_len:          # unchanged family -> skip
-                continue
-            fmt = lambda v: '' if v is None else (f'{v:g}' if isinstance(v, float) else str(v))
-            rows.append({
-                'HMM element': fam,
-                'canonical len': fmt(c_len),
-                'alt len': fmt(a_len),
-                'canonical cov %': fmt(c_cov),
-                'alt cov %': fmt(a_cov),
-                'canonical pLDDT': fmt(c_pl),
-                'impact': hmm_change_impact(c_cov, a_cov, c_pl),
-            })
-        return pd.DataFrame(rows) if rows else None
-
-    def _draw_hmm_table(self, ax, df_hmm):
-        """Draw the changed-HMM-elements table (styled like the results table,
-        with a distinct header tint so the two tables read as separate)."""
-        ax.axis('off')
-        if df_hmm is None or len(df_hmm) == 0:
-            return
-        table = ax.table(
-            cellText=df_hmm.astype(str).values,
-            colLabels=list(df_hmm.columns),
-            cellLoc='center',
-            bbox=[0, 0, 1, 1],
-        )
-        table.auto_set_font_size(False)
-        table.set_fontsize(5.5)
-        for (row, col), cell in table.get_celld().items():
-            cell.set_linewidth(0.6)
-            cell.set_edgecolor('#888888')
-            if row == 0:
-                cell.set_facecolor('#E4EEF3')
-                cell.set_text_props(weight='bold')
 
     def _draw_genomic_junctions(self, ax, junctions, exon_y, exon_height):
         """Draw colored bracket-like junction markers above the genomic exon track."""
@@ -1091,9 +911,6 @@ class GeneVisualization:
                 print(f"No transcripts found for gene {self.gene_name}")
             return
 
-        # HMM enrichment is drawn (track + changed-element table) only when
-        # hmm_by_transcript is supplied.
-        hmm_active = bool(self.hmm_by_transcript)
         canonical_transcript = next(
             (t for t in valid_transcripts if t['info'].get('canonical')), None)
 
@@ -1206,7 +1023,6 @@ class GeneVisualization:
                     transcript_start_row = cluster_events_row + 2
                 else:
                     transcript_start_row = scale_row + 2
-                transcript_hmm_tables = []
                 for transcript, rows in zip(page_transcripts, transcript_results):
                     num_rows = len(rows) if rows is not None else 0
                     results_height = 0.18 if num_rows == 0 else 0.42 + 0.30 * num_rows
@@ -1217,20 +1033,7 @@ class GeneVisualization:
                     # fixed box and spilling into the next transcript.
                     _, num_domain_rows = self._domain_row_layout(transcript['domains'], max_protein_length)
                     protein_row_height = 1.2 + 0.55 * (num_domain_rows - 1)
-                    if hmm_active:
-                        # room for the HMM track under the domains, plus a
-                        # changed-HMM-elements table under the results table.
-                        hmm_elems = self._hmm_elements_for(transcript)
-                        num_hmm_rows = (max(_pack_intervals(hmm_elems)) + 1) if hmm_elems else 0
-                        if num_hmm_rows:
-                            protein_row_height += (_HMM_TRACK_GAP + 0.6 * num_hmm_rows
-                                                   + _HMM_LABEL_DEPTH)
-                        hmm_df = self._changed_hmm_table(canonical_transcript, transcript)
-                        transcript_hmm_tables.append(hmm_df)
-                        hmm_table_height = (0.42 + 0.30 * len(hmm_df)) if hmm_df is not None else 0.14
-                        height_ratios += [results_height, hmm_table_height, 0.7, protein_row_height, 0.18]
-                    else:
-                        height_ratios += [results_height, 0.7, protein_row_height, 0.18]
+                    height_ratios += [results_height, 0.7, protein_row_height, 0.18]
                 show_no_comparison_note = (
                     page_idx == num_pages - 1 and no_comparison_note
                 )
@@ -1275,7 +1078,7 @@ class GeneVisualization:
                 self._draw_protein_scale(fig, gs[scale_row, 1], max_protein_length)
 
                 # ── transcript rows ────────────────────────────────────────
-                stride = 5 if hmm_active else 4
+                stride = 4
                 for i, transcript in enumerate(page_transcripts):
                     row = transcript_start_row + i * stride
 
@@ -1287,12 +1090,7 @@ class GeneVisualization:
                         table_rows = table_rows.drop(columns=['is_longest_cds', 'is_most_like_canonical'], errors='ignore')
                     self._draw_results_table(ax_results, table_rows)
 
-                    if hmm_active:
-                        ax_hmm = fig.add_subplot(gs[row + 1, :])
-                        self._draw_hmm_table(ax_hmm, transcript_hmm_tables[i])
-                        grow = row + 2
-                    else:
-                        grow = row + 1
+                    grow = row + 1
 
                     ax_genomic = fig.add_subplot(gs[grow:grow + 2, 0])
                     self._draw_genomic_view(
@@ -1329,20 +1127,11 @@ class GeneVisualization:
                         if 'is_most_like_canonical' in rows_for_transcript.columns and rows_for_transcript['is_most_like_canonical'].any():
                             tie_break_tags.append('most like canonical')
                     tag_suffix = f"  [{', '.join(tie_break_tags)}]" if tie_break_tags else ""
-                    fc = (self.fold_change_by_transcript.get(transcript_name)
-                          or self.fold_change_by_transcript.get(str(transcript_name).split('.')[0]))
                     ax_label.text(
                         0.02, 0.98,
                         f"Transcript: {transcript_name}  |  Protein: {protein_name}{tag_suffix}",
                         fontsize=8, va='top', transform=ax_label.transAxes,
                     )
-                    if fc is not None:
-                        ax_label.text(
-                            0.98, 0.98,
-                            f"P(fold change, TM<0.5) = {fc:.2f}",
-                            fontsize=7.5, va='top', ha='right', fontweight='bold',
-                            color='#1a365d', transform=ax_label.transAxes,
-                        )
 
                 if show_no_comparison_note:
                     ax_note = fig.add_subplot(gs[note_row, :])
@@ -1350,17 +1139,6 @@ class GeneVisualization:
                     ax_note.text(
                         0.02, 0.5, no_comparison_note,
                         fontsize=9, fontstyle='italic', va='center', transform=ax_note.transAxes,
-                    )
-
-                if self.fold_change_by_transcript:
-                    fig.text(
-                        0.02, 0.004,
-                        "Note on P(fold change): this structural score is driven by AlphaFold PAE "
-                        "(predicted aligned error) of the canonical structure — a well-defined, rigid "
-                        "fold (low PAE) tends to be PRESERVED under splicing, an uncertain/multi-domain "
-                        "one (high PAE) tends to change. It is a different question from the "
-                        "functional/pathogenicity score (impact), which is region_am/constraint-driven.",
-                        fontsize=5.6, style='italic', color='#555555', va='bottom', wrap=True,
                     )
 
                 if marks_active:
@@ -1379,10 +1157,8 @@ class GeneVisualization:
                             "entry: its annotation comes from DomainEvent/DomainType, which states no "
                             "entry type, so the ladder cannot rank it and every domain is compared as-is."
                         )
-                    # Placed above the fold-change note when both are present, so
-                    # neither is written over the other.
                     fig.text(
-                        0.02, 0.028 if self.fold_change_by_transcript else 0.004, legend,
+                        0.02, 0.004, legend,
                         fontsize=5.6, style='italic', color='#555555', va='bottom', wrap=True,
                     )
                 pdf.savefig(fig, bbox_inches='tight', dpi=PDF_RASTER_DPI)
@@ -1701,27 +1477,13 @@ class GeneVisualization:
 
         row_of, num_domain_rows = self._domain_row_layout(transcript['domains'], max_protein_length)
 
-        # HMM (Pfam) elements for this transcript, packed into non-overlapping rows.
-        hmm_elems = self._hmm_elements_for(transcript)
-        hmm_rows = _pack_intervals(hmm_elems) if hmm_elems else []
-        num_hmm_rows = (max(hmm_rows) + 1) if hmm_rows else 0
 
         # Extra rows push the bottom of the axis down so a transcript with
         # several overlapping domains gets a taller box (see create_pdf(),
         # which sizes the GridSpec row the same way) instead of its extra
-        # rows spilling into/being masked by the next transcript. The HMM track
-        # (if any) hangs below the domains and needs its own space.
+        # rows spilling into/being masked by the next transcript.
         domain_bottom = -0.35 - (num_domain_rows - 1) * domain_row_step
-        # The HMM track hangs a fixed clearance below the domain rows so the
-        # domains' angled labels (which can reach ~half a row-step down, more
-        # when many domains overlap) never run into it.
-        hmm_top = domain_y_top - num_domain_rows * domain_row_step - _HMM_TRACK_GAP
-        if num_hmm_rows:
-            hmm_bottom = (hmm_top - (num_hmm_rows - 1) * _HMM_ROW_STEP
-                          - _HMM_BAR_HEIGHT / 2 - _HMM_LABEL_DEPTH)
-            ax.set_ylim(min(domain_bottom, hmm_bottom), 1)
-        else:
-            ax.set_ylim(domain_bottom, 1)
+        ax.set_ylim(domain_bottom, 1)
 
         protein_length_aa = transcript['info'].get('protein_length')
         if protein_length_aa is None or pd.isna(protein_length_aa):
@@ -1763,8 +1525,6 @@ class GeneVisualization:
         if len(transcript['domains']) == 0:
             ax.text(0.5, 0.62, 'No domains', transform=ax.transAxes,
                    ha='center', va='center', fontsize=10, style='italic', color='black')
-            if hmm_elems:
-                self._draw_hmm_track(ax, hmm_elems, hmm_rows, hmm_top, max_protein_length)
             return
 
         domains_sorted = transcript['domains'].sort_values('AA_end', ascending=False)
@@ -1939,9 +1699,6 @@ class GeneVisualization:
                     color='black',
                     clip_on=True,
                 )
-
-        if hmm_elems:
-            self._draw_hmm_track(ax, hmm_elems, hmm_rows, hmm_top, max_protein_length)
 
 
 def generate_gene_pdf(gene_name, conn, output_file=None,

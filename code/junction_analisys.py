@@ -492,10 +492,10 @@ def filter_representative_domains(df_domains):
     Same accession at disjoint or barely-touching positions (e.g. two tandem RRM
     instances) is kept as two domains. Return sorted by AA_start.
 
-    Deliberately NOT handled here (left to the HMM/Pfam enrichment layer): cross-
-    transcript identity when canonical and compared annotate one physical domain
-    under different accessions (Pfam family from hmmscan is the stable key), and
-    surfacing an event region with no InterPro Domain entry (hmmscan recovers it).
+    Deliberately NOT handled here: cross-transcript identity when canonical and
+    compared annotate one physical domain under different accessions, and
+    surfacing an event region that carries no InterPro Domain entry at all. Both
+    need a sequence-level model rather than the accessions DoChaP stores.
 
     Requires 'domain_id' and 'type' columns; a frame without them, or with `type`
     entirely NULL (DomainEvent/DomainType rows), is returned unchanged.
