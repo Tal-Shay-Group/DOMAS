@@ -94,10 +94,45 @@ The defaults are what a normal run wants; each flag turns one of them off.
 
 ### A note on rMATS event types
 
-DOMAS reads the `SE`, `A5SS`, `A3SS` and `MXE` `[EventType].MATS.JC.txt` files.
-`RI.MATS.JC.txt` is deliberately not read: a retained-intron event yields a single
-junction, and a single-junction event can never produce a transcript that differs from
-the canonical one within the event, so such events are structurally unanalysable.
+DOMAS reads all five `[EventType].MATS.JC.txt` files: `SE`, `A5SS`, `A3SS`, `MXE` and
+`RI`. A retained-intron record names one interval, the spliced form, so it is emitted
+as two features at the same coordinates — one matched by adjacency (the intron is
+spliced out) and one by containment (a single exon holds it). That is what lets a
+retaining transcript carry a feature the canonical one lacks.
+
+## Example runs
+
+`run_examples.sh` runs DOMAS once per input format against the fixtures in `tests/`
+and compares each result against the reference stored in `tests/run_examples/`. The
+DoChaP database is not in this repository, so pass its path:
+
+```bash
+./run_examples.sh /path/to/DB_merged.sqlite [output_dir]
+```
+
+`output_dir` defaults to `./run_examples_output`, and each format writes `<format>.csv`
+there alongside the statistics report DOMAS produces by default. The whole set takes
+about two minutes.
+
+The script is four `domas.py` command lines, one per format — copy the one you need and
+swap in your own input.
+
+| Example | Input | Rows |
+| :--- | :--- | ---: |
+| `ioe` | `tests/ioe/` — 20 SUPPA events per event type | 265 |
+| `rmats` | `tests/rmats/` — the five `[EventType].MATS.JC.txt` files | 344 |
+| `majiq` | `tests/majiq/NveB_Mono_voila.txt` — a `voila tsv` | 372 |
+| `leafcutter` | `tests/leafcutter/` — the `leafcutter_ds` output pair | 316 |
+
+Each invocation uses the minimal arguments its format needs: `-format`, the input, and
+`-specie`, which is required because none of these files carries a species field. The
+three large fixtures also pass `-max_clusters 200` so an example finishes in seconds —
+drop it to analyse the whole fixture.
+
+Each reference is the exact CSV its run produces, so a mismatch means the analysis
+changed. The script checks them at the end with `tests/compare_run_example.py`, which
+sorts both sides first — row order is not part of the result, since clusters are
+analysed in parallel and returned as they finish.
 
 ## Output format
 
@@ -108,10 +143,12 @@ The resulting CSV file provides:
 - **Domain descriptions** — functional description of the affected domain, from DoChaP.
 - **Identification columns taken from the input** — cluster, gene symbol, gene ID,
   species and the coordinates of the alternative splicing event.
-- **`is_longest_cds` / `is_most_like_canonical`** — per-transcript flags marking the
-  transcript with the longest annotated CDS and the transcript most like the canonical
-  one. Every comparable transcript is reported; filter on a flag for a single-isoform
-  view. A transcript may carry both flags, one, or neither.
+- **`is_longest_cds` / `is_most_like_canonical`** — written only with
+  `-write_all_comparable`, which compares every comparable transcript and keeps a row
+  for each. The flags mark the transcript with the longest annotated CDS and the one
+  most like the canonical; a transcript may carry both, one, or neither. By default
+  only the transcript those rules select is compared, so each cluster holds one
+  comparison and the two columns are omitted.
 
 ## References
 
