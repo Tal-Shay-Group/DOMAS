@@ -18,11 +18,8 @@ import sys
 import numpy as np
 import pandas as pd
 
-# Columns that are consistently low-cardinality across a full run - loading
-# these as category (and the two length/count columns as float32) keeps a
-# 20M-row file to a few hundred MB instead of several GB of plain Python
-# strings. See results_stats.py's _read_ioe_csv() for the same technique
-# applied to reading one of these files for statistics.
+# Low-cardinality columns, read as category (and the length/count pair as
+# float32): a 20M-row file then costs a few hundred MB instead of several GB.
 CATEGORY_COLS = [
     'cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id',
     'transcript_id', 'domain_name', 'is_longest_cds', 'is_most_like_canonical',
@@ -39,10 +36,8 @@ def _read_compact(path, chunk_rows=1_000_000):
     if len(chunks) == 1:
         return chunks[0]
 
-    # Plain pd.concat() silently upcasts categoricals back to object when
-    # per-chunk categories differ (they always will) - union them explicitly
-    # instead so the result stays compact. See results_stats.py's
-    # _read_ioe_csv() for the same fix applied there.
+    # Union the per-chunk categories explicitly: plain concat upcasts them back
+    # to object whenever the chunks disagree, which they always do.
     cat_cols = [c for c in chunks[0].columns if isinstance(chunks[0][c].dtype, pd.CategoricalDtype)]
     other_cols = [c for c in chunks[0].columns if c not in cat_cols]
     data = {}
@@ -65,9 +60,8 @@ def main():
     print(f"Reading {new_path} ...")
     df_new = _read_compact(new_path)
     print(f"  {len(df_new):,} rows")
-    # NaN normalization happens implicitly below via .astype(str) (NaN -> 'nan'
-    # consistently in both frames) rather than .fillna('') here, since category
-    # dtype columns reject fillna() with a value that isn't already a category.
+    # NaN is normalised by the .astype(str) below (-> 'nan' in both frames);
+    # fillna() is not an option, category columns reject an unknown value.
 
     if set(df_old.columns) != set(df_new.columns):
         print("COLUMN MISMATCH")
@@ -77,11 +71,8 @@ def main():
 
     sort_cols = list(df_old.columns)
     print("Sorting both for order-independent comparison...")
-    # Sort by the STRING representation, not the raw (categorical) columns.
-    # Unordered category dtype sorts by category code, which is assigned by
-    # first-appearance order during parsing and can differ between the two
-    # files even when the actual values are identical - sorting on the raw
-    # categoricals could silently misalign otherwise-identical rows.
+    # Sort on the string form. Unordered categories sort by code, assigned in
+    # first-appearance order, so the two files could misalign on equal values.
     df_old = df_old.loc[df_old[sort_cols].astype(str).sort_values(sort_cols).index].reset_index(drop=True)
     df_new = df_new.loc[df_new[sort_cols].astype(str).sort_values(sort_cols).index].reset_index(drop=True)
 
@@ -89,9 +80,8 @@ def main():
         print(f"ROW COUNT MISMATCH: old={len(df_old):,} new={len(df_new):,}")
         sys.exit(1)
 
-    # Compare as strings (via astype(str)) rather than pd.testing.assert_frame_equal,
-    # so category/float dtype differences between the two loads don't themselves
-    # cause a false mismatch - only the actual values matter here.
+    # Compare as strings so a dtype difference between the two loads cannot
+    # register as a mismatch; only the values matter.
     mismatch_mask = np.zeros(len(df_old), dtype=bool)
     for col in sort_cols:
         mismatch_mask |= (df_old[col].astype(str).to_numpy() != df_new[col].astype(str).to_numpy())

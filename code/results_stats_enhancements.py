@@ -126,7 +126,7 @@ def transcript_choice_table(df):
         return pd.DataFrame({"n_transcripts": nuniq.to_numpy(),
                              "rule": "pre-selected at write time"}, index=nuniq.index)
 
-    # index of clusters carrying each tag (cheap: .size().index, not .groups)
+    # Clusters carrying each tag; .size().index is cheaper than .groups.
     most_like_idx = (analyzed[analyzed["is_most_like_canonical"] == True]
                      .groupby(gcols, observed=True, dropna=False).size().index)
     longest_idx = (analyzed[analyzed["is_longest_cds"] == True]
@@ -415,8 +415,8 @@ def splice_type_vs_outcome_with_counts(df, label):
         detail = ", ".join(f"{et}: {counts[i, j]}" for j, et in enumerate(outcome_types))
         print(f"  {at:<6s}  n={row_totals[i]:<8d} [{detail}]")
 
-    # keep width/height under _savefig_to_pdf's max_aspect (2.6) or the figure
-    # gets sliced across pages and the per-cell counts are cut in half
+    # Keep the aspect under _savefig_to_pdf's 2.6 limit; past it the figure is
+    # sliced across pages and the per-cell counts are cut in half.
     _w = 1.15 * len(outcome_types) + 4.0
     fig, ax = plt.subplots(figsize=(_w, max(_w / 2.3, len(as_types) * 0.95)))
     fig.suptitle(f"AS Splice Type vs Domain Outcome — {disp(label)}\n"
@@ -426,7 +426,7 @@ def splice_type_vs_outcome_with_counts(df, label):
     ax.set_xticks(range(len(outcome_types)))
     ax.set_xticklabels([rs.display_label(et) for et in outcome_types], rotation=25, ha="right", fontsize=9)
     ax.set_yticks(range(len(as_types)))
-    # number of events per line, as requested
+    # Event count per line.
     ax.set_yticklabels([f"{at}  (n={row_totals[i]:,})" for i, at in enumerate(as_types)], fontsize=9)
 
     vmax = pct.max() if pct.size else 0
@@ -509,7 +509,7 @@ def cross_source_domain_pages(pdf, label_dfs, top_n=20, per_page=10):
         chunk = table.iloc[start:start + per_page]
         y = np.arange(len(chunk))
         height = 0.8 / n_src
-        # min height keeps the aspect under _savefig_to_pdf's 2.6 split threshold
+        # A minimum height keeps the aspect under _savefig_to_pdf's 2.6 limit.
         fig, ax = plt.subplots(figsize=(13, max(6.0, len(chunk) * n_src * 0.32 + 1.6)))
 
         xmax = max(
@@ -668,7 +668,7 @@ def build_enhanced_report(runs, pdf_path, title, enrichment_pairs=None, top_n_do
     prepared = [(*rs._load_and_prepare(path, label, specie),) for label, path, specie in runs]
     label_dfs = {disp(label): df for df, label in prepared}
 
-    # patch the heatmap so per-source analyses get counts per line
+    # Patch the heatmap so per-source analyses show counts per line.
     rs.splice_type_vs_outcome = splice_type_vs_outcome_with_counts
 
     print("\nCollapsing clusters for every source ...")

@@ -222,12 +222,9 @@ def find_bp_range_for_domains(df_exons, domains_in_region):
     first_exon = df_exons.iloc[np.argmax(first_mask)]
     last_exon = df_exons.iloc[np.argmax(last_mask)]
 
-    # On a minus strand transcript, the domain's lower CDS bound maps to a
-    # HIGHER genomic position (and vice versa), so these two values can come
-    # back genomically reversed. Callers pool this pair into a min/max across
-    # several transcripts, so it must be returned in genomic (low, high)
-    # order regardless of strand - otherwise the reversed pair is silently
-    # dropped from the pooled max() and the window never widens to cover it.
+    # On a minus strand the domain's lower CDS bound maps to a higher genomic
+    # position, so the pair can come back reversed. Callers pool it into a
+    # min/max across transcripts, so return it in genomic (low, high) order.
     bp_a = _cds_to_bp(first_exon, min_domain_bp)
     bp_b = _cds_to_bp(last_exon, max_domain_bp)
     return min(bp_a, bp_b), max(bp_a, bp_b)
@@ -328,13 +325,10 @@ def collapse_contained_domains(df_domains, tolerance=2, overlap_fraction=0.85):
     index = df_domains.index.to_numpy()
     name_block = df_domains[DOMAIN_NAME_COLUMNS].to_numpy(dtype=object)
 
-    # Process longest domain first, but break ties with a *stable* key so the
-    # collapse result never depends on df_domains' own row order. That row order
-    # is hash-seed dependent (it flows from a set() of transcript ids into the
-    # domain query), and for equal-length overlapping domains the order decides
-    # which one is kept vs merged away - so ordering by length alone let a
-    # cluster's domain count (and thus its results.csv row count) vary between
-    # runs. Ties break by start, then end, then the row's merged identifier set.
+    # Longest domain first, ties broken by start, then end, then the merged
+    # identifier set. The tie-break must be stable: df_domains' own row order is
+    # hash-seed dependent, and for equal-length overlapping domains it decides
+    # which is kept, so length alone would vary a cluster's row count per run.
     name_key = [
         ";".join(sorted(
             str(v).strip() for v in name_block[pos]
@@ -390,11 +384,10 @@ _SITE_ENTRY_TYPES = frozenset({'Active_site', 'Binding_site', 'Conserved_site', 
 # (e.g. TRIB2's two G3DSA kinase lobes over the Pkinase family).
 _REDUNDANT_COVER = 0.5
 
-# Two entries with the SAME accession are treated as one physical domain, and the
-# shorter dropped, only when they overlap by at least this fraction of the shorter
-# one. Any-overlap (a single shared residue) collapsed neighbouring instances of a
-# repeat that merely abut - two tandem copies sharing one boundary residue are two
-# domains, not one - so the test is a majority of the shorter entry.
+# Two entries with the same accession are one physical domain, and the shorter
+# dropped, only when they overlap by at least this fraction of the shorter one.
+# A majority, not any overlap: two tandem copies of a repeat sharing a boundary
+# residue are two domains.
 _SAME_ID_OVERLAP = 0.5
 
 
@@ -624,16 +617,10 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
             t_domains_round2 = _domains_in_aa_range(df_t_domains, t_min_aa2, t_max_aa2)
             c_domains_round2 = _domains_in_aa_range(df_c_domains, c_min_aa2, c_max_aa2)
 
-    # _domains_in_aa_range() no longer defensively .copy()s its result
-    # (removed as a redundant allocation on a function called up to 4x per
-    # compared transcript - boolean-mask indexing already returns a new,
-    # independent DataFrame). Its return value still carries pandas'
-    # internal "copy of a slice" provenance marker though, which trips
-    # SettingWithCopyWarning on the ['length'] assignment below regardless
-    # of .loc[] usage (the warning is provenance-based, not a real aliasing
-    # check). Since only the round2 frames actually get mutated - not every
-    # _domains_in_aa_range() call - .copy() them here, once, right before
-    # the mutation, instead of inside the 4x-per-pair helper.
+    # _domains_in_aa_range() returns a boolean-mask slice: already independent,
+    # but carrying pandas' "copy of a slice" marker, which trips
+    # SettingWithCopyWarning on the ['length'] assignment below. Only the round-2
+    # frames are mutated, so copy here rather than in a helper called 4x per pair.
     t_domains_round2 = t_domains_round2.copy()
     c_domains_round2 = c_domains_round2.copy()
     t_domains_round2['length'] = t_domains_round2['AA_end'] - t_domains_round2['AA_start'] + 1
@@ -994,15 +981,11 @@ class ClusterAnalysisResult:
         """The gene's usable transcript ids and which of them are protein-coding,
         or None when the cluster cannot be analysed at all (the reason is recorded
         as the cluster's event)."""
-        # No gene named for this event at all - distinct from one that was named
-        # and not found. LeafCutter builds clusters annotation-free, so a cluster
-        # overlapping nothing annotated is an expected outcome; reporting it as
-        # gene_not_in_db claimed a lookup had failed when none was ever possible.
-        #
-        # A missing id alone is NOT enough to conclude that: a named gene whose
-        # symbol did not resolve - a lncRNA clone id absent from DoChaP, say -
-        # also arrives with no id, and that IS a failed lookup. The symbol is what
-        # separates the two.
+        # No gene named at all, as opposed to one named and not found: LeafCutter
+        # clusters are built annotation-free, so overlapping nothing annotated is
+        # an expected outcome, not a failed lookup. A missing id alone does not
+        # say which it is - a named gene whose symbol did not resolve also arrives
+        # without one - so the symbol decides.
         if _is_missing_gene_id(self.gene_ensembl_id) and _is_missing_gene_id(self.gene_symbol):
             self.add_event('no_gene_specified')
             logger.debug(f"No gene named for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
@@ -1032,13 +1015,10 @@ class ClusterAnalysisResult:
         # Transcripts carrying an annotated protein. The v1 priority puts
         # protein-coding first, ahead of most-like-canonical and longest CDS: a
         # transcript with no protein has no domains, so comparing it to the
-        # canonical one trivially "drops" every domain, and flagging it as the
-        # transcript that best represents the event is misleading. DoChaP
-        # populates cds_start/cds_end for non-coding transcripts too, so CDS
-        # length cannot stand in for this test - protein-id presence is the signal.
-        #
-        # Absent columns mean "unknown", not "non-coding": a caller building
-        # df_gene_transcripts by hand should not silently lose every candidate.
+        # canonical one trivially "drops" every domain. DoChaP populates
+        # cds_start/cds_end for non-coding transcripts too, so CDS length cannot
+        # stand in - protein-id presence is the signal. Absent columns mean
+        # "unknown", not "non-coding", so a hand-built frame keeps its candidates.
         protein_columns = [c for c in ('protein_ensembl_id', 'protein_refseq_id')
                            if c in df_gene_transcripts.columns]
         if protein_columns:
@@ -1090,17 +1070,12 @@ class ClusterAnalysisResult:
         can stand in, the cluster being recorded as no_canonical_transcript."""
         gene_canonical_ids = canonical_transcript_ids.intersection(gene_transcript_ids)
         if not gene_canonical_ids:
-            # No transcript of this gene is flagged canonical in DoChaP - common for
-            # genes annotated by RefSeq alone, where neither MANE Select nor RefSeq
-            # Select names a representative. Rather than abandon the cluster, stand
-            # in the longest-CDS transcript, by the same rule that picks the
-            # longest-CDS comparable transcript below: protein-coding candidates
-            # first (a transcript with no protein has no domains to compare
-            # against), then the longest coding sequence, then the lowest id.
-            #
-            # This is a substitute, not an annotation: the comparisons it produces
-            # are between real transcripts, but "canonical" for such a cluster means
-            # DOMAS's choice, not a curated representative.
+            # No transcript flagged canonical - common for genes annotated by
+            # RefSeq alone, where neither MANE Select nor RefSeq Select names a
+            # representative. The longest-CDS transcript stands in, by the rule
+            # used for the comparable transcripts: protein-coding candidates
+            # first, then longest coding sequence, then lowest id. A substitute,
+            # not an annotation: "canonical" here means DOMAS's choice.
             coding_ids = [tid for tid in gene_transcript_ids if coding_by_transcript.get(tid, True)]
             fallback_candidates = coding_ids or gene_transcript_ids
             if not fallback_candidates:
@@ -1115,14 +1090,11 @@ class ClusterAnalysisResult:
             )
             return True
 
-        # A gene can carry more than one canonical transcript, common outside human:
-        # ~4,800 mouse and ~7,100 rat genes have one transcript flagged by RefSeq
-        # (canonical=1) and a different one by Ensembl (canonical=2). Human rarely
-        # does - MANE makes the two agree, merging them into one canonical=3 row.
-        #
-        # Prefer the transcript both sources agree on (3), then Ensembl's (2), then
-        # RefSeq's (1). DoChaP's CanonicalEnum values rank in that order, so the
-        # higher value wins; ties fall to the lowest id, independent of hash order.
+        # A gene can carry more than one canonical transcript, common outside
+        # human: ~4,800 mouse and ~7,100 rat genes have one flagged by RefSeq
+        # (canonical=1) and another by Ensembl (2); MANE makes the two agree in
+        # human, merging them into one canonical=3 row. Prefer 3, then 2, then 1 -
+        # CanonicalEnum ranks in that order - with ties on the lowest id.
         ranked_ids = sorted(gene_canonical_ids)
         if canonical_rank:
             self.canonical_transcript_id = max(
@@ -1426,13 +1398,12 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
             log.info(f"[Writer] Empty results CSV written: {output_path}")
 
     finally:
-        # Cleanup temporary chunks
+        # Drop the temporary chunk files.
         shutil.rmtree(output_dir, ignore_errors=True)
 
 
-# Per-worker-process state, populated once by _init_worker() rather than
-# per chunk - df_exons/df_domains can be large, so re-pickling them for every
-# chunk via submit() args would be wasted work.
+# Per-worker state, populated once by _init_worker(): df_exons/df_domains can be
+# large, and submit() args would re-pickle them for every chunk.
 _worker_state = {}
 
 
@@ -1596,9 +1567,8 @@ class JunctionsAnalysis:
     def _prepare_cluster_groups(self, df_junctions):
         """Group junctions into clusters."""
         # specie is always present after normalize_junctions_frame(), so clusters
-        # are grouped per species unconditionally. Grouping on cluster_name alone -
-        # what the three formats without a specie column used to get - would merge
-        # same-named clusters from different species in a multi-species run.
+        # group per species unconditionally. Grouping on cluster_name alone would
+        # merge same-named clusters from different species in a multi-species run.
         #
         # dropna=False because the value may still be None: it is derived from the
         # Ensembl gene id, and an input keyed by GeneID or by a non-Ensembl
@@ -1627,9 +1597,9 @@ class JunctionsAnalysis:
         chunks = [shuffled_groups[i:i + chunk_size] for i in range(0, total, chunk_size)]
         total_chunks = len(chunks)
 
-        # as_completed() returns chunks in whatever order they finish, unrelated to
-        # cluster_groups' original order. PDF file names embed a sequential count (see
-        # _generate_pdfs), so results are restored to that original order below.
+        # as_completed() yields chunks as they finish, in no relation to
+        # cluster_groups' order. PDF names embed a sequential count, so the
+        # original order is restored below.
         has_specie_column = 'specie' in cluster_groups[0][1].columns if cluster_groups else False
 
         def _group_identity(cluster_name, specie):

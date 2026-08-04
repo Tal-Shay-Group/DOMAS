@@ -152,7 +152,7 @@ def _warn(message):
 # asserted against its UNANALYZABLE_TYPES/ANALYZED_TYPES below - a silent
 # length mismatch (e.g. forgetting to add a color when a new event type is
 # added) would otherwise make zip() truncate and shift every later color by
-# one, which happened once already when "gene_not_in_db" was added.
+# one, shifting every later colour by one.
 _UNANALYZABLE_COLORS = ["#8C8C8C", "#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2", "#937860", "#CCB974", "#64B5CD"]
 _ANALYZED_COLORS = ["#C00000", "#2E8B57", "#FF8C00", "#FFC000", "#70AD47", "#7030A0", "#4472C4", "#A6761D", "#E7298A"]
 assert len(_UNANALYZABLE_COLORS) == len(UNANALYZABLE_TYPES), \
@@ -168,16 +168,11 @@ def event_color(event_type):
     return palette.get(event_type, "#888888")
 
 
-# Shade ramp for the pie's exploded "mixed" sub-wedges (see event_distribution
-# and _pdf_event_distribution_combined) - a distinct blue-grey hue not used by
-# any single-reason wedge, so the whole family still reads as "part of mixed"
-# while each shade stays distinguishable. Order means different things in the
-# two callers: event_distribution() assigns by rank (darkest = most frequent
-# combination in that one pie); _pdf_event_distribution_combined assigns by
-# combo *identity* instead, so the same combination gets the same shade in
-# every label's panel - see that function for why rank-based shading isn't
-# safe to share across panels. Either way, the last shade is reserved for
-# the "other mixed" catch-all.
+# Shade ramp for the pie's exploded "mixed" sub-wedges: a blue-grey hue no
+# single-reason wedge uses, so the family reads as one while each shade stays
+# distinct. event_distribution() assigns by rank within its own pie;
+# _pdf_event_distribution_combined assigns by combo identity, so a combination
+# keeps its shade across panels. The last shade is the "other mixed" catch-all.
 MIXED_COMBO_SHADES = ["#37474F", "#546E7A", "#78909C", "#90A4AE", "#B0BEC5", "#CFD8DC"]
 
 
@@ -193,16 +188,11 @@ def event_sort_key(event_type):
     return len(ALL_EVENT_TYPES) + 2
 
 
-# Shorter chart-only labels. The analyzed side always renders under a title
-# that already says "domain" (Domain Frequency, Domain Copy-Count Change,
-# "Analyzable clusters" next to a domain-change legend, ...), so repeating
-# "domain" in every category name just adds width without adding meaning.
-# "transcript_doesnt_have_features" is shortened on its own merits - it's
-# nearly twice as long as any other unanalyzable reason. "features" covers both
-# junctions and retained introns: an event is a set of features, each matched by
-# its own predicate (see utils.FEATURE_JUNCTION / FEATURE_RETAINED_INTRON).
-# Never used for filtering/CSV output - ANALYZED_TYPES, UNANALYZABLE_TYPES,
-# ALL_EVENT_TYPES and the "event_type"/"label" column values stay unchanged.
+# Chart-only labels. The analyzed side renders under a title that already says
+# "domain", so the word is dropped from the category names, and
+# "transcript_doesnt_have_features" is shortened for width. "features" covers
+# junctions and retained introns alike. Display only: filtering and the CSV use
+# ANALYZED_TYPES / UNANALYZABLE_TYPES and the raw event_type values.
 SHORT_LABELS = {
     "no_gene_specified": "no gene named",
     "gene_not_in_db": "not in DB",
@@ -341,13 +331,9 @@ def _read_results_csv(path, chunk_rows=1_000_000):
     if len(chunks) == 1:
         return chunks[0]
 
-    # NOTE: plain pd.concat(chunks) silently upcasts categorical columns back
-    # to plain object dtype whenever the per-chunk categories differ (which
-    # they always will, since each chunk only sees its own slice of values).
-    # For a many-million-row file that turns our compact category/float32
-    # columns back into huge Python-object arrays and is what was causing
-    # this loader to run out of memory. Combine each column explicitly
-    # instead so categoricals stay categoricals.
+    # Combine column by column: plain pd.concat(chunks) upcasts categoricals
+    # back to object whenever the per-chunk categories differ, which they always
+    # do, and on a many-million-row file that exhausts memory.
     cat_cols = [c for c in chunks[0].columns if isinstance(chunks[0][c].dtype, pd.CategoricalDtype)]
     other_cols = [c for c in chunks[0].columns if c not in cat_cols]
 
@@ -1064,13 +1050,10 @@ def domain_frequency(df, label, top_n=20):
         breakdown_str = ", ".join(f"{et}: {c}" for et, c in breakdown.items())
         print(f"  {domain:<30s}  {count:3d}  [{breakdown_str}]")
 
-    # Per-species rank (not capped to top_n) for each of these domains, so a
-    # reader can see whether a domain's overall ranking is driven mostly by
-    # one species or is fairly common to both - '-' if it doesn't occur for
-    # that species at all. Only meaningful with 2+ species actually present
-    # (skipped for IOE, which has no specie column, and for an
-    # already-species-filtered df like "Hadas Human", where every row is
-    # already that one species and a rank-comparison is meaningless).
+    # Per-species rank, uncapped, so a reader can tell whether a domain's
+    # overall ranking comes from one species or both; '-' where it does not
+    # occur. Needs 2+ species present, so it is skipped for a frame with no
+    # specie column or one already filtered to a single species.
     species_ranks = None
     if "specie" in domain_df.columns:
         species_present = sorted(s for s in domain_df["specie"].dropna().unique() if s)
@@ -1116,13 +1099,10 @@ def domain_frequency(df, label, top_n=20):
     ax.legend(loc="lower right", fontsize=8)
 
     if species_ranks:
-        # x in axes-fraction (so negative values land in the left margin,
-        # to the left of x=0 where the plot area / bars start), y in data
-        # coordinates (so rows line up with each domain's bar) - the
-        # standard matplotlib trick for annotating outside the axes proper.
-        # Text color (not a label/legend) carries the human/mouse distinction,
-        # matching COLORS elsewhere in this report - a one-letter header
-        # above each column spells out which is which.
+        # x in axes-fraction so negatives land in the left margin, y in data
+        # coordinates so rows line up with each bar. Colour carries the
+        # human/mouse distinction, matching COLORS, with a one-letter header
+        # over each column.
         trans = ax.get_yaxis_transform()
         col_x = {sp: -0.30 + i * 0.11 for i, sp in enumerate(species_ranks)}
         for sp, x in col_x.items():
@@ -1579,12 +1559,9 @@ def species_comparison(df, label):
     _save_table(pivot, f"species_per_gene_comparison_{label.lower().replace(' ', '_')}.csv",
                 title=f"Per-Gene Comparison — {label}")
 
-    # per-gene plot - one page per fixed-size chunk of genes, each its own
-    # properly-sized figure (not one giant figure needing pixel-based
-    # splitting afterward, which could cut a panel in half depending on
-    # exactly where a page boundary happened to fall in raw pixels, and
-    # didn't guarantee the same panel count on every page). Cap to the top
-    # genes by cluster count; the CSV above always has every gene.
+    # One page per fixed-size chunk of genes, each its own correctly-sized
+    # figure, so no page can cut a panel in half. Capped to the top genes by
+    # cluster count; the CSV above carries every gene.
     max_genes_plotted = 20
     plotted_genes = genes
     if len(genes) > max_genes_plotted:
@@ -1934,11 +1911,9 @@ def event_type_comparison(named_dfs):
     df["event_type"] rows directly would count a cluster's own event type
     once per alternative transcript compared, instead of once for the
     cluster - overweighting clusters with more candidate transcripts.
-    "mixed"/"domain swap" are included as their own bars here too, matching
-    event_distribution()'s categories (this function previously only
-    iterated the single-reason UNANALYZABLE_TYPES/ANALYZED_TYPES lists,
-    which would have silently excluded every mixed/domain-swap cluster from
-    both the counts and the % denominator).
+    "mixed" and "domain swap" get their own bars, matching
+    event_distribution()'s categories, so those clusters count towards both
+    the bars and the % denominator.
     """
     cluster_labels_by_name = {name: _cluster_event_labels(df) for name, df in named_dfs.items()}
 
@@ -2340,10 +2315,9 @@ def _run_pdf_report(runs, pdf_path, title, fetch_domain_descriptions=False, comb
     to back, e.g. Hadas plus its human-only/mouse-only species split.
     `runs` is a list of (label, path, specie_filter) tuples.
 
-    Unlike the old file-based build_pdf_report(), every chart/table is
-    rendered *directly* into the open PdfPages as each analysis runs (see
-    save()/_save_table(), which route to the currently-open PDF instead of
-    OUT_DIR while it's set as _ACTIVE_PDF) - no intermediate PNG/CSV files
+    Every chart and table is rendered directly into the open PdfPages as each
+    analysis runs: save()/_save_table() route to the currently-open PDF rather
+    than OUT_DIR while it is set as _ACTIVE_PDF, so no intermediate PNG/CSV files
     for any of it, except tables too large for the PDF's row cap (see
     _save_table), which still get a full CSV alongside the PDF.
 

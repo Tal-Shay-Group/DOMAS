@@ -655,8 +655,7 @@ class GeneVisualization:
 
         Delegates to utils.find_matching_junction_indices, the same predicate the
         analysis uses, so the visualization and the analysis cannot disagree about
-        which features are mapped. This function previously carried its own copy of
-        the adjacency logic, kept in step by hand.
+        which features are mapped.
 
         A feature carrying utils.FEATURE_RETAINED_INTRON is matched by containment
         (one exon spanning the intron) rather than by adjacency, so a retained-intron

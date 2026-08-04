@@ -9,7 +9,7 @@ logging.basicConfig(level=logging.WARNING, format='%(levelname)s:%(message)s')
 dochap_path = '/Users/arielmelchior/Documents/projects/DOMAS/DB_merged.sqlite'
 con = sqlite3.connect(dochap_path)
 
-# Patch find_relevant_domain_windows to print for DOCK8
+# Wrap the window finder so every call prints the domains it selected.
 _orig_frw = ja.find_relevant_domain_windows
 
 def _debug_frw(transcript_exons, domain_lookup, canonical_transcript_id, transcript_id,
@@ -18,8 +18,6 @@ def _debug_frw(transcript_exons, domain_lookup, canonical_transcript_id, transcr
         transcript_exons, domain_lookup, canonical_transcript_id, transcript_id,
         canonical_junctions, transcript_junctions, junctions
     )
-    # We'll detect DOCK8 by checking if the transcript IDs belong to DOCK8
-    # (we check the domain data for clues, or just always print)
     print(f"\n=== find_relevant_domain_windows: canonical={canonical_transcript_id}, transcript={transcript_id} ===")
     print(f"  canonical junctions: {[junctions[i] for i in canonical_junctions]}")
     print(f"  transcript junctions: {[junctions[i] for i in transcript_junctions]}")
@@ -37,7 +35,7 @@ def _debug_frw(transcript_exons, domain_lookup, canonical_transcript_id, transcr
 
 ja.find_relevant_domain_windows = _debug_frw
 
-# Run only for DOCK8
+# Only DOCK8's junctions are analysed.
 input_file = '/Users/arielmelchior/Documents/projects/DOMAS/hadas_prefered.xlsx'
 df_junctions = alternative_splicing.hadas_read_input_file(con, input_file)
 df_dock8 = df_junctions[df_junctions['gene_symbol'] == 'DOCK8']

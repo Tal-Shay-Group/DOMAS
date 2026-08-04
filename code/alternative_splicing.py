@@ -460,15 +460,12 @@ def hadas_read_input_file(con, input_path):
 
 
 # --- LeafCutter differential-splicing output readers -------------------------
-# The two files are the standard leafcutter_ds outputs:
-#   - effect_sizes (leafcutter_ds_effect_sizes.txt): one row per intron, with an
-#     `intron` id of the form chr:start:end:clu_<n>_<strand> and a `deltapsi`
-#     column.
-#   - significance (leafcutter_ds_cluster_significance.txt): one row per cluster,
-#     with a `cluster` id of the form chr:clu_<n>_<strand>, a `genes` column and
-#     `p.adjust`.
-# We reshape them into the same per-junction schema hadas_read_input_file() /
-# ioe2junctions() produce, so the frame flows straight into analyze_junctions().
+# The two standard leafcutter_ds outputs, reshaped into the per-junction schema
+# the other readers produce:
+#   - leafcutter_ds_effect_sizes.txt: one row per intron, keyed by an `intron`
+#     id of the form chr:start:end:clu_<n>_<strand>.
+#   - leafcutter_ds_cluster_significance.txt: one row per cluster, keyed by
+#     chr:clu_<n>_<strand>, carrying the `genes` column.
 
 # Maps the specie label carried on the junctions (matching the hadas convention:
 # 'human'/'mouse') to the DoChaP Genes.specie value used for symbol lookups.
@@ -494,10 +491,9 @@ def _split_leafcutter_intron(intron):
 def _leafcutter_gene_symbols(genes):
     """The gene symbols a leafcutter_ds significance row names, as a list.
 
-    An unannotated cluster gives []. Previously this went through
-    `str(genes).split(',')`, which turns a missing value into the *string* 'nan' -
-    so those clusters carried gene_symbol="nan" all the way into the output CSV
-    instead of an empty cell.
+    An unannotated cluster gives []. The missing-value check matters: str() on a
+    missing value yields the string 'nan', which would reach the output CSV as a
+    gene symbol.
     """
     if genes is None or (not isinstance(genes, str) and pd.isna(genes)):
         return []
@@ -560,14 +556,11 @@ def leafcutter_read_input_files(con, significance_file, effect_sizes_file, speci
 
     # cluster -> the gene symbols the significance file names for it.
     #
-    # LeafCutter builds intron clusters annotation-free and only then annotates
-    # each with whichever genes it overlaps, so a cluster can name several -
-    # readthrough loci, tandem paralogues, a lncRNA over a coding gene. 6.6% of
-    # clusters in a real run name more than one, up to nine. The cluster is
-    # analysed once per named gene, so a domain change in any of them is reported
-    # and a name absent from DoChaP does not cost the others. The identifier
-    # carries the symbol only where there is more than one name, leaving the far
-    # commoner single-gene id plain.
+    # LeafCutter clusters introns annotation-free and only then names the genes
+    # each overlaps, so a cluster can name several - 6.6% of clusters in a real
+    # run do, up to nine. Each is analysed once per named gene, so a change in
+    # any of them is reported and a name absent from DoChaP does not cost the
+    # others. Only a multi-gene cluster carries the symbol in its identifier.
     df_sig['cluster_key'] = df_sig['cluster'].apply(_leafcutter_cluster_key)
     cluster_to_symbols = dict(zip(df_sig['cluster_key'],
                                   df_sig['genes'].apply(_leafcutter_gene_symbols)))
@@ -638,15 +631,6 @@ def create_events_junctions(con, df_events, output_csv):
 
     # Precompute transcript -> exons and transcript -> exon-by-rank maps for O(1) lookup in the loop.
     transcript_to_rows = {}
-    #for pos, exon_row in enumerate(df_exons.itertuples(index=False)):
-    #    t_ens = exon_row.transcript_ensembl_id
-    #    t_ref = exon_row.transcript_refseq_id
-    #    if pd.notna(t_ens):
-    #        transcript_to_rows.setdefault(t_ens, []).append(pos)
-    #    if pd.notna(t_ref) and t_ref != t_ens:
-    #        transcript_to_rows.setdefault(t_ref, []).append(pos)
-
-
     df_exons['pos'] = range(len(df_exons))
     df_melted = df_exons.melt(
         id_vars=['pos'], 
@@ -675,21 +659,6 @@ def create_events_junctions(con, df_events, output_csv):
             .apply(lambda x: {row.order_in_transcript: exon_tuples_list[int(row.pos)] for row in x.itertuples(index=False)})
             .to_dict()
     )
-    #transcript_to_rank_map = {
-    #    transcript_id: {ex.order_in_transcript: ex for ex in exons_df.itertuples(index=False)}
-    #    for transcript_id, exons_df in transcript_to_exons.items()
-    #}
-    #transcript_to_max_rank = {
-    #    transcript_id: exons_df['order_in_transcript'].max()
-    #    for transcript_id, exons_df in transcript_to_exons.items()
-    #}
-
-    #transcript_to_gene_id = {}
-    #for tx in df_transcripts.itertuples(index=False):
-    #    if pd.notna(tx.transcript_ensembl_id):
-    #        transcript_to_gene_id[tx.transcript_ensembl_id] = tx.gene_GeneID_id
-    #    if pd.notna(tx.transcript_refseq_id):
-    #       transcript_to_gene_id[tx.transcript_refseq_id] = tx.gene_GeneID_id
     
     df_tx_melted = df_transcripts.melt(
         id_vars=['gene_GeneID_id'],

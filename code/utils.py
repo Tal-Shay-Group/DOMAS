@@ -7,15 +7,13 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-# rMATS-turbo per-event result files (junction-count variant). The JCEC files
-# carry identical coordinates, so JC is enough for DOMAS's coordinate mapping.
+# rMATS-turbo per-event files, junction-count variant. JCEC carries identical
+# coordinates, so JC is enough for DOMAS's coordinate mapping.
 #
-# RI is read again. A retained intron has only one junction - the spliced form -
-# because the retained isoform is defined by that junction's ABSENCE, so the event
-# used to collapse to a single junction and no transcript could hold a feature the
-# canonical one lacked. It is now emitted as two features at the same coordinates,
-# one FEATURE_JUNCTION and one FEATURE_RETAINED_INTRON, which the matcher tells
-# apart (see _rmats_event_feature_types()).
+# An RI record names one junction, the spliced form, because the retaining
+# isoform is defined by that junction's absence. It is emitted as two features at
+# the same coordinates - one FEATURE_JUNCTION, one FEATURE_RETAINED_INTRON - so a
+# transcript can hold a feature the canonical one lacks (_rmats_event_feature_types).
 _RMATS_EVENT_FILES = {
     'SE': 'SE.MATS.JC.txt',
     'A5SS': 'A5SS.MATS.JC.txt',
@@ -28,16 +26,14 @@ _RMATS_EVENT_FILES = {
 # ---------------------------------------------------------------------------
 # Gene identity.
 #
-# DoChaP identifies a gene by gene_ensembl_id OR gene_GeneID_id (the NCBI/RefSeq
-# side). 16,672 of 128,454 genes - 13% - carry ONLY a GeneID, so a lookup keyed on
-# gene_ensembl_id alone silently drops them along with all of their transcripts.
-# Absent ids are stored as NULL, never as an empty string. (The share was highest
-# in D_rerio and X_tropicalis, but it is still 4,515 genes across human, mouse
-# and rat.)
+# DoChaP identifies a gene by gene_ensembl_id OR gene_GeneID_id (the NCBI side).
+# 16,672 of 128,454 genes - 13% - carry only a GeneID, so a lookup keyed on the
+# Ensembl id alone drops them and all of their transcripts. Absent ids are NULL,
+# never an empty string.
 #
 # The junctions frame keeps one 'gene_ensembl_id' column holding whichever id the
-# input supplied; these helpers let a lookup accept either kind, mirroring the
-# transcript_ensembl_id/transcript_refseq_id fallback already used for transcripts.
+# input supplied; these helpers accept either kind, mirroring the
+# transcript_ensembl_id/transcript_refseq_id fallback used for transcripts.
 # ---------------------------------------------------------------------------
 
 GENE_ID_COLUMNS = ('gene_ensembl_id', 'gene_GeneID_id')
@@ -64,14 +60,10 @@ def gene_id_clause(gene_ids):
 # ---------------------------------------------------------------------------
 # The junctions frame: one contract for every reader.
 #
-# Each reader parses a different file, but they all hand back the same frame, and
-# this is where its shape is declared. Previously each reader carried its own
-# column list and the differences were absorbed downstream by a dozen scattered
-# "if 'x' in df.columns" defaults - which is how three of the five formats ended
-# up with no specie column at all (see specie_from_gene_id below).
-#
-# Optional columns are filled with their default at the boundary
-# (normalize_junctions_frame), so code past that point can read them directly.
+# Each reader parses a different file and hands back the same frame, whose shape
+# is declared here. Optional columns are filled with their default at the
+# boundary (normalize_junctions_frame), so code past that point reads them
+# directly.
 # ---------------------------------------------------------------------------
 
 REQUIRED_JUNCTION_COLUMNS = ('gene_ensembl_id', 'start_position', 'end_position', 'cluster_name')
@@ -90,10 +82,9 @@ def _optional_junction_defaults():
         FEATURE_TYPE_COLUMN: FEATURE_JUNCTION,
     }
 
-# The species DOMAS supports, mapping the label carried on the junctions frame to
-# the DoChaP Genes.specie value. Lives here rather than in alternative_splicing.py
-# so that junction_analisys.py can cross-check the stated species against the
-# database without importing it (which would be circular).
+# The species DOMAS supports: the label carried on the junctions frame mapped to
+# the DoChaP Genes.specie value. Lives here so junction_analisys.py can check a
+# stated species against the database without importing alternative_splicing.py.
 SPECIE_DB_NAME = {
     'human': 'H_sapiens',
     'mouse': 'M_musculus',
@@ -104,18 +95,15 @@ SPECIE_DB_NAME = {
 
 SPECIE_FROM_DB_NAME = {db_name: label for label, db_name in SPECIE_DB_NAME.items()}
 
-# zebrafish and frog were dropped for a while, because NCBI publishes no
-# representative-transcript tag (MANE Select or RefSeq Select) for them, so
-# DoChaP can mark a canonical only where Ensembl supplies one - never for a gene
-# held on the RefSeq side alone. That is no longer disqualifying: a gene with no
-# flagged canonical now falls back to its longest-CDS transcript as a stand-in
-# (see ClusterAnalysisResult.analyze_cluster), so such a gene is analysed rather
-# than abandoned.
+# NCBI publishes no representative-transcript tag for zebrafish or frog, so
+# DoChaP marks a canonical for them only where Ensembl supplies one. A gene with
+# none falls back to its longest-CDS transcript (ClusterAnalysisResult._resolve_canonical),
+# which is why both are supported: it affects 17.7% of comparable zebrafish genes
+# and 6.1% of frog ones, against 0.4% for human.
 
 
-# Ensembl stamps the species into its gene ids. Longest-prefix-first is not
-# needed - 'ENSMUSG...' does not start with 'ENSG' - but the order is kept
-# explicit so adding a species cannot silently shadow another.
+# Ensembl stamps the species into its gene ids. The order is explicit so a
+# species added later cannot shadow another by prefix.
 _ENSEMBL_GENE_PREFIX_SPECIE = (
     ('ENSMUSG', 'mouse'),
     ('ENSRNOG', 'rat'),
@@ -266,11 +254,10 @@ def _rmats_event_junctions(event_type, r):
     return []
 
 
-# Columns _rmats_event_junctions() reads, per event type, on top of the common
-# GeneID/geneSymbol/chr/strand. Checked once per file so that a schema change -
-# a renamed column in a future rMATS release - fails loudly on the header instead
-# of raising KeyError on every row and being swallowed row by row, which would
-# silently produce an empty or truncated analysis.
+# Columns _rmats_event_junctions() reads per event type, on top of the common
+# GeneID/geneSymbol/chr/strand. Checked once per file so a renamed column in a
+# future rMATS release fails on the header rather than row by row, where the
+# per-row handler would swallow it into a silently truncated analysis.
 _RMATS_REQUIRED_COLUMNS = {
     'SE': ('upstreamEE', 'exonStart_0base', 'exonEnd', 'downstreamES'),
     'A5SS': ('longExonStart_0base', 'longExonEnd', 'shortES', 'shortEE',
@@ -342,9 +329,9 @@ def rmats2junctions(rmats_dir):
             try:
                 event_junctions = _rmats_event_junctions(event_type, r)
             except (ValueError, TypeError):
-                # A single row with an unparseable coordinate. Counted and reported
-                # below rather than passed over in silence: the columns are known to
-                # exist by now, so this is bad data in one row, not a schema problem.
+                # One row with an unparseable coordinate. The columns are known to
+                # exist by now, so this is bad data, not a schema problem; it is
+                # counted and reported below rather than passed over.
                 malformed += 1
                 continue
             feature_types = _rmats_event_feature_types(event_type)
@@ -411,19 +398,13 @@ def voila2junctions(tsv_path):
             types.append('IR')
         event_type = '+'.join(types) if types else 'LSV'
 
-        # MAJIQ quantifies intron retention as one of the LSV's edges, so the
-        # retained intron appears in 'Junctions coords' too - and 'IR coords'
-        # names which edge it is. That edge is NOT a splice junction: the actual
-        # junction for the same intron is listed separately, either at exactly
-        # (a-1, b+1) - the same intron in the flanking-exon-boundary convention -
-        # or inside a larger junction spanning it (verified over the whole
-        # fixture: 860 and 686 of 1546, none without one).
-        #
-        # So the IR interval is emitted ONCE, as a containment feature. Emitting
-        # it as a junction as well asked the opposite question of it: matched by
-        # adjacency it finds the transcript that splices the intron out, never the
-        # one that retains it, and it merely duplicated the real junction that the
-        # 1bp tolerance already matches.
+        # MAJIQ quantifies retention as one of the LSV's edges, so the retained
+        # intron also appears in 'Junctions coords'; 'IR coords' names which edge
+        # it is. That edge is emitted once, as a containment feature, and its
+        # 'Junctions coords' copy dropped - the spliced junction for the same
+        # intron is listed separately anyway, either at exactly (a-1, b+1) or
+        # inside a larger junction spanning it (860 and 686 of 1,546 over the
+        # fixture, none without either).
         retained_intron_pairs = _parse_coord_pairs(ir_coords) if ir_coords else []
         retained_intron_set = set(retained_intron_pairs)
         event_features = [(pair, FEATURE_JUNCTION)
@@ -494,18 +475,11 @@ def ioe2junctions(file_path):
                                   cluster_name, FEATURE_RETAINED_INTRON])
                 retained_intron_events += 1
         elif event_type == 'SE':
-            # SE:<chr>:<e1>-<s2>:<e2>-<s3> names the two INCLUSION junctions - the
-            # skipped exon to each flanking exon - and leaves the skipping junction
-            # (e1-s3) to be constructed. All three are emitted.
-            #
-            # The second inclusion junction used to be dropped: it supplied only its
-            # right coordinate to the constructed skipping junction and was never
-            # added in its own right, so SUPPA produced 2 junctions where rMATS
-            # produces 3 for the same event (verified across all 51,450 SE clusters
-            # of events_SE_strict.ioe). A transcript carrying only that downstream
-            # junction - an alternative first exon starting inside the skipped exon -
-            # was therefore comparable when the event came from rMATS but not from
-            # SUPPA. See tests/test_cross_format.py.
+            # SE:<chr>:<e1>-<s2>:<e2>-<s3> names the two inclusion junctions -
+            # the skipped exon to each flanking exon - and leaves the skipping
+            # junction (e1-s3) to be constructed. All three are emitted, matching
+            # what rMATS gives for the same event; tests/test_cross_format.py
+            # holds the two readers to that.
             if len(current_junctions) != 2:
                 continue
             upstream_inclusion = current_junctions[0]
@@ -598,10 +572,9 @@ def get_canonical_exon_counts(con, gene_ensembl_ids):
 # ---------------------------------------------------------------------------
 # Event feature <-> exon matching.
 #
-# Lives here so junction_analisys.py and generate_gene_pdf.py can share ONE
+# Lives here so junction_analisys.py and generate_gene_pdf.py share one
 # implementation: junction_analisys imports generate_gene_pdf, so the PDF layer
-# cannot import back from it. The two used to carry separate copies of this
-# predicate, with a comment asking that they be kept in step by hand.
+# cannot import back from it.
 # ---------------------------------------------------------------------------
 
 # An event is a list of features, each a (low, high) genomic coordinate pair
@@ -620,8 +593,7 @@ FEATURE_JUNCTION = 'junction'
 FEATURE_RETAINED_INTRON = 'retained_intron'
 
 # Optional column on the junctions DataFrame carrying the type per row. Absent
-# means every row is a plain junction, so every existing input file and every
-# reader that has not been taught to emit spans keeps working unchanged.
+# means every row is a plain junction, so a frame without the column is valid.
 FEATURE_TYPE_COLUMN = 'feature_type'
 
 
@@ -690,50 +662,41 @@ def find_matching_junction_indices(df_transcript_exons, junctions, strand='+', f
 # ---------------------------------------------------------------------------
 # DoChaP database readers.
 #
-# These live here rather than in alternative_splicing.py so that
-# junction_analisys.py can import them directly: alternative_splicing.py
-# imports junction_analisys, so reaching them from there required a
-# function-local import to dodge the circular dependency.
+# Here rather than in alternative_splicing.py so junction_analisys.py can import
+# them directly: alternative_splicing.py imports junction_analisys, so the
+# dependency only runs one way.
 # ---------------------------------------------------------------------------
 
 def get_exons_for_transcripts(con, transcript_ids):
-    # Define the maximum chunk size (SQLite limit is 999, so 450 is safe since 450 * 2 = 900)
+    # 450 ids per chunk: each is bound twice, and SQLite allows 999 parameters.
     chunk_size = 450
     df_list = []
     
     t_ids = list(transcript_ids)  # Ensure it's a list if it's a different iterable
-    # Loop through the IDs in chunks
     for i in range(0, len(t_ids), chunk_size):
         chunk_ids = t_ids[i:i + chunk_size]
         
-        # Create the correct number of placeholders for this specific chunk
         placeholders = ','.join(['?'] * len(chunk_ids))
         
-        # Construct the query dynamically for the chunk
         query = f'''
             SELECT * FROM Transcript_exon 
             WHERE transcript_ensembl_id IN ({placeholders}) 
             OR transcript_refseq_id IN ({placeholders})
         '''
         
-        # Duplicate the chunk IDs to match the two IN clauses
+        # Once per IN clause.
         params = chunk_ids * 2
         
-        # Execute and append the DataFrame chunk
         df_chunk = pd.read_sql_query(query, con, params=params)
         df_list.append(df_chunk)
 
     if not df_list:
-        # No transcript ids at all, so the chunk loop never ran and there is nothing
-        # to concatenate - pd.concat([]) raises "No objects to concatenate", which
-        # surfaced as an opaque pandas error rather than an empty result. It happens
-        # whenever no event resolves a gene: every LeafCutter cluster unannotated, or
-        # a gene set absent from the database. Returning the table's own empty shape
-        # lets the run finish and report each event's reason (no_gene_specified /
-        # gene_not_in_db) instead of dying.
+        # No transcript ids, so the chunk loop never ran and pd.concat([]) would
+        # raise. Happens whenever no event resolves a gene - every LeafCutter
+        # cluster unannotated, or a gene set absent from the database. Return the
+        # table's empty shape so the run finishes and reports each event's reason.
         return pd.read_sql_query('SELECT * FROM Transcript_exon LIMIT 0', con)
 
-    # Combine all chunks into one final DataFrame
     df_exons = pd.concat(df_list, ignore_index=True)
     return df_exons
 
@@ -751,9 +714,8 @@ def get_genes_df_transcripts(con, gene_ids):
         transcript_refseq_id, gene_ensembl_id, gene_GeneID_id and canonical columns.
     """
     dfs = []
-    # 450, not 500: gene_id_clause() binds each id once per gene id column, so a
-    # batch costs 2 parameters per gene. The same arithmetic as
-    # get_exons_for_transcripts() - 450 * 2 = 900, under SQLite's 999 limit.
+    # 450 per batch: gene_id_clause() binds each id once per gene id column, so
+    # 900 parameters, under SQLite's 999 limit.
     batch_size = 450
     for i in range(0, len(gene_ids), batch_size):
         batch = gene_ids[i:i + batch_size]
@@ -773,7 +735,6 @@ def _read_transcripts_and_proteins(con, transcript_ids):
     df_transcript = df_transcript[df_transcript.transcript_ensembl_id.isin(transcript_ids)]
     df_protein = pd.read_sql_query('select * from Proteins', con)
     df_protein = df_protein[df_protein.transcript_ensembl_id.isin(transcript_ids)]
-    # Drop rows with empty or NaN protein_ensembl_id
     df_protein = df_protein.dropna(subset=['protein_ensembl_id'])
     df_protein = df_protein[df_protein.protein_ensembl_id.str.strip() != '']
     return df_transcript, df_protein
@@ -787,7 +748,6 @@ def get_transcript_domains_db(con, transcript_ids, df_transcript=None, df_protei
     df_domain_event = pd.read_sql_query('select * from DomainEvent', con)
 
     df_domain_event = df_domain_event[df_domain_event.protein_ensembl_id.isin(proteins_ids)]
-    # Drop rows with NaN or empty protein_ensembl_id
     df_domain_event = df_domain_event.dropna(subset=['protein_ensembl_id'])
     df_domain_event = df_domain_event[df_domain_event.protein_ensembl_id.str.strip() != '']
     df_domain_type = pd.read_sql_query('select * from DomainType', con)
@@ -833,11 +793,11 @@ REPRESENTATIVE_DOMAINS_COLUMNS = [
     # either source answers to 'description'.
     'description',
     'CDD_id', 'cdd', 'pfam', 'smart', 'tigr', 'interpro',
-    # domain_id + InterPro entry `type` are carried through so
-    # junction_analisys.filter_representative_domains() can reduce the domain
-    # set by curated type (Domain/Repeat vs Family/Homologous_superfamily)
-    # instead of the geometric collapse heuristic. `type` is NULL for DBs built
-    # before RepresentativeDomains gained the column (filter then no-ops).
+    # domain_id and the InterPro entry `type` are carried through so
+    # junction_analisys.filter_representative_domains() can rank the domain set
+    # by curated type (Domain/Repeat above Family/Homologous_superfamily). `type`
+    # is NULL in DBs whose RepresentativeDomains lacks the column; the filter
+    # then passes the frame through unchanged.
     'domain_id', 'type',
 ]
 
@@ -895,8 +855,7 @@ def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_pr
     if df_rep.empty:
         return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
 
-    # `type` is absent in DBs built before RepresentativeDomains gained the
-    # column; add it as NULL so downstream columns/filtering stay uniform.
+    # Some DBs have no `type` column; add it as NULL to keep the frame uniform.
     if 'type' not in df_rep.columns:
         df_rep['type'] = None
 

@@ -40,13 +40,12 @@ def parse_args():
                          help="Path to the leafcutter_ds_effect_sizes.txt file "
                               "(only used with -format leafcutter)")
     parser.add_argument("-specie", required=False, choices=sorted(alternative_splicing.utils.SPECIE_DB_NAME),
-                         help="Species the input was produced from. Allowed values: "
-                              "human, mouse, rat. Required for every "
-                              "format except internal, which is a human/mouse comparison and "
-                              "carries the species per row. rMATS, MAJIQ and SUPPA files "
-                              "contain no species field at all, so it cannot be read from "
-                              "them. DOMAS aborts if the gene ids turn out to belong to a "
-                              "different species.")
+                         help="Species the input was produced from: human, mouse, rat, "
+                              "zebrafish or frog. Required for every format except internal, "
+                              "which is a human/mouse comparison and carries the species per "
+                              "row. rMATS, MAJIQ and SUPPA files contain no species field, so "
+                              "it cannot be read from them. DOMAS aborts if the gene ids turn "
+                              "out to belong to a different species.")
     parser.add_argument("-dochap", required=False, type=str, help="Path to the DoChaP sqlite db")
     parser.add_argument("-output_csv", type=str, default="junctions_analysis.csv", help="Path to the output csv")
     parser.add_argument("-gene_ids", type=str, default=None,
@@ -103,10 +102,9 @@ def parse_args():
     if not args.format:
         parser.error("-format is required")
 
-    # internal is a human/mouse comparison and states the species per row, so a single
-    # -specie cannot describe it. Every other format needs it stated: three of them
-    # carry no species field, and inferring it from the gene id prefix fails for
-    # genes keyed only by GeneID.
+    # internal states a species per row (it is a human/mouse comparison), so one
+    # -specie cannot describe it. Every other format must state one: three carry
+    # no species field, and a GeneID-keyed gene names none in its id either.
     if args.format == "internal":
         if args.specie:
             parser.error("-specie does not apply to -format internal: that input is a "
@@ -119,8 +117,8 @@ def parse_args():
     if not os.path.exists(args.dochap):
         parser.error(f"DoChaP db not found at {args.dochap}")
 
-    # Reject mixing inputs from different formats: -input (internal/ioe) must not be
-    # combined with the leafcutter -lc_sig/-lc_effect pair. Exit with -1 per spec.
+    # -input (internal/ioe) and the leafcutter -lc_sig/-lc_effect pair name
+    # different formats and cannot be combined.
     input_provided = args.input is not None
     leafcutter_provided = args.lc_sig is not None or args.lc_effect is not None
     if input_provided and leafcutter_provided:
@@ -156,15 +154,9 @@ def parse_args():
 
 
 def main():
-    # junction_analisys.py's JunctionsAnalysis already logs progress every
-    # 10,000 clusters (with an ETA) via self.logger.info(...) - but nothing
-    # in the actual call chain from this CLI ever configured a logging
-    # handler (alternative_splicing.py only does that inside its own
-    # __main__ guard, which doesn't run when it's imported as a module, as
-    # it is here), so every one of those log records was silently dropped:
-    # logging with no handler configured produces no output at all below
-    # WARNING. This is what actually enables that existing progress logging
-    # for a real domas.py run, not new logging of its own.
+    # JunctionsAnalysis logs progress every 10,000 clusters at INFO. Nothing
+    # else in this call chain configures a handler, and an unconfigured logger
+    # drops everything below WARNING, so those records need this to appear.
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     args = parse_args()
