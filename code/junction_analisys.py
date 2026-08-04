@@ -399,12 +399,6 @@ _SAME_ID_OVERLAP = 0.5
 
 
 TIER_PRIMARY, TIER_PARENT, TIER_MEMBER, TIER_SITE = '1', '2', '3', 'S'
-TIER_DESCRIPTIONS = {
-    TIER_PRIMARY: 'InterPro Domain/Repeat',
-    TIER_PARENT: 'InterPro Family/Homologous superfamily',
-    TIER_MEMBER: 'member-DB hit (G3DSA/PTHR/SSF/cd/PF)',
-    TIER_SITE: 'InterPro site/PTM',
-}
 
 
 def domain_entry_tiers(df_domains):
@@ -949,12 +943,57 @@ class ClusterAnalysisResult:
         across the whole cluster when no transcript qualifies.
 
         "Longest CDS" means the coding length in bases, not the genomic span from
-        cds_start to cds_end - see cds_length_by_transcript below.
+        cds_start to cds_end - see _load_exons_and_cds_lengths().
 
         Phase 2/3 - for each transcript with a unique junction, determine the
         relevant genomic window and compare its domains against the canonical
         transcript's, recording one event per domain group.
+
+        Each step below records its own outcome event and reports whether the
+        cluster can go on; the steps run in order and any of the first three can
+        end the analysis.
         """
+        resolved = self._resolve_gene_transcripts(df_gene_transcripts)
+        if resolved is None:
+            return
+        gene_transcript_ids, coding_by_transcript = resolved
+
+        transcript_exons, cds_length_by_transcript = self._load_exons_and_cds_lengths(
+            gene_transcript_ids, exon_lookup)
+
+        if not self._resolve_canonical(gene_transcript_ids, canonical_transcript_ids, canonical_rank,
+                                       coding_by_transcript, cds_length_by_transcript):
+            return
+
+        transcript_junctions, canonical_junctions = self._match_features_to_transcripts(transcript_exons)
+        if canonical_junctions is None:
+            return
+
+        comparable_transcript_ids = self._find_comparable_transcripts(
+            transcript_junctions, canonical_junctions)
+
+        longest_cds_transcript_id, most_like_canonical_transcript_id = self._select_representatives(
+            comparable_transcript_ids, coding_by_transcript, cds_length_by_transcript, transcript_exons)
+
+        # Same priority as selected_comparable_rows() and
+        # results_stats.select_representative_transcript(): most-like-canonical
+        # where one qualifies, else longest-CDS. Applied here rather than at write
+        # time so the domains of the transcripts that would be discarded are never
+        # fetched or compared.
+        if not write_all_comparable:
+            selected = most_like_canonical_transcript_id or longest_cds_transcript_id
+            if selected is not None:
+                comparable_transcript_ids = [selected]
+
+        self._compare_transcripts(
+            comparable_transcript_ids, transcript_junctions, canonical_junctions,
+            transcript_exons, domain_lookup,
+            longest_cds_transcript_id, most_like_canonical_transcript_id)
+
+    def _resolve_gene_transcripts(self, df_gene_transcripts):
+        """The gene's usable transcript ids and which of them are protein-coding,
+        or None when the cluster cannot be analysed at all (the reason is recorded
+        as the cluster's event)."""
         # No gene named for this event at all - distinct from one that was named
         # and not found. LeafCutter builds clusters annotation-free, so a cluster
         # overlapping nothing annotated is an expected outcome; reporting it as
@@ -967,7 +1006,7 @@ class ClusterAnalysisResult:
         if _is_missing_gene_id(self.gene_ensembl_id) and _is_missing_gene_id(self.gene_symbol):
             self.add_event('no_gene_specified')
             logger.debug(f"No gene named for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
-            return
+            return None
 
         # Check if gene exists in the database at all. Done before any column is
         # read, so an absent gene can be signalled with a plain empty frame (or
@@ -975,7 +1014,7 @@ class ClusterAnalysisResult:
         if df_gene_transcripts is None or df_gene_transcripts.empty:
             self.add_event('gene_not_in_db')
             logger.debug(f"Gene {self.gene_ensembl_id} ({self.gene_symbol}) not found in database for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
-            return
+            return None
 
         # Use an order-preserving dedup (not `set`) so the order in which
         # transcripts are processed - and therefore the order of the output
@@ -1015,19 +1054,25 @@ class ClusterAnalysisResult:
         if len(gene_transcript_ids) == 1:
             self.add_event('only_one_transcript')
             logger.debug(f"Only one transcript found for cluster {self.cluster_name}, specie {self.specie}.")
-            return
+            return None
 
+        return gene_transcript_ids, coding_by_transcript
+
+    @staticmethod
+    def _load_exons_and_cds_lengths(gene_transcript_ids, exon_lookup):
+        """Each transcript's exons, and its coding length in bases.
+
+        The length is the largest CDS-relative exon offset. Interior coding exons
+        are wholly coding, so that equals the summed exonic CDS (verified on 4,000
+        coding transcripts). NOT cds_end - cds_start, a genomic span that counts
+        the introns between the first and last coding exon - a median ~10x the
+        coding length, ranking transcripts partly by intron content.
+        """
         transcript_exons = {
             transcript_id: exon_lookup(transcript_id)
             for transcript_id in gene_transcript_ids
         }
 
-        # CDS length per transcript, for the longest-CDS tag below: the coding length
-        # in bases, taken as the largest CDS-relative exon offset. Interior coding
-        # exons are wholly coding, so that equals the summed exonic CDS (verified on
-        # 4,000 coding transcripts). NOT cds_end - cds_start, a genomic span that
-        # counts the introns between the first and last coding exon - a median ~10x
-        # the coding length, ranking transcripts partly by intron content.
         cds_length_by_transcript = {}
         for transcript_id, exons in transcript_exons.items():
             length = -1
@@ -1037,6 +1082,12 @@ class ClusterAnalysisResult:
                     length = largest_offset
             cds_length_by_transcript[transcript_id] = length
 
+        return transcript_exons, cds_length_by_transcript
+
+    def _resolve_canonical(self, gene_transcript_ids, canonical_transcript_ids, canonical_rank,
+                           coding_by_transcript, cds_length_by_transcript):
+        """Set self.canonical_transcript_id. False when the gene has none and none
+        can stand in, the cluster being recorded as no_canonical_transcript."""
         gene_canonical_ids = canonical_transcript_ids.intersection(gene_transcript_ids)
         if not gene_canonical_ids:
             # No transcript of this gene is flagged canonical in DoChaP - common for
@@ -1055,36 +1106,44 @@ class ClusterAnalysisResult:
             if not fallback_candidates:
                 self.add_event('no_canonical_transcript')
                 logger.debug(f"No canonical transcript found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
-                return
+                return False
             self.canonical_transcript_id = select_longest_cds(fallback_candidates, cds_length_by_transcript)
             logger.warning(
                 f"No canonical transcript for cluster {self.cluster_name}, specie {self.specie}. "
                 f"Using the longest-CDS transcript {self.canonical_transcript_id} "
                 f"(CDS {cds_length_by_transcript.get(self.canonical_transcript_id, -1)} bases) instead."
             )
-        else:
-            # A gene can carry more than one canonical transcript, common outside human:
-            # ~4,800 mouse and ~7,100 rat genes have one transcript flagged by RefSeq
-            # (canonical=1) and a different one by Ensembl (canonical=2). Human rarely
-            # does - MANE makes the two agree, merging them into one canonical=3 row.
-            #
-            # Prefer the transcript both sources agree on (3), then Ensembl's (2), then
-            # RefSeq's (1). DoChaP's CanonicalEnum values rank in that order, so the
-            # higher value wins; ties fall to the lowest id, independent of hash order.
-            ranked_ids = sorted(gene_canonical_ids)
-            if canonical_rank:
-                self.canonical_transcript_id = max(
-                    ranked_ids, key=lambda tid: canonical_rank.get(tid, 0))
-            else:
-                self.canonical_transcript_id = ranked_ids[0]
-            if len(gene_canonical_ids) > 1:
-                logger.warning(
-                    f"Multiple canonical transcripts found for cluster {self.cluster_name}, "
-                    f"specie {self.specie}: "
-                    f"{ {tid: canonical_rank.get(tid) for tid in ranked_ids} if canonical_rank else ranked_ids}. "
-                    f"Using {self.canonical_transcript_id} (highest canonical flag, then lowest id)."
-                )
+            return True
 
+        # A gene can carry more than one canonical transcript, common outside human:
+        # ~4,800 mouse and ~7,100 rat genes have one transcript flagged by RefSeq
+        # (canonical=1) and a different one by Ensembl (canonical=2). Human rarely
+        # does - MANE makes the two agree, merging them into one canonical=3 row.
+        #
+        # Prefer the transcript both sources agree on (3), then Ensembl's (2), then
+        # RefSeq's (1). DoChaP's CanonicalEnum values rank in that order, so the
+        # higher value wins; ties fall to the lowest id, independent of hash order.
+        ranked_ids = sorted(gene_canonical_ids)
+        if canonical_rank:
+            self.canonical_transcript_id = max(
+                ranked_ids, key=lambda tid: canonical_rank.get(tid, 0))
+        else:
+            self.canonical_transcript_id = ranked_ids[0]
+        if len(gene_canonical_ids) > 1:
+            logger.warning(
+                f"Multiple canonical transcripts found for cluster {self.cluster_name}, "
+                f"specie {self.specie}: "
+                f"{ {tid: canonical_rank.get(tid) for tid in ranked_ids} if canonical_rank else ranked_ids}. "
+                f"Using {self.canonical_transcript_id} (highest canonical flag, then lowest id)."
+            )
+        return True
+
+    def _match_features_to_transcripts(self, transcript_exons):
+        """Which of the event's features each transcript carries, and which of them
+        the canonical transcript carries. Features matching no transcript at all are
+        recorded as feature_not_mapped. The canonical set is None - ending the
+        analysis - when the canonical transcript carries none of them.
+        """
         transcript_junctions = {
             transcript_id: find_matching_junction_indices(exons, self.junctions, strand=self.strand or '+',
                                                           feature_types=self.feature_types)
@@ -1100,8 +1159,14 @@ class ClusterAnalysisResult:
         if not canonical_junctions:
             self.add_event('no_canonical_features')
             logger.debug(f"No canonical junctions found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
-            return
+            return transcript_junctions, None
 
+        return transcript_junctions, canonical_junctions
+
+    def _find_comparable_transcripts(self, transcript_junctions, canonical_junctions):
+        """The transcripts carrying at least one feature the canonical one lacks.
+        The rest are recorded as carrying no feature of the event, or none unique
+        to them."""
         comparable_transcript_ids = []
         for transcript_id, junction_idxs in transcript_junctions.items():
             if transcript_id == self.canonical_transcript_id:
@@ -1121,38 +1186,39 @@ class ClusterAnalysisResult:
                 continue
 
             comparable_transcript_ids.append(transcript_id)
+        return comparable_transcript_ids
 
-        # Which transcript the selection rule picks. Under write_all_comparable it
-        # only tags the rows; otherwise it also decides which single transcript is
-        # compared at all, so the work for the rest is never done.
-        longest_cds_transcript_id = None
-        most_like_canonical_transcript_id = None
-        if comparable_transcript_ids:
-            # Step 1 of the priority: prefer protein-coding candidates. A priority,
-            # not a hard filter - where no candidate is coding they all tie here and
-            # selection falls through to the structural and length steps, so a
-            # cluster still resolves to one transcript rather than none.
-            coding_candidates = [tid for tid in comparable_transcript_ids
-                                 if coding_by_transcript.get(tid, True)]
-            selection_candidates = coding_candidates or comparable_transcript_ids
+    def _select_representatives(self, comparable_transcript_ids, coding_by_transcript,
+                                cds_length_by_transcript, transcript_exons):
+        """(longest_cds, most_like_canonical) - which transcript each rule picks, or
+        None where it picks nothing. Under write_all_comparable these only tag the
+        rows; otherwise they also decide which single transcript is compared at all,
+        so the work for the rest is never done."""
+        if not comparable_transcript_ids:
+            return None, None
 
-            longest_cds_transcript_id = select_longest_cds(
-                selection_candidates, cds_length_by_transcript)
-            most_like_canonical_transcript_id = select_most_like_canonical(
-                selection_candidates, self.canonical_transcript_id, transcript_exons,
-                self.junctions, cds_length_by_transcript,
-            )
+        # Step 1 of the priority: prefer protein-coding candidates. A priority,
+        # not a hard filter - where no candidate is coding they all tie here and
+        # selection falls through to the structural and length steps, so a
+        # cluster still resolves to one transcript rather than none.
+        coding_candidates = [tid for tid in comparable_transcript_ids
+                             if coding_by_transcript.get(tid, True)]
+        selection_candidates = coding_candidates or comparable_transcript_ids
 
-        # Same priority as selected_comparable_rows() and
-        # results_stats.select_representative_transcript(): most-like-canonical
-        # where one qualifies, else longest-CDS. Applied here rather than at write
-        # time so the domains of the transcripts that would be discarded are never
-        # fetched or compared.
-        if not write_all_comparable:
-            selected = most_like_canonical_transcript_id or longest_cds_transcript_id
-            if selected is not None:
-                comparable_transcript_ids = [selected]
+        longest_cds_transcript_id = select_longest_cds(
+            selection_candidates, cds_length_by_transcript)
+        most_like_canonical_transcript_id = select_most_like_canonical(
+            selection_candidates, self.canonical_transcript_id, transcript_exons,
+            self.junctions, cds_length_by_transcript,
+        )
+        return longest_cds_transcript_id, most_like_canonical_transcript_id
 
+    def _compare_transcripts(self, comparable_transcript_ids, transcript_junctions,
+                             canonical_junctions, transcript_exons, domain_lookup,
+                             longest_cds_transcript_id, most_like_canonical_transcript_id):
+        """Compare each transcript's domains against the canonical transcript's,
+        recording one event per domain group - or no_domains_in_region where the
+        comparison happened but neither side has a domain there."""
         for transcript_id in comparable_transcript_ids:
             junction_idxs = transcript_junctions[transcript_id]
             is_longest_cds = transcript_id == longest_cds_transcript_id
