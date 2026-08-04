@@ -1,7 +1,6 @@
 """Debug script: run the normal pipeline but print domain-window details for DOCK8."""
 import logging
 import sqlite3
-import pandas as pd
 import junction_analisys as ja
 import alternative_splicing
 

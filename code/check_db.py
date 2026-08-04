@@ -485,11 +485,6 @@ def _fetch_ensembl_gene(session, gene_ensembl_id):
     return session.get_json(url)
 
 
-def _fetch_ensembl_transcript(session, transcript_ensembl_id):
-    """Look up a transcript (with exons/translation) on the Ensembl REST API."""
-    base_id = transcript_ensembl_id.split('.')[0]
-    url = f"https://rest.ensembl.org/lookup/id/{base_id}?expand=1;content-type=application/json"
-    return session.get_json(url)
 
 
 def _fetch_ncbi_gene_summary(session, gene_id, api_key=None, email=None):

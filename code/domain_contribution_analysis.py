@@ -22,8 +22,6 @@ SOURCE_COLUMNS = ['interpro', 'pfam', 'cdd', 'smart', 'tigr', 'CDD_id']
 PREFIX_PRIORITY = ['IPR', 'pfam', 'cd', 'smart', 'tigr', 'CDD']
 
 
-def _first_id(value):
-    return str(value).split(';')[0].strip()
 
 
 def source_presence(df, cols=SOURCE_COLUMNS):

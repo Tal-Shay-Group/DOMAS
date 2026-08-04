@@ -2,13 +2,11 @@ import glob
 import logging
 import os
 import re
-import sys
 import sqlite3
 from unittest import case
 import pandas as pd
 import numpy as np
 
-from generate_gene_pdf import GeneVisualization
 from junction_analisys import JunctionsAnalysis
 import utils
 
@@ -158,8 +156,6 @@ def check_alt_prime(gene_id, df_e1, df_e2, strand, prime=3, results=None):
 def check_overlap(start1, end1, start2, end2):
     return (start1 <= end2) and (start2 <= end1)
 
-def check_contain(start1, end1, start2, end2):
-    return (start1 <= start2) and (end1 >= end2)
 
 def check_skip_exon(gene_id, df_e1, df_e2, results):
     actual_check_skip_exon(gene_id, df_e1, df_e2, results)
@@ -395,16 +391,6 @@ def get_all_as_events(con, max_transcripts_per_gene=-1):
     df_results = pd.DataFrame(all_results)
     df_results.to_csv('all_as_events.csv', index=False)
 
-def find_clusters_with_n_transcripts(con, input_file, output_file, n=3):
-    # get number of transcripts for each gene
-    df_t = pd.read_sql_query(f'select * from transcripts', con)
-    gene_count = df_t.value_counts('gene_GeneID_id')
-    df_t['gene_count'] = df_t['gene_GeneID_id'].map(gene_count)
-    ids_n = df_t[df_t['gene_count'] == n].gene_ensembl_id.unique().tolist()
-    # get genes from clusters
-    df_junctions = hadas_read_input_file(con, input_file)
-    df_junctions_n = df_junctions[df_junctions['gene_ensembl_id'].isin(ids_n)]
-    analyze_junctions(con, df_junctions=df_junctions_n, output_path=output_file)
 
 def get_df_junction_columns():
     columns =['chromosome', 'start_position', 'end_position', 'gene_symbol', 'gene_ensembl_id', 'cluster_name']

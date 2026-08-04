@@ -2054,8 +2054,6 @@ def compare_files(named_dfs):
 # PDF bundling - every PNG/CSV analyze_file() wrote for a label, in one file
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _label_slug(label):
-    return label.lower().replace(" ", "_")
 
 
 def _pdf_title_page(pdf, text, fontsize=20):
@@ -2236,12 +2234,6 @@ def _wrap_cell(value, width):
     return "\n".join(textwrap.wrap(text, width=width)) or text
 
 
-def _pdf_csv_pages(pdf, csv_path, max_lines_per_page=45, table_char_width=150, max_rows=300):
-    """Read `csv_path` and render it via _pdf_csv_pages_from_df - see that function for the actual rendering."""
-    df_full = pd.read_csv(csv_path)
-    _pdf_csv_pages_from_df(pdf, df_full, os.path.basename(csv_path),
-                            max_lines_per_page=max_lines_per_page, table_char_width=table_char_width,
-                            max_rows=max_rows)
 
 
 def _pdf_csv_pages_from_df(pdf, df_full, name, max_lines_per_page=45, table_char_width=150, max_rows=300):

@@ -4,10 +4,9 @@ This module creates PDF reports showing gene transcripts with exons and protein 
 """
 
 import matplotlib.pyplot as plt
-from matplotlib.patches import Ellipse, Rectangle, FancyBboxPatch
+from matplotlib.patches import Ellipse, Rectangle
 from matplotlib.collections import PatchCollection
 from matplotlib.gridspec import GridSpec
-import matplotlib.patches as mpatches
 import matplotlib.patheffects as mpe
 import numpy as np
 import pandas as pd
@@ -478,15 +477,6 @@ class GeneVisualization:
         """Format number with commas."""
         return f"{int(num):,}"
 
-    def _format_axis_number(self, num):
-        """Format axis numbers compactly to save vertical space on genomic scales."""
-        value = float(num)
-        abs_value = abs(value)
-        if abs_value >= 1_000_000:
-            return f"{value / 1_000_000:.4g}M"
-        if abs_value >= 1_000:
-            return f"{value / 1_000:.4g}K"
-        return str(int(round(value)))
 
     def _is_negative_strand(self):
         """Return True when gene strand indicates reverse genomic orientation."""
@@ -1403,32 +1393,6 @@ class GeneVisualization:
             matched_junctions = self._get_matching_junctions(transcript, normalized)
             self._draw_genomic_junctions(ax, matched_junctions, exon_y, exon_height)
 
-    def _draw_transcript_view(self, ax, transcript, max_protein_length):
-        """Draw the transcript/protein rectangle view above the domain view."""
-        ax.set_xlim(0, max_protein_length)
-        ax.set_ylim(0, 1)
-        ax.set_yticks([])
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_visible(False)
-        ax.spines['bottom'].set_visible(False)
-        ax.set_xticks([])
-
-        coding_segments = self._get_coding_exon_segments(transcript)
-        rect_y = 0.5
-        rect_height = 0.38
-
-        for segment in coding_segments:
-            rect = Rectangle(
-            (segment['start_aa'], rect_y - rect_height / 2),
-            segment['end_aa'] - segment['start_aa'],
-                rect_height,
-                facecolor=segment['color'],
-                edgecolor='black',
-                linewidth=1.0,
-                zorder=2,
-            )
-            ax.add_patch(rect)
     
     def domain_ladder_marks(self, transcript):
         """`{row key: (tier, was_kept)}` for `transcript`'s domains, or None when the
