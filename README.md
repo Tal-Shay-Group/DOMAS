@@ -79,7 +79,7 @@ python3 code/domas.py -format hadas -input <comparative_splicing.xlsx> -dochap <
 | `-gene_ids` | Comma-separated gene symbols to generate PDFs for (only with `-format hadas` and `-pdf`). |
 | `-num_workers` | Number of parallel worker processes (default: the machine's CPU count). |
 | `-max_clusters` | If > 0, analyze only the first N clusters (sorted). 0 (default) means no limit. |
-| `-stats_out_dir` | Directory for the stats report (default: alongside `-output_csv`). |
+| `-stats_out_dir` | Directory for the `-stats` report (default: alongside `-output_csv`). |
 
 ### Optional behaviour flags
 
@@ -89,7 +89,7 @@ The defaults are what a normal run wants; each flag turns one of them off.
 | :---- | :---- |
 | `-pdf` | Generate a per-gene PDF. Off by default — a full-scale run would otherwise produce one PDF per gene. Only honored with `-format hadas`. |
 | `-no_representative_domains` | Use `DomainEvent`/`DomainType` only. By default domains come from the `RepresentativeDomains` table where available, falling back per protein. |
-| `-no_stats` | Skip the statistics report (event distribution, domain frequency, etc.) that is otherwise generated for `-output_csv` after the run. |
+| `-stats` | Also generate the statistics report (event distribution, domain frequency, etc.) for `-output_csv` after the run. Off by default. |
 | `-keep_non_comparable` | Keep rows for non-comparable transcripts (`gene_not_in_db`, `junction_not_mapped`, `no_unique_junctions`, …). By default the output CSV holds only transcripts actually compared to the canonical transcript. |
 
 ### A note on rMATS event types
@@ -111,8 +111,8 @@ DoChaP database is not in this repository, so pass its path:
 ```
 
 `output_dir` defaults to `./run_examples_output`, and each format writes `<format>.csv`
-there alongside the statistics report DOMAS produces by default. The whole set takes
-about two minutes.
+there. DOMAS creates the directory if it does not exist. The whole set takes about two
+minutes; add `-stats` to a command to get the statistics report as well.
 
 The script is four `domas.py` command lines, one per format — copy the one you need and
 swap in your own input.

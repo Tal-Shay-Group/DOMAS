@@ -73,12 +73,14 @@ def parse_args():
                               "the ioe path never generates PDFs regardless of this flag). "
                               "Off by default: a full-scale internal run would otherwise "
                               "produce a PDF per gene.")
-    parser.add_argument("-no_stats", action="store_true",
-                         help="Skip the results_stats.py report. By default the report "
-                              "(event distribution, domain frequency, etc.) is generated "
-                              "for the produced -output_csv after the run.")
+    parser.add_argument("-stats", action="store_true",
+                         help="Generate the results_stats.py report (event distribution, "
+                              "domain frequency, etc.) for the produced -output_csv after "
+                              "the run. Off by default: the report is a separate set of "
+                              "figures and tables, and takes longer than the analysis on a "
+                              "large result.")
     parser.add_argument("-stats_out_dir", type=str, default=None,
-                         help="Directory for the stats report (default: same "
+                         help="Directory for the -stats report (default: same "
                               "directory as -output_csv)")
     parser.add_argument("-max_clusters", type=int, default=0,
                          help="If > 0, analyze only the first N clusters (sorted). Caps the "
@@ -161,6 +163,12 @@ def main():
 
     args = parse_args()
 
+    # -output_csv may name a directory that does not exist yet; the analysis
+    # writes straight to that path, so create it before the run rather than
+    # failing at the end with the results already computed.
+    output_dir = os.path.dirname(os.path.abspath(args.output_csv))
+    os.makedirs(output_dir, exist_ok=True)
+
     con = sqlite3.connect(args.dochap)
     try:
         if args.format == "leafcutter":
@@ -212,7 +220,7 @@ def main():
     finally:
         con.close()
 
-    if not args.no_stats:
+    if args.stats:
         import results_stats
         stats_out_dir = args.stats_out_dir or os.path.dirname(os.path.abspath(args.output_csv))
         if args.format == "internal":
