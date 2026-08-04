@@ -303,11 +303,24 @@ _UNUSED_COLS = {
 }
 
 
+# The AS types the rMATS and SUPPA readers put in front of a constructed cluster
+# name ({TYPE}_{gene}_{chr}_{n}). LeafCutter names clusters chr:clu_<n> and MAJIQ
+# uses the LSV id, neither of which carries a type.
+_AS_TYPE_PREFIXES = frozenset({
+    'SE', 'A3', 'A5', 'MX', 'RI', 'AF', 'AL',      # SUPPA
+    'A5SS', 'A3SS', 'MXE',                          # rMATS
+})
+
+
 def _cluster_prefix(c):
-    """Reduce a cluster id to its AS-type prefix (e.g. 'A3_ENSG...' -> 'A3')."""
-    if not c or c.startswith("chr"):
+    """The cluster id's AS-type prefix ('A3_ENSG...' -> 'A3'), or '' where the
+    name carries no type. Matching the known set matters: a MAJIQ LSV id has no
+    underscore, so returning its first token would make every cluster its own
+    AS type."""
+    if not c:
         return ""
-    return c.split("_")[0]
+    prefix = str(c).split("_")[0]
+    return prefix if prefix in _AS_TYPE_PREFIXES else ""
 
 
 def _read_results_csv(path, chunk_rows=1_000_000):
