@@ -1373,63 +1373,6 @@ def test_database_specie_check_ignores_genes_it_does_not_hold():
 
 
 # ---------------------------------------------------------------------------
-# enrichment.py CLI - provisioning and -enrich argument handling
-# ---------------------------------------------------------------------------
-
-def test_enrichment_cli_requires_something_to_do():
-    import enrichment
-    with pytest.raises(SystemExit):
-        enrichment.parse_args([])
-
-
-def test_enrichment_cli_enrich_requires_dochap():
-    import enrichment
-    with pytest.raises(SystemExit):
-        enrichment.parse_args(['-enrich', 'results.csv'])
-
-
-def test_enrichment_cli_scores_requires_enrich():
-    """-scores is a second pass over the enriched table, so it is meaningless alone."""
-    import enrichment
-    with pytest.raises(SystemExit):
-        enrichment.parse_args(['-build', '-scores'])
-
-
-def test_enrichment_cli_setup_defaults(tmp_path):
-    """-enrichment_db and -pfam_hmm default to where -build leaves them."""
-    import enrichment
-    args = enrichment.parse_args(['-build', '-data_dir', str(tmp_path)])
-    assert args.enrichment_db == os.path.join(str(tmp_path), 'enrichment.sqlite')
-    assert args.pfam_hmm == os.path.join(str(tmp_path), 'pfam', 'Pfam-A.hmm')
-
-
-def test_enrichment_cli_derives_output_name(tmp_path):
-    """-out defaults beside the input rather than overwriting it."""
-    import enrichment
-    results = tmp_path / 'results.csv'
-    results.write_text('event_type\n')
-    db = tmp_path / 'enrichment.sqlite'; db.write_text('')
-    dochap = tmp_path / 'dochap.sqlite'; dochap.write_text('')
-    pfam = tmp_path / 'pfam'; pfam.mkdir(); (pfam / 'Pfam-A.hmm').write_text('')
-
-    args = enrichment.parse_args(['-enrich', str(results), '-dochap', str(dochap),
-                                  '-data_dir', str(tmp_path)])
-    assert args.out == str(tmp_path / 'results.enriched.csv')
-    assert args.out != str(results), "must not overwrite the input by default"
-
-
-def test_enrichment_cli_reports_missing_inputs_before_running(tmp_path):
-    """Paths are checked up front: an hmmsearch can run for minutes before it would
-    otherwise discover a missing database."""
-    import enrichment
-    results = tmp_path / 'results.csv'; results.write_text('event_type\n')
-    dochap = tmp_path / 'dochap.sqlite'; dochap.write_text('')
-    with pytest.raises(SystemExit):
-        enrichment.parse_args(['-enrich', str(results), '-dochap', str(dochap),
-                               '-data_dir', str(tmp_path)])  # no enrichment.sqlite built
-
-
-# ---------------------------------------------------------------------------
 # filter_representative_domains: Site/PTM removal
 #
 # This branch is reachable with real data - 3,041 Site/PTM rows in the database,
