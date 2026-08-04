@@ -59,6 +59,10 @@ RMATS_SUBSET_CLUSTERS = LEAFCUTTER_SUBSET_CLUSTERS
 
 MAJIQ_TSV = os.path.join(TESTS_DIR, 'majiq', 'NveB_Mono_voila.txt')
 
+# 20 events per SUPPA event type, each on a human gene DoChaP holds with more than
+# one transcript, so they reach a real comparison instead of only_one_transcript.
+IOE_DIR = os.path.join(TESTS_DIR, 'ioe')
+
 # Mirrors JunctionsAnalysis._SKIPPED_TRANSCRIPT_EVENTS plus the cluster-level
 # events that carry no real transcript id.
 _SKIPPED_EVENTS = {
@@ -639,6 +643,50 @@ def test_majiq_subset_compare_against_reference(con, keep_test_output):
 
     generated_csv = _run_majiq_case_to_dir(con, output_dir, subset=RMATS_SUBSET_CLUSTERS)
     assert os.path.getsize(generated_csv) > 0, "Results CSV should not be empty"
+
+    _compare_or_create_reference(generated_csv, reference_csv)
+
+    if not keep_test_output:
+        shutil.rmtree(output_dir)
+
+
+def _run_ioe_case_to_dir(con, case_dir):
+    """Run the SUPPA reader over tests/ioe (representative domains, no PDFs),
+    writing results.csv into a freshly-created case_dir."""
+    if os.path.exists(case_dir):
+        shutil.rmtree(case_dir)
+    os.makedirs(case_dir)
+
+    import alternative_splicing
+
+    output_path = os.path.join(case_dir, 'results.csv')
+    alternative_splicing.analyze_ioe_files(
+        con, input_path=IOE_DIR, pattern=r"output_prefix_.*_strict\.ioe",
+        output_csv=output_path, specie='human', examples_per_event=0,
+        num_workers=1, use_representative_domains=True,
+        write_all_comparable=True,
+    )
+    return output_path
+
+
+def test_ioe_directory_compare_against_reference(con, keep_test_output):
+    """Default (fast) SUPPA golden test over tests/ioe: 20 events per event type
+    (A3, A5, AF, AL, MX, RI, SE), each on a gene DoChaP holds with more than one
+    transcript, so the events reach a real domain comparison. Covers the reader's
+    per-type coordinate handling - the constructed SE skipping junction and the
+    RI junction/retained-intron pair among them - which the single-file fixtures
+    do not. Bootstraps its reference on first run."""
+    case_name = 'ioe_directory__representative_True'
+    output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
+    reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
+
+    generated_csv = _run_ioe_case_to_dir(con, output_dir)
+    assert os.path.getsize(generated_csv) > 0, "Results CSV should not be empty"
+
+    df = pd.read_csv(generated_csv)
+    types = {c.split('_', 1)[0] for c in df['cluster']}
+    assert types == {'A3', 'A5', 'AF', 'AL', 'MX', 'RI', 'SE'}, (
+        f"Expected every SUPPA event type to survive to the output, got {sorted(types)}")
 
     _compare_or_create_reference(generated_csv, reference_csv)
 
