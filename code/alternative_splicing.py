@@ -516,6 +516,58 @@ def _leafcutter_cluster_key(cluster):
     return f'{chromosome}:{clu_no_strand}'
 
 
+def _leafcutter_attach_genes(con, df, cluster_to_symbols, specie):
+    """Attach the gene annotation to a per-junction frame keyed by cluster_name,
+    given the gene symbols each cluster names.
+
+    LeafCutter clusters introns annotation-free and only then names the genes each
+    overlaps, so a cluster can name several - 6.6% of clusters in a real run do, up
+    to nine. Each is analysed once per named gene, so a change in any of them is
+    reported and a name absent from DoChaP does not cost the others. Only a
+    multi-gene cluster carries the symbol in its identifier.
+
+    Shared by the two LeafCutter-shaped readers: the pair of leafcutter_ds files
+    and the internal2 Excel export of the same results.
+    """
+    df = df.copy()
+    df['gene_symbols'] = df['cluster_name'].map(cluster_to_symbols)
+    # A cluster naming no gene keeps one row with a missing symbol - it is a real
+    # LeafCutter outcome (a novel cluster overlapping nothing annotated), not bad
+    # input, and is labelled no_gene_specified downstream rather than dropped.
+    df['gene_symbols'] = df['gene_symbols'].apply(lambda s: s if isinstance(s, list) and s else [None])
+    df = df.explode('gene_symbols', ignore_index=True)
+    df = df.rename(columns={'gene_symbols': 'gene_symbol'})
+
+    multi_gene_clusters = {key for key, symbols in cluster_to_symbols.items() if len(symbols) > 1}
+    is_multi = df['cluster_name'].isin(multi_gene_clusters)
+    df.loc[is_multi, 'cluster_name'] = (df.loc[is_multi, 'cluster_name']
+                                        + ':' + df.loc[is_multi, 'gene_symbol'].astype(str))
+
+    # resolve gene symbol -> gene_ensembl_id via the DoChaP Genes table.
+    # The same symbol exists across species in the DB (e.g. USP16 -> human,
+    # mouse, rat, ...), so the lookup must be restricted to this input's species.
+    db_specie = _SPECIE_DB_NAME.get(specie, specie)
+    symbols = [s for s in df['gene_symbol'].dropna().unique().tolist()
+               if s and str(s).lower() not in ('nan', 'na', '.')]
+    symbol_to_ensembl = {}
+    if symbols:
+        placeholders = ','.join(['?'] * len(symbols))
+        # gene_GeneID_id is selected as a fallback: 13% of DoChaP genes carry no
+        # gene_ensembl_id, and resolving a symbol to that column alone yields NaN,
+        # dropping the gene before analysis (see utils.combined_gene_ids).
+        query = (f"SELECT gene_ensembl_id, gene_GeneID_id, gene_symbol FROM Genes "
+                 f"WHERE specie = ? AND UPPER(gene_symbol) IN ({placeholders})")
+        df_genes = pd.read_sql_query(query, con, params=[db_specie] + [s.upper() for s in symbols])
+        symbol_to_ensembl = {sym.upper(): gid
+                             for gid, sym in zip(utils.combined_gene_ids(df_genes),
+                                                 df_genes['gene_symbol'])}
+    df['gene_ensembl_id'] = df['gene_symbol'].apply(
+        lambda s: symbol_to_ensembl.get(str(s).upper()) if pd.notna(s) else None)
+
+    df['specie'] = specie
+    return df
+
+
 def leafcutter_read_input_files(con, significance_file, effect_sizes_file, specie='human'):
     """Read a pair of LeafCutter differential-splicing outputs
     (leafcutter_ds_cluster_significance.txt + leafcutter_ds_effect_sizes.txt) and
@@ -555,50 +607,10 @@ def leafcutter_read_input_files(con, significance_file, effect_sizes_file, speci
     df = df[(df.start_position >= 0) & (df.end_position >= 0)].copy()
 
     # cluster -> the gene symbols the significance file names for it.
-    #
-    # LeafCutter clusters introns annotation-free and only then names the genes
-    # each overlaps, so a cluster can name several - 6.6% of clusters in a real
-    # run do, up to nine. Each is analysed once per named gene, so a change in
-    # any of them is reported and a name absent from DoChaP does not cost the
-    # others. Only a multi-gene cluster carries the symbol in its identifier.
     df_sig['cluster_key'] = df_sig['cluster'].apply(_leafcutter_cluster_key)
     cluster_to_symbols = dict(zip(df_sig['cluster_key'],
                                   df_sig['genes'].apply(_leafcutter_gene_symbols)))
-    df['gene_symbols'] = df['cluster_name'].map(cluster_to_symbols)
-    # A cluster naming no gene keeps one row with a missing symbol - it is a real
-    # LeafCutter outcome (a novel cluster overlapping nothing annotated), not bad
-    # input, and is labelled no_gene_specified downstream rather than dropped.
-    df['gene_symbols'] = df['gene_symbols'].apply(lambda s: s if s else [None])
-    df = df.explode('gene_symbols', ignore_index=True)
-    df = df.rename(columns={'gene_symbols': 'gene_symbol'})
-
-    multi_gene_clusters = {key for key, symbols in cluster_to_symbols.items() if len(symbols) > 1}
-    is_multi = df['cluster_name'].isin(multi_gene_clusters)
-    df.loc[is_multi, 'cluster_name'] = (df.loc[is_multi, 'cluster_name']
-                                        + ':' + df.loc[is_multi, 'gene_symbol'].astype(str))
-
-    # resolve gene symbol -> gene_ensembl_id via the DoChaP Genes table.
-    # The same symbol exists across species in the DB (e.g. USP16 -> human,
-    # mouse, rat, ...), so the lookup must be restricted to this input's species.
-    db_specie = _SPECIE_DB_NAME.get(specie, specie)
-    symbols = [s for s in df['gene_symbol'].dropna().unique().tolist()
-               if s and str(s).lower() not in ('nan', 'na', '.')]
-    symbol_to_ensembl = {}
-    if symbols:
-        placeholders = ','.join(['?'] * len(symbols))
-        # gene_GeneID_id is selected as a fallback: 13% of DoChaP genes carry no
-        # gene_ensembl_id, and resolving a symbol to that column alone yields NaN,
-        # dropping the gene before analysis (see utils.combined_gene_ids).
-        query = (f"SELECT gene_ensembl_id, gene_GeneID_id, gene_symbol FROM Genes "
-                 f"WHERE specie = ? AND UPPER(gene_symbol) IN ({placeholders})")
-        df_genes = pd.read_sql_query(query, con, params=[db_specie] + [s.upper() for s in symbols])
-        symbol_to_ensembl = {sym.upper(): gid
-                             for gid, sym in zip(utils.combined_gene_ids(df_genes),
-                                                 df_genes['gene_symbol'])}
-    df['gene_ensembl_id'] = df['gene_symbol'].apply(
-        lambda s: symbol_to_ensembl.get(str(s).upper()) if pd.notna(s) else None)
-
-    df['specie'] = specie
+    df = _leafcutter_attach_genes(con, df, cluster_to_symbols, specie)
 
     columns = ['gene_symbol', 'gene_ensembl_id', 'junction_name', 'chromosome',
                'start_position', 'end_position', 'specie', 'cluster_name']
@@ -615,6 +627,123 @@ def analyze_leafcutter_input(con, significance_file, effect_sizes_file, output_c
                        num_workers=num_workers, use_representative_domains=use_representative_domains,
                        max_clusters=max_clusters, filter_non_comparable=filter_non_comparable,
                        write_all_comparable=write_all_comparable)
+
+
+# --- internal2: LeafCutter results as a supplementary-table Excel -------------
+# A collaborator's export of a leafcutter_ds run, with the cluster-significance
+# and effect-size outputs already joined into a single sheet - one row per
+# junction, under a title block:
+#
+#     | Supplementary Table 11                                                  |
+#     | DTUs between TB and PTB placentas                                       |
+#     |                                                                         |
+#     | Cluster    | Splicing junction        | TB | PTB | deltaPSI | p.Adjust | Genes    |
+#     | clu_1455_- | chr1:153626533-153627139 | .. | ..  | ..       | ..       | S100A13  |
+#
+# The table does not start at A1 (and in some files not in column A either), and
+# the two PSI columns are named after the compared conditions, so the header row
+# and its columns are found by label rather than by position. Only Cluster,
+# Splicing junction and Genes are read: these rows are already the significant
+# subset, and DOMAS applies no significance filtering of its own, exactly as for
+# -format leafcutter.
+_INTERNAL2_REQUIRED_LABELS = frozenset({'cluster', 'splicing junction', 'genes'})
+# chr1:153626533-153627139. The leafcutter_ds files spell the same thing
+# chr:start:end, so both separators are accepted.
+_INTERNAL2_JUNCTION_RE = r'^(?P<chromosome>[^:\s]+):(?P<start_position>\d+)[-:](?P<end_position>\d+)$'
+
+
+def _internal2_locate_table(df_raw, input_path):
+    """Find the results table inside a sheet that starts with a title block.
+
+    Returns (index of the header row, {lower-cased header label: column}).
+    """
+    for row_index in range(len(df_raw)):
+        labels = {}
+        for column, value in df_raw.iloc[row_index].items():
+            if pd.notna(value):
+                labels.setdefault(str(value).strip().lower(), column)
+        if _INTERNAL2_REQUIRED_LABELS.issubset(labels):
+            return row_index, labels
+    raise ValueError(
+        f"No results table found in {input_path}: expected a header row naming "
+        f"{', '.join(sorted(_INTERNAL2_REQUIRED_LABELS))}")
+
+
+def internal2_read_input_file(con, input_path, specie='human'):
+    """Read an internal2 Excel file (LeafCutter differential-splicing results as a
+    supplementary table) and return a per-junction DataFrame with the same columns
+    hadas_read_input_file() produces, ready for analyze_junctions().
+
+    The junction column supplies the coordinates, the cluster column the cluster -
+    normalised to the chr:clu_<n> key leafcutter_read_input_files() builds, so the
+    two readers produce the same identifiers for the same run - and the Genes
+    column the symbols, resolved to a gene_ensembl_id via the DoChaP `Genes` table.
+    """
+    df_raw = pd.read_excel(input_path, header=None)
+    header_row, labels = _internal2_locate_table(df_raw, input_path)
+    body = df_raw.iloc[header_row + 1:]
+    df = pd.DataFrame({
+        'cluster': body[labels['cluster']],
+        'junction': body[labels['splicing junction']],
+        'genes': body[labels['genes']],
+    })
+    # Trailing blank rows below the table, and any row that names no junction,
+    # carry nothing to analyse; they are not the unreadable-junction case warned
+    # about below.
+    df = df[df['cluster'].notna() & df['junction'].notna()].copy()
+
+    parsed = df['junction'].astype(str).str.strip().str.extract(_INTERNAL2_JUNCTION_RE)
+    unreadable = parsed['start_position'].isna()
+    if unreadable.any():
+        # These sheets are hand-assembled and do contain the occasional corrupted
+        # cell (a stray spreadsheet reference pasted over a value), so one bad row
+        # drops rather than failing a run of thousands.
+        logger.warning("internal2: skipping %d row(s) with an unreadable junction, e.g. %s",
+                       int(unreadable.sum()), df.loc[unreadable, 'junction'].head(3).tolist())
+        df = df[~unreadable]
+        parsed = parsed[~unreadable]
+    if df.empty:
+        raise ValueError(f"No readable junctions found in {input_path}")
+
+    df['chromosome'] = parsed['chromosome']
+    df['start_position'] = parsed['start_position'].astype(int)
+    df['end_position'] = parsed['end_position'].astype(int)
+    df['junction_name'] = (df['chromosome'] + ':' + df['start_position'].astype(str)
+                           + ':' + df['end_position'].astype(str))
+    # clu_<n>_<strand> -> chr:clu_<n>; the cluster column names no chromosome, so
+    # it comes from the junction, as it does in the leafcutter_ds intron id.
+    df['cluster_name'] = (df['chromosome'] + ':' + df['cluster'].astype(str).str.strip()
+                          ).apply(_leafcutter_cluster_key)
+
+    # The Genes column repeats the cluster's annotation on every one of its rows;
+    # collecting it per cluster (rather than per row) keeps a cluster analysed once
+    # per named gene even where the rows disagree.
+    cluster_to_symbols = {}
+    for cluster_name, genes in zip(df['cluster_name'], df['genes']):
+        symbols = cluster_to_symbols.setdefault(cluster_name, [])
+        for symbol in _leafcutter_gene_symbols(genes):
+            if symbol not in symbols:
+                symbols.append(symbol)
+
+    df = _leafcutter_attach_genes(con, df, cluster_to_symbols, specie)
+    logger.info("internal2: read %d junctions in %d clusters from %s",
+                len(df), df['cluster_name'].nunique(), input_path)
+
+    columns = ['gene_symbol', 'gene_ensembl_id', 'junction_name', 'chromosome',
+               'start_position', 'end_position', 'specie', 'cluster_name']
+    return df[columns].reset_index(drop=True)
+
+
+def analyze_internal2_input(con, input_file, output_csv, specie='human', num_workers=5,
+                            use_representative_domains=False, max_clusters=0,
+                            filter_non_comparable=False, write_all_comparable=False):
+    """Read an internal2 Excel file and run the domain analysis, the same way
+    analyze_leafcutter_input() does for the leafcutter_ds files it exports."""
+    df_junctions = internal2_read_input_file(con, input_file, specie=specie)
+    analyze_junctions(con, df_junctions=df_junctions, specie=specie, output_path=output_csv, create_pdf=False,
+                      num_workers=num_workers, use_representative_domains=use_representative_domains,
+                      max_clusters=max_clusters, filter_non_comparable=filter_non_comparable,
+                      write_all_comparable=write_all_comparable)
 
 
 def create_events_junctions(con, df_events, output_csv):

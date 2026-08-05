@@ -21,19 +21,22 @@ _DEFAULT_NUM_WORKERS = os.cpu_count() or 5
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Analyze junctions and detect domain changes across alternative transcripts.")
-    parser.add_argument("-format", required=False, choices=["internal", "ioe", "leafcutter", "rmats", "majiq"],
+    parser.add_argument("-format", required=False, choices=["internal", "internal2", "ioe", "leafcutter", "rmats", "majiq"],
                          help="Input file format: 'internal' for the internal comparative "
-                              "splicing Excel file, 'ioe' for a SUPPA .ioe file (or a "
-                              "directory of them, see -ioe_pattern), 'leafcutter' for a pair "
-                              "of leafcutter_ds output files (see -lc_sig / -lc_effect), "
-                              "'rmats' for an rMATS-turbo output directory (the five "
+                              "splicing Excel file, 'internal2' for the internal supplementary "
+                              "table Excel file (LeafCutter significant results: Cluster, "
+                              "Splicing junction, deltaPSI, p.Adjust, Genes), 'ioe' for a SUPPA "
+                              ".ioe file (or a directory of them, see -ioe_pattern), 'leafcutter' "
+                              "for a pair of leafcutter_ds output files (see -lc_sig / "
+                              "-lc_effect), 'rmats' for an rMATS-turbo output directory (the five "
                               "[Event].MATS.JC.txt files, passed via -input), 'majiq' for a "
                               "MAJIQ voila TSV file (passed via -input)")
     parser.add_argument("-input", required=False, default=None, type=str,
-                         help="Path to the input for -format internal/ioe/rmats/majiq (Excel for "
-                              "internal; a single .ioe file or a directory of .ioe files for ioe; "
-                              "an rMATS-turbo output directory for rmats; a voila TSV file for "
-                              "majiq). Not used with -format leafcutter.")
+                         help="Path to the input for -format internal/internal2/ioe/rmats/majiq "
+                              "(Excel for internal and internal2; a single .ioe file or a "
+                              "directory of .ioe files for ioe; an rMATS-turbo output directory "
+                              "for rmats; a voila TSV file for majiq). Not used with -format "
+                              "leafcutter.")
     parser.add_argument("-lc_sig", required=False, default=None, type=str,
                          help="Path to the leafcutter_ds_cluster_significance.txt file "
                               "(only used with -format leafcutter)")
@@ -44,9 +47,9 @@ def parse_args():
                          help="Species the input was produced from: human, mouse, rat, "
                               "zebrafish or frog. Required for every format except internal, "
                               "which is a human/mouse comparison and carries the species per "
-                              "row. rMATS, MAJIQ and SUPPA files contain no species field, so "
-                              "it cannot be read from them. DOMAS aborts if the gene ids turn "
-                              "out to belong to a different species.")
+                              "row. rMATS, MAJIQ, SUPPA and internal2 files contain no species "
+                              "field, so it cannot be read from them. DOMAS aborts if the gene "
+                              "ids turn out to belong to a different species.")
     parser.add_argument("-dochap", required=False, type=str, help="Path to the DoChaP sqlite db")
     parser.add_argument("-output_csv", type=str, default="junctions_analysis.csv", help="Path to the output csv")
     parser.add_argument("-gene_ids", type=str, default=None,
@@ -120,13 +123,13 @@ def parse_args():
     if not os.path.exists(args.dochap):
         parser.error(f"DoChaP db not found at {args.dochap}")
 
-    # -input (internal/ioe) and the leafcutter -lc_sig/-lc_effect pair name
-    # different formats and cannot be combined.
+    # -input (internal/internal2/ioe) and the leafcutter -lc_sig/-lc_effect pair
+    # name different formats and cannot be combined.
     input_provided = args.input is not None
     leafcutter_provided = args.lc_sig is not None or args.lc_effect is not None
     if input_provided and leafcutter_provided:
         sys.stderr.write(
-            "Error: mixed input formats - provide either -input (for -format internal/ioe/rmats/majiq) "
+            "Error: mixed input formats - provide either -input (for -format internal/internal2/ioe/rmats/majiq) "
             "OR -lc_sig/-lc_effect (for -format leafcutter), not both.\n")
         sys.exit(-1)
 
@@ -209,6 +212,14 @@ def main():
         elif args.format == "majiq":
             alternative_splicing.analyze_voila_input(
                 con, voila_tsv=args.input, output_csv=args.output_csv, specie=args.specie, num_workers=args.num_workers,
+                use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
+                filter_non_comparable=not args.keep_non_comparable,
+                write_all_comparable=args.write_all_comparable,
+            )
+        elif args.format == "internal2":
+            alternative_splicing.analyze_internal2_input(
+                con, input_file=args.input, output_csv=args.output_csv, specie=args.specie,
+                num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
                 filter_non_comparable=not args.keep_non_comparable,
                 write_all_comparable=args.write_all_comparable,
