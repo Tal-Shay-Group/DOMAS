@@ -117,12 +117,23 @@ def _leafcutter_gene_symbols(genes):
 
 def _leafcutter_cluster_key(cluster):
     """chr:clu_<n>_<strand> (significance file) -> chr:clu_<n>, the same key
-    _split_leafcutter_intron() builds from the effect-sizes intron id."""
+    _split_leafcutter_intron() builds from the effect-sizes intron id.
+
+    Older LeafCutter versions write the cluster without the strand suffix
+    (clu_<n>), so only a trailing _+ / _- is dropped. Splitting on the last
+    underscore unconditionally turned every clu_<n> into 'clu', which merged
+    every cluster on a chromosome into a single one - junctions from unrelated
+    genes analysed together, silently.
+    """
     parts = str(cluster).split(':')
     if len(parts) < 2:
         return str(cluster)
     chromosome, clu = parts[0], parts[1]
-    clu_no_strand = clu.rsplit('_', 1)[0] if clu.startswith('clu_') else clu
+    clu_no_strand = clu
+    if clu.startswith('clu_'):
+        head, _sep, tail = clu.rpartition('_')
+        if tail in ('+', '-'):
+            clu_no_strand = head
     return f'{chromosome}:{clu_no_strand}'
 
 

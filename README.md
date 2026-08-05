@@ -20,11 +20,11 @@ by the canonical transcript.
   linked to its visualization in DoChaP format (Gal-Oz et al., 2021).
 - **Protein domain databases.** DOMAS builds upon the DoChaP database
   (Gal-Oz et al., 2021), which integrates domain annotation from several databases.
-- Stay tuned — DOMAS will also be available as a web server soon.
+- Also avaiable as a web server in dochap.bgu.ac.il. Look for the DOMAS page.
 
 ## Installation and requirements
 
-- Python 3.x
+- Python 3.9 or higher
 - Dependencies: `pandas`, `numpy`, `sqlite3`, `openpyxl` (for Excel input), `matplotlib`
 - **Database:** requires access to a local instance of the **DoChaP DB**.
   See Gal-Oz et al. (2021) for installation instructions.
@@ -90,7 +90,7 @@ The defaults are what a normal run wants; each flag turns one of them off.
 | `-pdf` | Generate a per-gene PDF. Off by default — a full-scale run would otherwise produce one PDF per gene. Only honored with `-format hadas`. |
 | `-no_representative_domains` | Use `DomainEvent`/`DomainType` only. By default domains come from the `RepresentativeDomains` table where available, falling back per protein. |
 | `-stats` | Also generate the statistics report (event distribution, domain frequency, etc.) for `-output_csv` after the run. Off by default. |
-| `-keep_non_comparable` | Keep rows for non-comparable transcripts (`gene_not_in_db`, `junction_not_mapped`, `no_unique_junctions`, …). By default the output CSV holds only transcripts actually compared to the canonical transcript. |
+| `-omit_non_comparable` | Leave out rows for non-comparable transcripts (`gene_not_in_db`, `junction_not_mapped`, `no_unique_junctions`, …), keeping only transcripts actually compared to the canonical transcript. By default they are written, so the output CSV accounts for every cluster in the input. |
 
 ### A note on rMATS event types
 

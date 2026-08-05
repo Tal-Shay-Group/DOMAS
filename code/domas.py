@@ -90,11 +90,13 @@ def parse_args():
                          help="If > 0, analyze only the first N clusters (sorted). Caps the "
                               "amount of work; used by the web GUI to process the first 100 "
                               "clusters. 0 (default) means no limit.")
-    parser.add_argument("-keep_non_comparable", action="store_true",
-                         help="Keep rows for non-comparable transcripts (e.g. those with a "
-                              "gene_not_in_db / feature_not_mapped / no_unique_features "
-                              "event). By default the output CSV holds only transcripts "
-                              "that were actually compared to the canonical transcript.")
+    parser.add_argument("-omit_non_comparable", action="store_true",
+                         help="Leave out rows for non-comparable transcripts (e.g. those with "
+                              "a gene_not_in_db / feature_not_mapped / no_unique_features "
+                              "event), keeping only transcripts that were actually compared "
+                              "to the canonical one. By default they are written, so the "
+                              "output CSV accounts for every cluster in the input - including "
+                              "the ones no comparison was possible for.")
     parser.add_argument("-write_all_comparable", action="store_true",
                          help="Compare every comparable transcript to the canonical one and "
                               "keep a row for each, adding the is_most_like_canonical and "
@@ -199,21 +201,21 @@ def main():
                 con, significance_file=args.lc_sig, effect_sizes_file=args.lc_effect,
                 output_csv=args.output_csv, specie=args.specie, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
-                filter_non_comparable=not args.keep_non_comparable,
+                filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
             )
         elif args.format == "rmats":
             alternative_splicing.analyze_rmats_input(
                 con, rmats_dir=args.input, output_csv=args.output_csv, specie=args.specie, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
-                filter_non_comparable=not args.keep_non_comparable,
+                filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
             )
         elif args.format == "majiq":
             alternative_splicing.analyze_voila_input(
                 con, voila_tsv=args.input, output_csv=args.output_csv, specie=args.specie, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
-                filter_non_comparable=not args.keep_non_comparable,
+                filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
             )
         elif args.format == "internal2":
@@ -221,7 +223,7 @@ def main():
                 con, input_file=args.input, output_csv=args.output_csv, specie=args.specie,
                 num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
-                filter_non_comparable=not args.keep_non_comparable,
+                filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
             )
         elif args.format == "internal":
@@ -230,7 +232,7 @@ def main():
                 con, input_file=args.input, output_csv=args.output_csv,
                 print_genes=print_genes, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, create_pdf=args.pdf,
-                max_clusters=args.max_clusters, filter_non_comparable=not args.keep_non_comparable,
+                max_clusters=args.max_clusters, filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
             )
         elif os.path.isdir(args.input):
@@ -238,14 +240,14 @@ def main():
                 con, input_path=args.input, pattern=args.ioe_pattern, output_csv=args.output_csv, specie=args.specie,
                 examples_per_event=args.examples_per_event, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
-                filter_non_comparable=not args.keep_non_comparable,
+                filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
             )
         else:
             alternative_splicing.analyze_ioe_file(
                 con, ioe_file=args.input, output_csv=args.output_csv, specie=args.specie, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
-                filter_non_comparable=not args.keep_non_comparable,
+                filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
             )
     finally:
