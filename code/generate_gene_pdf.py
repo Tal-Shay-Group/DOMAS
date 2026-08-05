@@ -1134,11 +1134,11 @@ class GeneVisualization:
                     legend = (
                         "Mark inside each domain — its tier on the InterPro entry-type ladder: "
                         "1 = Domain/Repeat · 2 = Family/Homologous superfamily · "
-                        "3 = member-DB hit (G3DSA/PTHR/SSF/cd/PF) · S = site/PTM. "
+                        "3 = member-DB hit (G3DSA/PTHR/SSF/cd/PF) · S = site/PTM, ranked with tier 2. "
                         "FILLED = kept, and compared. HOLLOW = removed before the comparison, so no "
-                        "row of the events table can refer to it — a 2 or 3 when more than half of it "
-                        "is already covered by a higher tier, an S unconditionally, and an entry of ANY "
-                        "tier when it duplicates a longer kept entry of the same accession that overlaps it."
+                        "row of the events table can refer to it — a 2, S or 3 when more than half of it "
+                        "is already covered by a higher tier, and an entry of ANY tier when it "
+                        "duplicates a longer kept entry of the same accession that overlaps it."
                     )
                     if marks_partial:
                         legend += (

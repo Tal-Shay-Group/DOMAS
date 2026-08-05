@@ -373,7 +373,12 @@ def collapse_contained_domains(df_domains, tolerance=2, overlap_fraction=0.85):
 # InterPro entry types (from RepresentativeDomains.type, sourced from
 # interpro.xml.gz). Domain/Repeat are the real structural-functional units;
 # Family/Homologous_superfamily are broader groupings; the site/PTM types are
-# residue features, not domains.
+# residue features. Sites are ranked WITH the broader groupings rather than
+# dropped outright: a splicing event that removes an active site or a
+# phosphorylation site changes the protein whether or not a Domain entry covers
+# that region, so a site is only discarded where a Domain/Repeat already
+# accounts for the majority of it - the same "demote, don't delete" rule the
+# Family entries get.
 _PRIMARY_ENTRY_TYPES = frozenset({'Domain', 'Repeat'})
 _SITE_ENTRY_TYPES = frozenset({'Active_site', 'Binding_site', 'Conserved_site', 'PTM'})
 # A lower-tier entry is treated as redundant (and dropped) only when MORE THAN
@@ -391,7 +396,11 @@ _REDUNDANT_COVER = 0.5
 _SAME_ID_OVERLAP = 0.5
 
 
+# TIER_SITE keeps its own label so a reader (and the PDF) can still tell a
+# residue feature from a Family entry, but it is ranked at the PARENT level -
+# see _PARENT_LEVEL_TIERS, which is what filter_representative_domains() applies.
 TIER_PRIMARY, TIER_PARENT, TIER_MEMBER, TIER_SITE = '1', '2', '3', 'S'
+_PARENT_LEVEL_TIERS = (TIER_PARENT, TIER_SITE)
 
 
 def domain_entry_tiers(df_domains):
@@ -403,7 +412,8 @@ def domain_entry_tiers(df_domains):
     which the filter returns its input untouched.
 
     Shared with the PDF, so a domain is labelled with the tier the analysis judged
-    it on rather than one re-derived alongside it.
+    it on rather than one re-derived alongside it. TIER_SITE is a label, not a rank
+    of its own: the filter ranks it with TIER_PARENT (see _PARENT_LEVEL_TIERS).
     """
     if df_domains is None or len(df_domains) == 0:
         return None
@@ -469,10 +479,16 @@ def filter_representative_domains(df_domains):
 
       Tier 1 PRIMARY : InterPro Domain / Repeat
       Tier 2 PARENT  : InterPro Family / Homologous_superfamily (+ IPR of unknown
-                       type) - kept unless the majority is covered by PRIMARY
+                       type), and the site/PTM types (Active_site, Binding_site,
+                       Conserved_site, PTM) - kept unless the majority is covered
+                       by PRIMARY
       Tier 3 MEMBER  : non-InterPro member-DB hits (G3DSA/PTHR/SSF/cd/PF/...) -
                        kept unless the majority is covered by kept PRIMARY+PARENT
-      dropped        : InterPro site/PTM types (residue features, not domains)
+
+    Sites sit at the PARENT level rather than being dropped outright: an event that
+    removes an active or phosphorylation site is a real change to the protein, and
+    where a Domain entry does cover the site the coverage rule discards it anyway.
+    They keep their own TIER_SITE label for the PDF - see domain_entry_tiers().
 
     Then collapse genuine duplicates: two kept rows with the SAME domain_id whose
     overlap covers at least _SAME_ID_OVERLAP of the shorter one -> keep the longer.
@@ -485,18 +501,14 @@ def filter_representative_domains(df_domains):
     need a sequence-level model rather than the accessions DoChaP stores.
 
     Requires 'domain_id' and 'type' columns; a frame without them, or with `type`
-    entirely NULL (DomainEvent/DomainType rows), is returned unchanged.
-
-    Site/PTM removal is unconditional, hence ahead of the single-row shortcut: a
-    residue feature is not a domain however little else the transcript carries.
+    entirely NULL (DomainEvent/DomainType rows), is returned unchanged. A frame of
+    one row is returned as it stands, sites included - there is nothing that could
+    cover it.
     """
     if 'domain_id' not in df_domains.columns or 'type' not in df_domains.columns:
         return df_domains
     if df_domains['type'].isna().all():
         return df_domains
-
-    tiers = domain_entry_tiers(df_domains)
-    df_domains = df_domains[tiers != TIER_SITE]
     if len(df_domains) <= 1:
         return df_domains
 
@@ -506,11 +518,11 @@ def filter_representative_domains(df_domains):
     ends = df['AA_end']
 
     # One definition of the tiers, shared with the PDF - see domain_entry_tiers().
-    # TIER_SITE has no list: those rows are gone by this point.
+    # TIER_SITE rows are ranked here with TIER_PARENT, keeping their own label.
     tiers = domain_entry_tiers(df)
     primary_idx = df.index[tiers == TIER_PRIMARY].tolist()
-    parent_idx = df.index[tiers == TIER_PARENT].tolist()   # Family/HSF/unknown-type IPR
-    member_idx = df.index[tiers == TIER_MEMBER].tolist()   # non-IPR member DBs
+    parent_idx = df.index[tiers.isin(_PARENT_LEVEL_TIERS)].tolist()   # Family/HSF/unknown IPR + sites
+    member_idx = df.index[tiers == TIER_MEMBER].tolist()   # non-InterPro member DBs
 
     keep = list(primary_idx)
     prim_iv = [(starts[i], ends[i]) for i in primary_idx]

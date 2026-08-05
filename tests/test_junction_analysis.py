@@ -1373,12 +1373,14 @@ def test_database_specie_check_ignores_genes_it_does_not_hold():
 
 
 # ---------------------------------------------------------------------------
-# filter_representative_domains: Site/PTM removal
+# filter_representative_domains: Site/PTM ranking
 #
-# This branch is reachable with real data - 3,041 Site/PTM rows in the database,
-# on 1,007 human transcripts - but no cluster in any fixture happens to sample one,
-# so it had no coverage at all. The frames below are synthetic for that reason:
-# they pin the rule rather than a particular gene.
+# Sites are ranked with the Family tier, not dropped outright: they survive where
+# no Domain/Repeat covers the majority of them. This branch is reachable with real
+# data - 3,041 Site/PTM rows in the database, on 1,007 human transcripts - but no
+# cluster in any fixture happens to sample one, so it had no coverage at all. The
+# frames below are synthetic for that reason: they pin the rule rather than a
+# particular gene.
 # ---------------------------------------------------------------------------
 
 def _typed_domain_row(domain_id, entry_type, start, end):
@@ -1386,9 +1388,9 @@ def _typed_domain_row(domain_id, entry_type, start, end):
             **{c: None for c in DOMAIN_NAME_COLUMNS}}
 
 
-def test_site_and_ptm_entries_are_removed():
-    """Site and PTM entries are residue-level features, not structural units, so they
-    are dropped outright - not merely demoted like a redundant Family entry."""
+def test_site_and_ptm_entries_inside_a_domain_are_dropped():
+    """Sites are ranked with the Family tier, so the coverage rule applies to them:
+    each of these sits wholly inside the Domain, which therefore covers all of it."""
     from junction_analisys import filter_representative_domains
     df = pd.DataFrame([
         _typed_domain_row('IPR000001', 'Domain', 10, 200),
@@ -1400,19 +1402,40 @@ def test_site_and_ptm_entries_are_removed():
     assert list(kept['domain_id']) == ['IPR000001'], list(kept['domain_id'])
 
 
-def test_site_entries_removed_even_where_no_domain_covers_them():
-    """Removal is unconditional. The >50% coverage rule that spares an otherwise
-    redundant Family or member entry - 'demote, don't delete' - does not apply here:
-    a residue-level feature is never the evidence a domain comparison rests on, so a
-    Conserved_site alone in its region is still dropped rather than kept as the only
-    annotation."""
+def test_site_entries_survive_where_no_domain_covers_them():
+    """'Demote, don't delete' now covers the sites too: an active or phosphorylation
+    site in a region no Domain/Repeat annotates is the only evidence there is that a
+    splicing event touching that region changes the protein, so it is kept and
+    compared."""
     from junction_analisys import filter_representative_domains
     df = pd.DataFrame([
         _typed_domain_row('IPR000001', 'Domain', 10, 100),
         _typed_domain_row('IPR000002', 'Conserved_site', 500, 512),   # nothing else near it
     ])
     kept = filter_representative_domains(df)
-    assert list(kept['domain_id']) == ['IPR000001'], list(kept['domain_id'])
+    assert list(kept['domain_id']) == ['IPR000001', 'IPR000002'], list(kept['domain_id'])
+
+
+def test_lone_site_entry_is_kept():
+    """A transcript annotated with nothing but a site keeps it - there is nothing
+    that could cover it, and dropping it would leave the transcript with no
+    annotation at all."""
+    from junction_analisys import filter_representative_domains
+    df = pd.DataFrame([_typed_domain_row('IPR000002', 'Active_site', 40, 44)])
+    kept = filter_representative_domains(df)
+    assert list(kept['domain_id']) == ['IPR000002'], list(kept['domain_id'])
+
+
+def test_site_partially_covered_by_a_domain_is_kept():
+    """The threshold is a majority of the site's own residues, as for a Family entry:
+    a site half outside the Domain that abuts it survives."""
+    from junction_analisys import filter_representative_domains
+    df = pd.DataFrame([
+        _typed_domain_row('IPR000001', 'Domain', 10, 100),
+        _typed_domain_row('IPR000002', 'Binding_site', 97, 106),   # 4 of 10 residues covered
+    ])
+    kept = filter_representative_domains(df)
+    assert list(kept['domain_id']) == ['IPR000001', 'IPR000002'], list(kept['domain_id'])
 
 
 def _same_id_kept(span_a, span_b):
@@ -1451,9 +1474,26 @@ def test_same_id_disjoint_positions_are_two_domains():
     assert _same_id_kept((10, 100), (300, 400)) == [(10, 100), (300, 400)]
 
 
+def test_frame_whose_only_typed_rows_are_sites_does_not_raise():
+    """Regression: while sites were dropped up front, a frame left with two or more
+    rows of NULL entry type had nothing for the ladder to rank, domain_entry_tiers()
+    returned None, and indexing the frame with `None == TIER_PRIMARY` raised
+    ValueError. _analyze_chunk() catches ValueError per cluster, so the whole
+    cluster - every transcript, including the rows recorded before the comparison -
+    vanished from the results. Two real leafcutter clusters were lost this way."""
+    from junction_analisys import filter_representative_domains
+    df = pd.DataFrame([
+        _typed_domain_row('G3DSA:1.10.238.10', None, 10, 80),
+        _typed_domain_row('PTHR11216', None, 5, 200),
+        _typed_domain_row('IPR018247', 'Conserved_site', 40, 52),
+    ])
+    kept = filter_representative_domains(df)
+    assert set(kept['domain_id']) == {'G3DSA:1.10.238.10', 'PTHR11216', 'IPR018247'}
+
+
 def test_non_site_tiers_survive_alongside_site_removal():
-    """Removing the sites must not disturb the tier ladder: a Family entry that no
-    Domain covers is still kept, while the sites go."""
+    """Ranking the sites at the Family tier must not disturb the rest of the ladder:
+    a Family entry that no Domain covers is still kept, while a PTM inside one goes."""
     from junction_analisys import filter_representative_domains
     df = pd.DataFrame([
         _typed_domain_row('IPR000001', 'Domain', 10, 100),
