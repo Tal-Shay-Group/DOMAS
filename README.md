@@ -12,131 +12,53 @@ by the canonical transcript.
 
 - **Input formats.** Output of several differential splicing tools: LeafCutter
   (Li et al., 2016), rMATS-turbo (Wang et al., 2024), MAJIQ (Vaquero-Garcia et al., 2023)
-  and SUPPA `.ioe` files, plus a hadas-style comparative-splicing Excel file. To
-  accommodate additional input formats, please write to us.
+  and SUPPA `.ioe` files. To accommodate additional input formats, please write to us.
 - **Output format.** A CSV listing the domains affected by each alternative splicing
   event and the class of the effect compared to the protein encoded by the canonical
   transcript — loss, gain, alteration, elongation or truncation. Each event can be
   linked to its visualization in DoChaP format (Gal-Oz et al., 2021).
 - **Protein domain databases.** DOMAS builds upon the DoChaP database
   (Gal-Oz et al., 2021), which integrates domain annotation from several databases.
-- Also avaiable as a web server in dochap.bgu.ac.il. Look for the DOMAS page.
+- Also available as a web server in dochap.bgu.ac.il. Look for the DOMAS page.
 
 ## Installation and requirements
 
 - Python 3.9 or higher
-- Dependencies: `pandas`, `numpy`, `sqlite3`, `openpyxl` (for Excel input), `matplotlib`
+- Dependencies: see `requirements.txt`
+
+  ```bash
+  pip install -r requirements.txt
+  ```
 - **Database:** requires access to a local instance of the **DoChaP DB**.
   See Gal-Oz et al. (2021) for installation instructions.
 
 ## Usage
 
 Run the utility from the command line. `-format` selects the input reader, and the
-remaining input arguments depend on it.
+remaining input arguments depend on it. `-specie` is required throughout: none of
+these formats carries a species field, and DOMAS stops if the gene ids turn out to
+belong to a different species than the one stated.
 
-LeafCutter — takes a pair of `leafcutter_ds` output files and no `-input`:
-
-```bash
-python3 code/domas.py -format leafcutter -lc_sig <leafcutter_ds_cluster_significance.txt> -lc_effect <leafcutter_ds_effect_sizes.txt> -dochap <dochap.sqlite> -output_csv results.csv
-```
-
-rMATS-turbo — `-input` is the output *directory*:
-
-```bash
-python3 code/domas.py -format rmats -input <rmats_output_dir> -dochap <dochap.sqlite> -output_csv results.csv
-```
-
-MAJIQ — `-input` is a `voila tsv` file:
-
-```bash
-python3 code/domas.py -format majiq -input <voila.tsv> -dochap <dochap.sqlite> -output_csv results.csv
-```
-
-SUPPA — `-input` is a single `.ioe` file, or a directory of them (see `-ioe_pattern`):
-
-```bash
-python3 code/domas.py -format ioe -input <events.ioe> -dochap <dochap.sqlite> -output_csv results.csv
-```
-
-hadas-format Excel:
-
-```bash
-python3 code/domas.py -format hadas -input <comparative_splicing.xlsx> -dochap <dochap.sqlite> -output_csv results.csv
-```
-
-### Input parameters
-
-| Parameter | Description |
-| :---- | :---- |
-| `-format` | Input format: `hadas`, `ioe`, `leafcutter`, `rmats` or `majiq`. Required. |
-| `-input` | Input path for `-format hadas/ioe/rmats/majiq`. Not used with `-format leafcutter`. |
-| `-lc_sig` | Path to `leafcutter_ds_cluster_significance.txt` (only with `-format leafcutter`). |
-| `-lc_effect` | Path to `leafcutter_ds_effect_sizes.txt` (only with `-format leafcutter`). |
-| `-dochap` | Path to the DoChaP sqlite database. Required. |
-| `-output_csv` | Destination path for the generated results (default `junctions_analysis.csv`). |
-| `-ioe_pattern` | Filename regex used to find `.ioe` files when `-input` is a directory. |
-| `-examples_per_event` | Per event type, keep only this many example clusters (0 keeps every cluster); only when `-input` is a directory with `-format ioe`. |
-| `-gene_ids` | Comma-separated gene symbols to generate PDFs for (only with `-format hadas` and `-pdf`). |
-| `-num_workers` | Number of parallel worker processes (default: the machine's CPU count). |
-| `-max_clusters` | If > 0, analyze only the first N clusters (sorted). 0 (default) means no limit. |
-| `-stats_out_dir` | Directory for the `-stats` report (default: alongside `-output_csv`). |
-
-### Optional behaviour flags
-
-The defaults are what a normal run wants; each flag turns one of them off.
-
-| Flag | Effect |
-| :---- | :---- |
-| `-pdf` | Generate a per-gene PDF. Off by default — a full-scale run would otherwise produce one PDF per gene. Only honored with `-format hadas`. |
-| `-no_representative_domains` | Use `DomainEvent`/`DomainType` only. By default domains come from the `RepresentativeDomains` table where available, falling back per protein. |
-| `-stats` | Also generate the statistics report (event distribution, domain frequency, etc.) for `-output_csv` after the run. Off by default. |
-| `-omit_non_comparable` | Leave out rows for non-comparable transcripts (`gene_not_in_db`, `junction_not_mapped`, `no_unique_junctions`, …), keeping only transcripts actually compared to the canonical transcript. By default they are written, so the output CSV accounts for every cluster in the input. |
-
-### A note on rMATS event types
-
-DOMAS reads all five `[EventType].MATS.JC.txt` files: `SE`, `A5SS`, `A3SS`, `MXE` and
-`RI`. A retained-intron record names one interval, the spliced form, so it is emitted
-as two features at the same coordinates — one matched by adjacency (the intron is
-spliced out) and one by containment (a single exon holds it). That is what lets a
-retaining transcript carry a feature the canonical one lacks.
-
-## Example runs
-
-`run_examples.sh` runs DOMAS once per input format against the fixtures in `tests/`
-and compares each result against the reference stored in `tests/run_examples/`. The
-DoChaP database is not in this repository, so pass its path:
+`run_examples.sh` is one working `domas.py` command line per input format — read it
+for the invocation you need and swap in your own input. It runs DOMAS once per format
+against the fixtures in `tests/` and checks each result against the reference stored
+in `tests/run_examples/`. The DoChaP database is not in this repository, so pass its
+path:
 
 ```bash
 ./run_examples.sh /path/to/DB_merged.sqlite [output_dir]
 ```
 
-`output_dir` defaults to `./run_examples_output`, and each format writes `<format>.csv`
-there. DOMAS creates the directory if it does not exist. The whole set takes about two
-minutes; add `-stats` to a command to get the statistics report as well.
+The whole set takes about two minutes.
 
-Each run also writes `domas.log` beside its `-output_csv` and prints nothing to the
-console. The four examples share one output directory, so only the last run's log
-survives.
+Every parameter and flag, with its default, is documented in the CLI's own help:
 
-The script is four `domas.py` command lines, one per format — copy the one you need and
-swap in your own input.
+```bash
+python3 code/domas.py -h
+```
 
-| Example | Input | Rows |
-| :--- | :--- | ---: |
-| `ioe` | `tests/ioe/` — 20 SUPPA events per event type | 265 |
-| `rmats` | `tests/rmats/` — the five `[EventType].MATS.JC.txt` files | 344 |
-| `majiq` | `tests/majiq/NveB_Mono_voila.txt` — a `voila tsv` | 372 |
-| `leafcutter` | `tests/leafcutter/` — the `leafcutter_ds` output pair | 316 |
-
-Each invocation uses the minimal arguments its format needs: `-format`, the input, and
-`-specie`, which is required because none of these files carries a species field. The
-three large fixtures also pass `-max_clusters 200` so an example finishes in seconds —
-drop it to analyse the whole fixture.
-
-Each reference is the exact CSV its run produces, so a mismatch means the analysis
-changed. The script checks them at the end with `tests/compare_run_example.py`, which
-sorts both sides first — row order is not part of the result, since clusters are
-analysed in parallel and returned as they finish.
+The defaults are what a normal run wants; each flag either turns one of them off or
+asks for something extra, such as the statistics report.
 
 ## Output format
 
