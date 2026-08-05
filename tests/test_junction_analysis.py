@@ -16,7 +16,7 @@ sys.path.insert(0, CODE_DIR)
 from junction_analisys import (  # noqa: E402
     _init_worker, _process_cluster_chunk, ClusterAnalysisResult, JunctionsAnalysis,
     find_matching_junction_indices, get_aa_range, find_bp_range_for_domains,
-    classify_domain_change, collapse_contained_domains, group_by_shared_names,
+    classify_domain_change, group_by_shared_names,
     select_most_like_canonical, DOMAIN_NAME_COLUMNS,
 )
 
@@ -304,45 +304,6 @@ def test_find_matching_junction_indices_non_adjacent_exons_do_not_match():
 ])
 def test_classify_domain_change(c_count, t_count, c_length, t_length, expected):
     assert classify_domain_change(c_count, t_count, c_length, t_length) == expected
-
-
-# ---------------------------------------------------------------------------
-# collapse_contained_domains
-# ---------------------------------------------------------------------------
-
-def _domain_row(aa_start, aa_end, **names):
-    row = {'AA_start': aa_start, 'AA_end': aa_end}
-    row.update({col: names.get(col) for col in DOMAIN_NAME_COLUMNS})
-    return row
-
-
-def test_collapse_contained_domains_merges_contained_domain():
-    """A domain fully contained within another (within tolerance) is dropped,
-    and its names are merged into the surviving (longer) domain."""
-    df = pd.DataFrame([
-        _domain_row(10, 100, interpro='IPR001'),
-        _domain_row(12, 98, pfam='PF001'),  # contained within the first, within tolerance=2
-    ])
-    result = collapse_contained_domains(df, tolerance=2)
-    assert len(result) == 1
-    assert result.iloc[0]['AA_start'] == 10 and result.iloc[0]['AA_end'] == 100
-    assert result.iloc[0]['interpro'] == 'IPR001'
-    assert result.iloc[0]['pfam'] == 'PF001'
-
-
-def test_collapse_contained_domains_keeps_non_overlapping_domains_separate():
-    df = pd.DataFrame([
-        _domain_row(10, 50, interpro='IPR001'),
-        _domain_row(200, 250, interpro='IPR002'),
-    ])
-    result = collapse_contained_domains(df, tolerance=2)
-    assert len(result) == 2
-
-
-def test_collapse_contained_domains_single_row_is_unchanged():
-    df = pd.DataFrame([_domain_row(10, 50, interpro='IPR001')])
-    result = collapse_contained_domains(df, tolerance=2)
-    assert len(result) == 1
 
 
 # ---------------------------------------------------------------------------

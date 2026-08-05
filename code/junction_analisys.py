@@ -286,88 +286,6 @@ def _domains_in_aa_range(df_domains, min_aa, max_aa):
     return df_domains[(df_domains['AA_end'] >= min_aa) & (df_domains['AA_start'] <= max_aa)]
 
 
-def _merge_domain_names(*values):
-    """Merge one or more ';'-separated identifier strings into a deduplicated ';'-separated string."""
-    names = []
-    for value in values:
-        if value is None or pd.isna(value):
-            continue
-        for name in str(value).split(';'):
-            name = name.strip()
-            if name and name not in ('None', 'nan') and name not in names:
-                names.append(name)
-    return '; '.join(names) if names else None
-
-
-def collapse_contained_domains(df_domains, tolerance=2, overlap_fraction=0.85):
-    """
-    Collapse domains (of a single transcript) that are the same physical
-    domain instance into a single row - the longer domain - merging the
-    redundant domains' identifier names into the kept row so
-    compare_domains() can match on any of them.
-
-    Two domains are treated as the same instance if EITHER:
-    - one contains the other within `tolerance` AA on either side (handles
-      near-identical hits whose boundaries differ by only a couple AA), OR
-    - their overlap covers at least `overlap_fraction` of the shorter
-      domain's length (handles cases like co-occurring cross-database calls,
-      e.g. a CDD hit and an InterPro hit for the same fold, whose boundaries
-      can differ by more than `tolerance` AA without being a different
-      domain - a fixed AA tolerance alone is brittle here since it flips
-      on a few AA of alignment drift regardless of domain size).
-    """
-    if len(df_domains) <= 1:
-        return df_domains
-
-    df_domains = df_domains.copy()
-    starts = df_domains['AA_start'].to_numpy()
-    ends = df_domains['AA_end'].to_numpy()
-    index = df_domains.index.to_numpy()
-    name_block = df_domains[DOMAIN_NAME_COLUMNS].to_numpy(dtype=object)
-
-    # Longest domain first, ties broken by start, then end, then the merged
-    # identifier set. The tie-break must be stable: df_domains' own row order is
-    # hash-seed dependent, and for equal-length overlapping domains it decides
-    # which is kept, so length alone would vary a cluster's row count per run.
-    name_key = [
-        ";".join(sorted(
-            str(v).strip() for v in name_block[pos]
-            if not pd.isna(v) and str(v).strip() not in ("", "None", "nan")
-        ))
-        for pos in range(len(df_domains))
-    ]
-    order = sorted(
-        range(len(df_domains)),
-        key=lambda pos: (starts[pos] - ends[pos], starts[pos], ends[pos], name_key[pos]),
-    )
-
-    dropped = set()
-    merges = {}  # position -> list of positions merged into it
-    for oi in order:
-        if oi in dropped:
-            continue
-        for oj in order:
-            if oj == oi or oj in dropped:
-                continue
-            contained = starts[oi] - tolerance <= starts[oj] and ends[oj] <= ends[oi] + tolerance
-            if not contained:
-                overlap = min(ends[oi], ends[oj]) - max(starts[oi], starts[oj]) + 1
-                if overlap > 0:
-                    shorter_length = min(ends[oi] - starts[oi] + 1, ends[oj] - starts[oj] + 1)
-                    contained = (overlap / shorter_length) >= overlap_fraction
-            if contained:
-                merges.setdefault(oi, []).append(oj)
-                dropped.add(oj)
-
-    if merges:
-        for oi, others in merges.items():
-            for ci in range(len(DOMAIN_NAME_COLUMNS)):
-                values = [name_block[oi, ci]] + [name_block[oj, ci] for oj in others]
-                name_block[oi, ci] = _merge_domain_names(*values)
-        for ci, col in enumerate(DOMAIN_NAME_COLUMNS):
-            df_domains[col] = name_block[:, ci]
-
-    return df_domains.drop(index=index[list(dropped)] if dropped else [])
 
 
 # InterPro entry types (from RepresentativeDomains.type, sourced from
@@ -439,8 +357,8 @@ def _aa_overlap(s1, e1, s2, e2):
 def _aa_overlap_fraction(s1, e1, s2, e2):
     """Residues shared by [s1,e1] and [s2,e2] as a fraction of the SHORTER of the
     two - so a short entry sitting inside a long one scores 1.0, not the small
-    fraction of the long one it happens to cover. Coordinates are inclusive, the
-    same convention collapse_contained_domains() uses. 0.0 when they don't overlap."""
+    fraction of the long one it happens to cover. Coordinates are inclusive.
+    0.0 when they don't overlap."""
     if not _aa_overlap(s1, e1, s2, e2):
         return 0.0
     overlap = min(e1, e2) - max(s1, s2) + 1
@@ -598,9 +516,8 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
     t_min_aa, t_max_aa = get_aa_range(t_first_exon, t_last_exon)
     c_min_aa, c_max_aa = get_aa_range(c_first_exon, c_last_exon)
 
-    # collapse_contained_domains() (the geometric 2 AA / 85% overlap heuristic)
-    # is retained above but no longer called; the domain set is now reduced by
-    # curated InterPro entry type via filter_representative_domains().
+    # The domain set is reduced by curated InterPro entry type, not by the
+    # geometry of the hits.
     df_t_domains = filter_representative_domains(domain_lookup(transcript_id))
     df_c_domains = filter_representative_domains(domain_lookup(canonical_transcript_id))
 
@@ -644,25 +561,6 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
 # Phase 3: domain comparison and classification
 # ---------------------------------------------------------------------------
 
-def domain_name_set(row, name_cols=DOMAIN_NAME_COLUMNS):
-    """Return the set of non-empty/non-null identifier names for a domain row.
-
-    Cell values may be a single identifier or a ';'-joined list of identifiers
-    merged by collapse_contained_domains()/_merge_domain_names() - split them
-    back out here so a merged name (e.g. "G3DSA:2.80.10.50; IPR002209") still
-    matches a plain "IPR002209" cell elsewhere, as collapse_contained_domains'
-    docstring intends.
-    """
-    names = set()
-    for col in name_cols:
-        val = row[col]
-        if val is None or pd.isna(val):
-            continue
-        for name in str(val).split(';'):
-            name = name.strip()
-            if name and name not in ('None', 'nan'):
-                names.add(name)
-    return names
 
 
 def _domain_name_sets(df_domains, name_cols=DOMAIN_NAME_COLUMNS):
@@ -782,8 +680,7 @@ def _group_description(c_domains, c_idxs, t_domains, t_idxs):
     A group can hold several entries (a repeat present twice, a domain split in
     two), and a dropped or new domain has entries on one side only. Canonical is
     read first so the description describes the reference where there is one;
-    distinct texts are joined rather than picked between, the way
-    _merge_domain_names() treats merged names.
+    distinct texts are joined rather than picked between.
     """
     values = []
     for df, idxs in ((c_domains, c_idxs), (t_domains, t_idxs)):
@@ -1218,18 +1115,6 @@ class ClusterAnalysisResult:
                 self.add_event('no_domains_in_region', transcript_id=transcript_id,
                                 is_longest_cds=is_longest_cds, is_most_like_canonical=is_most_like_canonical)
 
-    def print_results(self, file_name='analysis_results.txt'):
-        with open(file_name, 'a') as f:
-            f.write(f"Cluster: {self.cluster_name}, Gene: {self.gene_symbol} ({self.gene_ensembl_id}), Chromosome: {self.chromosome}, Specie: {self.specie}\n")
-            f.write(f"\tCanonical Transcript ID: {self.canonical_transcript_id}\n")
-            f.write(f"\tJunctions: {self.junctions}\n")
-            f.write(f"\tEvents:\n")
-            for event, transcript_id, domain_name, canonical_domain_length, transcript_domain_length, \
-                canonical_domains_number, transcript_domains_number in self.events:
-                msg = f"\t\t{event}: Transcript ID={transcript_id}, Domain Name={domain_name}, "
-                msg += f"Canonical Length={canonical_domain_length}, Transcript Length={transcript_domain_length}, "
-                msg += f"Canonical Domains Number={canonical_domains_number}, Transcript Domains Number={transcript_domains_number}\n"
-                f.write(msg)
 
     def get_results_df(self):
         return pd.DataFrame(
