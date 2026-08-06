@@ -1240,7 +1240,7 @@ def test_zebrafish_and_frog_are_supported():
         return pd.DataFrame({'gene_ensembl_id': [gene_id], 'start_position': [1],
                              'end_position': [2], 'cluster_name': ['c']})
 
-    # derived from the ids, with no -specie stated
+    # derived from the ids, with no -species stated
     assert list(utils.normalize_junctions_frame(frame('ENSDARG3'))['specie']) == ['zebrafish']
     # asked for explicitly, on a gene id that names no species
     assert list(utils.normalize_junctions_frame(
@@ -1269,7 +1269,7 @@ def test_cluster_grouping_keeps_rows_whose_specie_cannot_be_derived():
 
 
 # ---------------------------------------------------------------------------
-# -specie: stated by the user, cross-checked against the data
+# -species: stated by the user, cross-checked against the data
 # ---------------------------------------------------------------------------
 
 def _specie_frame(gene_ids):
@@ -1286,7 +1286,7 @@ def test_stated_specie_is_authoritative():
 
 
 def test_contradicting_gene_ids_abort():
-    """A wrong -specie must stop the run, not silently mislabel every row."""
+    """A wrong -species must stop the run, not silently mislabel every row."""
     import utils
     with pytest.raises(ValueError, match="does not match"):
         utils.normalize_junctions_frame(_specie_frame(['ENSG1', 'ENSG2']), specie='mouse')
@@ -1315,7 +1315,7 @@ def test_no_stated_specie_falls_back_to_derivation():
 
 def test_database_specie_mismatch_aborts():
     """The database knows the species of every gene it holds, including GeneID-keyed
-    ones the Ensembl prefix cannot read - so it catches a wrong -specie the prefix
+    ones the Ensembl prefix cannot read - so it catches a wrong -species the prefix
     check is blind to."""
     from junction_analisys import _assert_specie_matches_database
     df = _specie_frame(['79400'])

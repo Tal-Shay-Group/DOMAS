@@ -43,7 +43,7 @@ def parse_args():
     parser.add_argument("-lc_effect", required=False, default=None, type=str,
                          help="Path to the leafcutter_ds_effect_sizes.txt file "
                               "(only used with -format leafcutter)")
-    parser.add_argument("-specie", required=False, choices=sorted(alternative_splicing.utils.SPECIE_DB_NAME),
+    parser.add_argument("-species", required=False, choices=sorted(alternative_splicing.utils.SPECIE_DB_NAME),
                          help="Species the input was produced from: human, mouse, rat, "
                               "zebrafish or frog. Required for every format except internal, "
                               "which is a human/mouse comparison and carries the species per "
@@ -111,14 +111,14 @@ def parse_args():
         parser.error("-format is required")
 
     # internal states a species per row (it is a human/mouse comparison), so one
-    # -specie cannot describe it. Every other format must state one: three carry
+    # -species cannot describe it. Every other format must state one: three carry
     # no species field, and a GeneID-keyed gene names none in its id either.
     if args.format == "internal":
-        if args.specie:
-            parser.error("-specie does not apply to -format internal: that input is a "
+        if args.species:
+            parser.error("-species does not apply to -format internal: that input is a "
                          "human/mouse comparison and carries the species per row.")
-    elif not args.specie:
-        parser.error(f"-specie is required for -format {args.format} "
+    elif not args.species:
+        parser.error(f"-species is required for -format {args.format} "
                      f"(one of: {', '.join(sorted(alternative_splicing.utils.SPECIE_DB_NAME))})")
     if not args.dochap:
         parser.error("-dochap is required")
@@ -199,28 +199,28 @@ def main():
         if args.format == "leafcutter":
             alternative_splicing.analyze_leafcutter_input(
                 con, significance_file=args.lc_sig, effect_sizes_file=args.lc_effect,
-                output_csv=args.output_csv, specie=args.specie, num_workers=args.num_workers,
+                output_csv=args.output_csv, specie=args.species, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
             )
         elif args.format == "rmats":
             alternative_splicing.analyze_rmats_input(
-                con, rmats_dir=args.input, output_csv=args.output_csv, specie=args.specie, num_workers=args.num_workers,
+                con, rmats_dir=args.input, output_csv=args.output_csv, specie=args.species, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
             )
         elif args.format == "majiq":
             alternative_splicing.analyze_voila_input(
-                con, voila_tsv=args.input, output_csv=args.output_csv, specie=args.specie, num_workers=args.num_workers,
+                con, voila_tsv=args.input, output_csv=args.output_csv, specie=args.species, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
             )
         elif args.format == "internal2":
             alternative_splicing.analyze_internal2_input(
-                con, input_file=args.input, output_csv=args.output_csv, specie=args.specie,
+                con, input_file=args.input, output_csv=args.output_csv, specie=args.species,
                 num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
                 filter_non_comparable=args.omit_non_comparable,
@@ -237,7 +237,7 @@ def main():
             )
         elif os.path.isdir(args.input):
             alternative_splicing.analyze_ioe_files(
-                con, input_path=args.input, pattern=args.ioe_pattern, output_csv=args.output_csv, specie=args.specie,
+                con, input_path=args.input, pattern=args.ioe_pattern, output_csv=args.output_csv, specie=args.species,
                 examples_per_event=args.examples_per_event, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
                 filter_non_comparable=args.omit_non_comparable,
@@ -245,7 +245,7 @@ def main():
             )
         else:
             alternative_splicing.analyze_ioe_file(
-                con, ioe_file=args.input, output_csv=args.output_csv, specie=args.specie, num_workers=args.num_workers,
+                con, ioe_file=args.input, output_csv=args.output_csv, specie=args.species, num_workers=args.num_workers,
                 use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,

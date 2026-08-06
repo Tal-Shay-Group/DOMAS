@@ -759,7 +759,7 @@ def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, tr
 def _assert_specie_matches_database(df_junctions, gene_specie):
     """Abort when the species carried on the junctions contradicts DoChaP.
 
-    Catches a wrong -specie for any gene the database holds - unlike the Ensembl
+    Catches a wrong -species for any gene the database holds - unlike the Ensembl
     prefix check, which is blind to GeneID-keyed genes. Genes absent from the
     database say nothing and are left to the gene_not_in_db path.
     """
@@ -1756,7 +1756,7 @@ class JunctionsAnalysis:
 
         # The database knows the species of every gene it holds, including those
         # keyed only by GeneID, which the Ensembl-prefix check cannot read. This is
-        # therefore the stronger check on the stated species: a wrong -specie is
+        # therefore the stronger check on the stated species: a wrong -species is
         # caught on any gene present in DoChaP, not only Ensembl-keyed ones.
         _assert_specie_matches_database(df_junctions, gene_specie)
 

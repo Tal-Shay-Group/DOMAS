@@ -35,7 +35,7 @@ by the canonical transcript.
 ## Usage
 
 Run the utility from the command line. `-format` selects the input reader, and the
-remaining input arguments depend on it. `-specie` is required throughout: none of
+remaining input arguments depend on it. `-species` is required throughout: none of
 these formats carries a species field, and DOMAS stops if the gene ids turn out to
 belong to a different species than the one stated.
 

@@ -174,7 +174,7 @@ def normalize_junctions_frame(df, specie=None):
     if not conflicting.empty:
         found = sorted(derived[conflicting.index].unique())
         raise ValueError(
-            f"Input does not match -specie {specie}: {len(conflicting)} of {len(df)} "
+            f"Input does not match -species {specie}: {len(conflicting)} of {len(df)} "
             f"rows carry gene ids from {', '.join(found)} "
             f"(e.g. {', '.join(str(g) for g in conflicting.unique()[:3])}). "
             f"Re-run with the species the data actually came from."
