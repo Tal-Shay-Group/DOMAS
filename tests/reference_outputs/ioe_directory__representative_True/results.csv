@@ -1,4 +1,4 @@
-cluster,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_name,domain_description,c_domain_length,t_domain_length,c_domains_number,t_domains_number,is_longest_cds,is_most_like_canonical
+event,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_name,domain_description,c_domain_length,t_domain_length,c_domains_number,t_domains_number,is_longest_cds,is_most_like_canonical
 SE_ENSG00000182183_1_12,SHISAL2A,human,no_canonical_features,ENST00000517870.2,,,,,,,,,
 MX_ENSG00000137948_1_13,BRDT,human,no_canonical_features,ENST00000399546.7,,,,,,,,,
 SE_ENSG00000283761_1_19,ENSG00000283761,human,no_unique_features,ENST00000639037.1,ENST00000638968.1,,,,,,,,

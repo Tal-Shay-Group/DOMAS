@@ -1,4 +1,4 @@
-cluster,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_name,domain_description,c_domain_length,t_domain_length,c_domains_number,t_domains_number,is_longest_cds,is_most_like_canonical
+event,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_name,domain_description,c_domain_length,t_domain_length,c_domains_number,t_domains_number,is_longest_cds,is_most_like_canonical
 MX_ENSG00000205916_Y_48674,DAZ4,human,transcript_doesnt_have_features,ENST00000682740.1,NM_001005375.3,,,,,,,,
 MX_ENSG00000205916_Y_48674,DAZ4,human,transcript_doesnt_have_features,ENST00000682740.1,ENST00000382314.6,,,,,,,,
 MX_ENSG00000205916_Y_48674,DAZ4,human,transcript_doesnt_have_features,ENST00000682740.1,ENST00000449750.7,,,,,,,,

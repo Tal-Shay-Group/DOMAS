@@ -1240,9 +1240,12 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
 
                     df_transformed = (
                         df_cluster_results
+                        # The per-cluster frame's own 'event' column holds the
+                        # outcome label and is renamed first, so the assign below
+                        # is free to write the cluster id under that name.
                         .rename(columns={'event': 'event_type'})
                         .assign(
-                            cluster=cluster_result.cluster_name,
+                            event=cluster_result.cluster_name,
                             gene_symbol=cluster_result.gene_symbol,
                             canonical_transcript_id=cluster_result.canonical_transcript_id,
                             specie=cluster_result.specie,
@@ -1524,7 +1527,7 @@ class JunctionsAnalysis:
         # only under write_all_comparable, where several transcripts share a
         # cluster and the reader needs to know which one the rule picked. With one
         # comparison row per cluster they would be True on every row of it.
-        df_results_columns = ['cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
+        df_results_columns = ['event', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
                               'domain_description',
                               'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
         if write_all_comparable:

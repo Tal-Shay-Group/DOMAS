@@ -1,4 +1,4 @@
-cluster,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_name,domain_description,c_domain_length,t_domain_length,c_domains_number,t_domains_number,is_longest_cds,is_most_like_canonical
+event,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_name,domain_description,c_domain_length,t_domain_length,c_domains_number,t_domains_number,is_longest_cds,is_most_like_canonical
 chr10:clu_2356,HNRNPH3,mouse,feature_not_mapped,ENSMUST00000020263.14,,,,,,,,,
 chr10:clu_2356,HNRNPH3,mouse,feature_not_mapped,ENSMUST00000020263.14,,,,,,,,,
 chr10:clu_2356,HNRNPH3,mouse,feature_not_mapped,ENSMUST00000020263.14,,,,,,,,,

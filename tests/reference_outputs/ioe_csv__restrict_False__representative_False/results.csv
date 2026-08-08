@@ -1,4 +1,4 @@
-cluster,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_name,domain_description,c_domain_length,t_domain_length,c_domains_number,t_domains_number,is_longest_cds,is_most_like_canonical
+event,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_name,domain_description,c_domain_length,t_domain_length,c_domains_number,t_domains_number,is_longest_cds,is_most_like_canonical
 A5_ENSG00000110375_11_37301,UPK2,human,dropped_domain,ENST00000264031.3,ENST00000534788.1,IPR037881,"RGS14, RGS domain; Homeobox protein GBX-1/2",179,,2,0,True,False
 A5_ENSG00000110375_11_37301,UPK2,human,dropped_domain,ENST00000264031.3,ENST00000534788.1,IPR051282,"Arf-GAP with GTPase, ANK repeat and PH domain-containing protein; alpha-2 adrenergic receptors subtype D, member of the class A family of seven-transmembrane G protein-coupled receptors",154,,1,0,True,False
 AF_ENSG00000100583_14_422208,SAMD15,human,dropped_domain,ENST00000216471.5,ENST00000533095.2,IPR031736,RNA exonuclease 1 homolog-like domain; N-terminal NatB acetyltransferase catalytic subunit,67,,1,0,True,False

@@ -1,4 +1,4 @@
-cluster,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_name,domain_description,c_domain_length,t_domain_length,c_domains_number,t_domains_number
+event,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_name,domain_description,c_domain_length,t_domain_length,c_domains_number,t_domains_number
 ENSG00000065413:t:196986662-196990927,ANKRD44,human,feature_not_mapped,ENST00000282272.15,,,,,,,
 ENSG00000065413:t:196986662-196990927,ANKRD44,human,transcript_doesnt_have_features,ENST00000282272.15,XM_047446287.1,,,,,,
 ENSG00000065413:t:196986662-196990927,ANKRD44,human,transcript_doesnt_have_features,ENST00000282272.15,XM_005246948.3,,,,,,

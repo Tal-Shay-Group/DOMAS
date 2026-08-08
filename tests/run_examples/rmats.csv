@@ -1,4 +1,4 @@
-cluster,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_name,domain_description,c_domain_length,t_domain_length,c_domains_number,t_domains_number
+event,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_name,domain_description,c_domain_length,t_domain_length,c_domains_number,t_domains_number
 A3SS_ENSG00000022976_14_75817,ZNF839,human,no_unique_features,ENST00000442396.7,ENST00000559185.5,,,,,,
 A3SS_ENSG00000022976_14_75817,ZNF839,human,transcript_doesnt_have_features,ENST00000442396.7,NM_001385069.1,,,,,,
 A3SS_ENSG00000022976_14_75817,ZNF839,human,no_unique_features,ENST00000442396.7,ENST00000558850.5,,,,,,

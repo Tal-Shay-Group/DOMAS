@@ -21,7 +21,7 @@ import pandas as pd
 # Low-cardinality columns, read as category (and the length/count pair as
 # float32): a 20M-row file then costs a few hundred MB instead of several GB.
 CATEGORY_COLS = [
-    'cluster', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id',
+    'event', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id',
     'transcript_id', 'domain_name', 'is_longest_cds', 'is_most_like_canonical',
 ]
 FLOAT_COLS = ['c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']

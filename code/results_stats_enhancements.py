@@ -116,7 +116,7 @@ def transcript_choice_table(df):
     if analyzed.empty:
         return pd.DataFrame(columns=["n_transcripts", "rule"])
 
-    gcols = ["specie", "cluster"] if "specie" in analyzed.columns else ["cluster"]
+    gcols = ["specie", "event"] if "specie" in analyzed.columns else ["event"]
     nuniq = analyzed.groupby(gcols, observed=True, dropna=False)["transcript_id"].nunique()
 
     # A CSV written without -write_all_comparable carries neither tag column: only

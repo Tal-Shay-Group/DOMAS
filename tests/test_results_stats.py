@@ -93,7 +93,7 @@ def _rep_df(rows):
     clusters, transcripts, most_like, longest = zip(*rows)
     return pd.DataFrame({
         'specie': ['H_sapiens'] * len(rows),
-        'cluster': clusters,
+        'event': clusters,
         'transcript_id': transcripts,
         'event_type': ['shorter'] * len(rows),
         'is_most_like_canonical': most_like,

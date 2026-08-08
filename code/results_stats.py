@@ -130,7 +130,7 @@ ALL_EVENT_TYPES = UNANALYZABLE_TYPES + ANALYZED_TYPES
 # Columns that aren't always present in a results.csv (depends on input
 # format / how it was produced) - analyses that need one of these are
 # skipped with a warning instead of failing when it's absent.
-OPTIONAL_COLUMNS = ["specie", "cluster"]
+OPTIONAL_COLUMNS = ["specie", "event"]
 
 # ── Visual style ───────────────────────────────────────────────────────────────
 COLORS = {
@@ -282,7 +282,7 @@ RESULTS_CSV_DTYPES = {
     "specie": "category",
     "event_type": "category",
     "domain_name": "category",
-    "cluster": "category",
+    "event": "category",
     "transcript_id": "category",
     "c_domain_length": "float32",
     "t_domain_length": "float32",
@@ -327,7 +327,7 @@ def _read_results_csv(path, chunk_rows=1_000_000):
     """Memory-efficient reader for a results.csv of any size.
 
     Reads in chunks with compact dtypes (category/float32/nullable-boolean)
-    and drops columns that are never used downstream. The full "cluster" id
+    and drops columns that are never used downstream. The full "event" id
     is kept (as a category, not collapsed to its AS-type prefix) since
     select_representative_transcript() needs real per-cluster identity, not
     just its AS-type category - at full IOE scale (21M rows, ~1.1M distinct
@@ -435,7 +435,7 @@ def _load_single(path, label):
     # Extract AS splice type from cluster prefix (e.g. "A3_ENSG…" → "A3").
     # Rows whose cluster id doesn't carry one (e.g. Hadas' "chr11:clu_6611",
     # or a missing cluster column) get "" and are excluded downstream.
-    df["as_type"] = df["cluster"].apply(_cluster_prefix)
+    df["as_type"] = df["event"].apply(_cluster_prefix)
 
     return df
 
@@ -469,7 +469,7 @@ def select_representative_transcript(df, on_ambiguous="raise"):
     the analyzed subset, and there's no principled way to prefer one of the
     remaining untagged transcripts over another.
 
-    `df` must carry the real, full cluster id in its 'cluster' column - not
+    `df` must carry the real, full cluster id in its 'event' column - not
     the AS-type-prefix-collapsed one older versions of _read_results_csv()
     produced, which would group every cluster of the same AS type together
     instead of keeping each cluster distinct. normalize_event_types() is
@@ -494,7 +494,7 @@ def select_representative_transcript(df, on_ambiguous="raise"):
     if not {"is_most_like_canonical", "is_longest_cds"} <= set(analyzed_df.columns):
         return analyzed_df
 
-    group_cols = ["specie", "cluster"] if "specie" in analyzed_df.columns else ["cluster"]
+    group_cols = ["specie", "event"] if "specie" in analyzed_df.columns else ["event"]
 
     most_like_pick = (
         analyzed_df[analyzed_df["is_most_like_canonical"] == True]
@@ -586,7 +586,7 @@ def _cluster_event_labels(df):
     within a cluster, so callers needing a per-gene breakdown - e.g.
     species_comparison() - don't need to re-derive it).
     """
-    group_cols = ["specie", "cluster"] if "specie" in df.columns else ["cluster"]
+    group_cols = ["specie", "event"] if "specie" in df.columns else ["event"]
     is_analyzed = df["event_type"].isin(ANALYZED_TYPES)
 
     has_analyzed = (
@@ -794,7 +794,7 @@ def _mixed_combo_sets(df):
     Shared by mixed_combinations() (the full breakdown table) and
     event_distribution() (which explodes the pie's "mixed" wedge by combo).
     """
-    group_cols = ["specie", "cluster"] if "specie" in df.columns else ["cluster"]
+    group_cols = ["specie", "event"] if "specie" in df.columns else ["event"]
     is_analyzed = df["event_type"].isin(ANALYZED_TYPES)
 
     has_analyzed = (
@@ -1275,7 +1275,7 @@ def domain_cluster_species_counts(df, top_domains, label):
 
     domain_df = df[df["domain_name"].isin(top_domains.index)]
     cluster_counts = {
-        sp: domain_df[domain_df["specie"] == sp].groupby("domain_name")["cluster"]
+        sp: domain_df[domain_df["specie"] == sp].groupby("domain_name")["event"]
             .nunique().reindex(top_domains.index, fill_value=0)
         for sp in species_present
     }
@@ -1884,7 +1884,7 @@ def _run_analyses(df, label, fetch_domain_descriptions=False, skip_sections=None
 
     representative_df = select_representative_transcript(df, on_ambiguous="drop")
     n_clusters = len(representative_df.groupby(
-        ["specie", "cluster"] if "specie" in representative_df.columns else ["cluster"], observed=True
+        ["specie", "event"] if "specie" in representative_df.columns else ["event"], observed=True
     ))
     print(f"  Representative-transcript selection: {len(representative_df)} analyzed rows "
           f"across {n_clusters} clusters kept for domain/length/count/severity analyses below.")

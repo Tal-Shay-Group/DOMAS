@@ -178,7 +178,7 @@ def test_write_all_comparable_off_keeps_one_transcript_and_drops_the_tags(con, t
 
     comparisons = df[~df['event_type'].isin(NON_COMPARISON_EVENTS)]
     assert len(comparisons) > 0, "Expected at least one compared transcript"
-    per_cluster = comparisons.groupby('cluster')['transcript_id'].nunique()
+    per_cluster = comparisons.groupby('event')['transcript_id'].nunique()
     assert (per_cluster == 1).all(), (
         f"Clusters with more than one compared transcript: "
         f"{per_cluster[per_cluster > 1].to_dict()}")
@@ -684,7 +684,7 @@ def test_ioe_directory_compare_against_reference(con, keep_test_output):
     assert os.path.getsize(generated_csv) > 0, "Results CSV should not be empty"
 
     df = pd.read_csv(generated_csv)
-    types = {c.split('_', 1)[0] for c in df['cluster']}
+    types = {c.split('_', 1)[0] for c in df['event']}
     assert types == {'A3', 'A5', 'AF', 'AL', 'MX', 'RI', 'SE'}, (
         f"Expected every SUPPA event type to survive to the output, got {sorted(types)}")
 
