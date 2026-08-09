@@ -1363,40 +1363,41 @@ def test_site_and_ptm_entries_inside_a_domain_are_dropped():
     assert list(kept['domain_id']) == ['IPR000001'], list(kept['domain_id'])
 
 
-def test_site_entries_survive_where_no_domain_covers_them():
-    """'Demote, don't delete' now covers the sites too: an active or phosphorylation
-    site in a region no Domain/Repeat annotates is the only evidence there is that a
-    splicing event touching that region changes the protein, so it is kept and
-    compared."""
+def test_site_entries_are_dropped_wherever_they_sit():
+    """Only InterPro Domain and Repeat are domains. A residue feature is a position,
+    not a region a splicing event can remove a unit of, so it goes even where no
+    Domain annotates that part of the protein."""
     from junction_analisys import filter_representative_domains
     df = pd.DataFrame([
         _typed_domain_row('IPR000001', 'Domain', 10, 100),
         _typed_domain_row('IPR000002', 'Conserved_site', 500, 512),   # nothing else near it
     ])
     kept = filter_representative_domains(df)
-    assert list(kept['domain_id']) == ['IPR000001', 'IPR000002'], list(kept['domain_id'])
+    assert list(kept['domain_id']) == ['IPR000001'], list(kept['domain_id'])
 
 
-def test_lone_site_entry_is_kept():
-    """A transcript annotated with nothing but a site keeps it - there is nothing
-    that could cover it, and dropping it would leave the transcript with no
-    annotation at all."""
+def test_lone_site_entry_leaves_no_domains():
+    """A transcript annotated with nothing but a site has no domains. The one-row
+    frame must not short-circuit the filter: whether a row is a domain does not
+    depend on what surrounds it."""
     from junction_analisys import filter_representative_domains
     df = pd.DataFrame([_typed_domain_row('IPR000002', 'Active_site', 40, 44)])
     kept = filter_representative_domains(df)
-    assert list(kept['domain_id']) == ['IPR000002'], list(kept['domain_id'])
+    assert list(kept['domain_id']) == [], list(kept['domain_id'])
 
 
-def test_site_partially_covered_by_a_domain_is_kept():
-    """The threshold is a majority of the site's own residues, as for a Family entry:
-    a site half outside the Domain that abuts it survives."""
+def test_family_entries_are_dropped_even_when_nothing_covers_them():
+    """The same for Family and Homologous_superfamily: they say what the protein IS
+    rather than delimiting a unit within it. Previously kept under 'demote, don't
+    delete'."""
     from junction_analisys import filter_representative_domains
     df = pd.DataFrame([
         _typed_domain_row('IPR000001', 'Domain', 10, 100),
-        _typed_domain_row('IPR000002', 'Binding_site', 97, 106),   # 4 of 10 residues covered
+        _typed_domain_row('IPR000002', 'Family', 400, 500),
+        _typed_domain_row('IPR000003', 'Homologous_superfamily', 600, 700),
     ])
     kept = filter_representative_domains(df)
-    assert list(kept['domain_id']) == ['IPR000001', 'IPR000002'], list(kept['domain_id'])
+    assert list(kept['domain_id']) == ['IPR000001'], list(kept['domain_id'])
 
 
 def _same_id_kept(span_a, span_b):
@@ -1441,7 +1442,10 @@ def test_frame_whose_only_typed_rows_are_sites_does_not_raise():
     returned None, and indexing the frame with `None == TIER_PRIMARY` raised
     ValueError. _analyze_chunk() catches ValueError per cluster, so the whole
     cluster - every transcript, including the rows recorded before the comparison -
-    vanished from the results. Two real leafcutter clusters were lost this way."""
+    vanished from the results. Two real leafcutter clusters were lost this way.
+
+    The site is dropped now, but the member-DB rows it sits among must still come
+    through rather than the call raising."""
     from junction_analisys import filter_representative_domains
     df = pd.DataFrame([
         _typed_domain_row('G3DSA:1.10.238.10', None, 10, 80),
@@ -1449,20 +1453,34 @@ def test_frame_whose_only_typed_rows_are_sites_does_not_raise():
         _typed_domain_row('IPR018247', 'Conserved_site', 40, 52),
     ])
     kept = filter_representative_domains(df)
-    assert set(kept['domain_id']) == {'G3DSA:1.10.238.10', 'PTHR11216', 'IPR018247'}
+    assert set(kept['domain_id']) == {'G3DSA:1.10.238.10', 'PTHR11216'}
 
 
-def test_non_site_tiers_survive_alongside_site_removal():
-    """Ranking the sites at the Family tier must not disturb the rest of the ladder:
-    a Family entry that no Domain covers is still kept, while a PTM inside one goes."""
+def test_member_db_hit_is_the_fallback_where_interpro_has_no_domain():
+    """Tier 2 is what remains once the ignored types are gone: a protein whose
+    InterPro entries are all Family/site still reports its member-DB hits, and they
+    are the only reason it has any domains at all."""
     from junction_analisys import filter_representative_domains
     df = pd.DataFrame([
-        _typed_domain_row('IPR000001', 'Domain', 10, 100),
-        _typed_domain_row('IPR000002', 'Family', 400, 500),           # no Domain covers this
+        _typed_domain_row('IPR000002', 'Family', 1, 500),
         _typed_domain_row('IPR000003', 'PTM', 45, 47),
+        _typed_domain_row('PF00001', None, 30, 120),
     ])
     kept = filter_representative_domains(df)
-    assert set(kept['domain_id']) == {'IPR000001', 'IPR000002'}, list(kept['domain_id'])
+    assert list(kept['domain_id']) == ['PF00001'], list(kept['domain_id'])
+
+
+def test_member_db_hit_still_yields_to_a_covering_domain():
+    """The tier-2 coverage rule is unchanged: a member-DB entry a Domain already
+    covers by a majority is redundant and goes."""
+    from junction_analisys import filter_representative_domains
+    df = pd.DataFrame([
+        _typed_domain_row('IPR000001', 'Domain', 10, 200),
+        _typed_domain_row('G3DSA:1.10.238.10', None, 20, 190),   # sits inside the domain
+        _typed_domain_row('PF00002', None, 400, 500),            # nothing covers this
+    ])
+    kept = filter_representative_domains(df)
+    assert set(kept['domain_id']) == {'IPR000001', 'PF00002'}, list(kept['domain_id'])
 
 
 # ---------------------------------------------------------------------------

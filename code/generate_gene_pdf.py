@@ -1588,7 +1588,8 @@ class GeneVisualization:
                 ax.add_patch(ellipse_border)
             
             # Ladder mark: a small rectangle inside the ellipse carrying the
-            # domain's tier (1/2/3/S), filled when the domain reaches
+            # domain's tier - 1 for an InterPro Domain/Repeat, 2 for a member-DB
+            # hit, - for an entry no tier admits - filled when the domain reaches
             # compare_domains() and hollow when the ladder removes it. At 18% of the
             # width it clears the ellipse edge and the centred length label, and the
             # ellipse is over 3/4 of full height there, so the chip fits inside.

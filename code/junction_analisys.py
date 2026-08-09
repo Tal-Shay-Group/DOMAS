@@ -297,8 +297,12 @@ def _domains_in_aa_range(df_domains, min_aa, max_aa):
 # that region, so a site is only discarded where a Domain/Repeat already
 # accounts for the majority of it - the same "demote, don't delete" rule the
 # Family entries get.
+# The only InterPro entry types DOMAS considers. Everything else InterPro
+# curates - Family, Homologous_superfamily, and the residue features
+# Active_site / Binding_site / Conserved_site / PTM - is ignored: a family
+# assignment names what a protein IS, not a structural unit that a splicing
+# event can remove, and a residue feature is a position rather than a region.
 _PRIMARY_ENTRY_TYPES = frozenset({'Domain', 'Repeat'})
-_SITE_ENTRY_TYPES = frozenset({'Active_site', 'Binding_site', 'Conserved_site', 'PTM'})
 # A lower-tier entry is treated as redundant (and dropped) only when MORE THAN
 # this fraction of its residues is already covered by higher-tier entries. The
 # "majority" midpoint keeps a member-DB/family entry that annotates a region no
@@ -314,24 +318,28 @@ _REDUNDANT_COVER = 0.5
 _SAME_ID_OVERLAP = 0.5
 
 
-# TIER_SITE keeps its own label so a reader (and the PDF) can still tell a
-# residue feature from a Family entry, but it is ranked at the PARENT level -
-# see _PARENT_LEVEL_TIERS, which is what filter_representative_domains() applies.
-TIER_PRIMARY, TIER_PARENT, TIER_MEMBER, TIER_SITE = '1', '2', '3', 'S'
-_PARENT_LEVEL_TIERS = (TIER_PARENT, TIER_SITE)
+# Two tiers, plus a label for the entries neither tier admits. TIER_IGNORED rows
+# are dropped by filter_representative_domains(); the label exists so a caller
+# ranking an unfiltered frame (the PDF) can say why an entry is not there.
+TIER_PRIMARY, TIER_MEMBER, TIER_IGNORED = '1', '2', '-'
 
 
 def domain_entry_tiers(df_domains):
     """Each row's tier on the ladder filter_representative_domains() applies, as a
     Series of TIER_* labels indexed like `df_domains`.
 
+      TIER_PRIMARY : an InterPro Domain or Repeat entry
+      TIER_MEMBER  : a member-database hit (Pfam, CDD, G3DSA, PANTHER, SUPERFAMILY,
+                     ...), i.e. any accession InterPro did not issue
+      TIER_IGNORED : every other InterPro entry - Family, Homologous_superfamily,
+                     the residue features, and an IPR of unknown type
+
     None when the frame carries nothing to rank by - no domain_id/type columns, or
     type entirely null (DomainEvent/DomainType rows) - the same condition under
     which the filter returns its input untouched.
 
     Shared with the PDF, so a domain is labelled with the tier the analysis judged
-    it on rather than one re-derived alongside it. TIER_SITE is a label, not a rank
-    of its own: the filter ranks it with TIER_PARENT (see _PARENT_LEVEL_TIERS).
+    it on rather than one re-derived alongside it.
     """
     if df_domains is None or len(df_domains) == 0:
         return None
@@ -343,9 +351,8 @@ def domain_entry_tiers(df_domains):
     is_ipr = df_domains['domain_id'].astype(str).str.startswith('IPR')
     etype = df_domains['type']
     tiers = pd.Series(TIER_MEMBER, index=df_domains.index)   # non-IPR by default
-    tiers[is_ipr] = TIER_PARENT                              # IPR, incl. unknown type
+    tiers[is_ipr] = TIER_IGNORED                             # IPR, incl. unknown type
     tiers[is_ipr & etype.isin(_PRIMARY_ENTRY_TYPES)] = TIER_PRIMARY
-    tiers[is_ipr & etype.isin(_SITE_ENTRY_TYPES)] = TIER_SITE
     return tiers
 
 
@@ -389,24 +396,24 @@ def filter_representative_domains(df_domains):
     Reduce a single transcript's representative domains to a clean domain set,
     ranked by the curated InterPro entry `type`.
 
-    Priority ladder - per region, keep the best available annotation, and drop a
-    lower tier only where a higher tier already covers the MAJORITY of it
-    (>_REDUNDANT_COVER). This is "demote, don't delete": a member-DB or family
-    entry that annotates a region no domain covers is kept, so we never lose the
-    only annotation for a region (e.g. KLF1's cd21581, which carries the change).
+    Two tiers, and everything else is not a domain at all:
 
-      Tier 1 PRIMARY : InterPro Domain / Repeat
-      Tier 2 PARENT  : InterPro Family / Homologous_superfamily (+ IPR of unknown
-                       type), and the site/PTM types (Active_site, Binding_site,
-                       Conserved_site, PTM) - kept unless the majority is covered
-                       by PRIMARY
-      Tier 3 MEMBER  : non-InterPro member-DB hits (G3DSA/PTHR/SSF/cd/PF/...) -
-                       kept unless the majority is covered by kept PRIMARY+PARENT
+      Tier 1 PRIMARY : InterPro Domain / Repeat - the curated structural units
+      Tier 2 MEMBER  : member-database hits (Pfam, CDD, G3DSA, PANTHER,
+                       SUPERFAMILY, ...) - kept only where PRIMARY does not
+                       already cover the MAJORITY of the entry (>_REDUNDANT_COVER),
+                       so a member-DB entry is the annotation of last resort for a
+                       region InterPro left unannotated (e.g. KLF1's cd21581), not
+                       a duplicate laid over a domain (e.g. TRIB2's two G3DSA
+                       kinase lobes over the Pkinase entry)
 
-    Sites sit at the PARENT level rather than being dropped outright: an event that
-    removes an active or phosphorylation site is a real change to the protein, and
-    where a Domain entry does cover the site the coverage rule discards it anyway.
-    They keep their own TIER_SITE label for the PDF - see domain_entry_tiers().
+    Every other InterPro entry is dropped outright: Family and
+    Homologous_superfamily say what the protein IS rather than delimiting a unit
+    within it, and Active_site / Binding_site / Conserved_site / PTM are residue
+    positions rather than regions. A protein whose only InterPro entries are of
+    those types therefore falls back on its member-DB hits, and where it has none
+    it has no domains - which is the honest answer, not a gap to paper over with a
+    family assignment.
 
     Then collapse genuine duplicates: two kept rows with the SAME domain_id whose
     overlap covers at least _SAME_ID_OVERLAP of the shorter one -> keep the longer.
@@ -420,14 +427,12 @@ def filter_representative_domains(df_domains):
 
     Requires 'domain_id' and 'type' columns; a frame without them, or with `type`
     entirely NULL (DomainEvent/DomainType rows), is returned unchanged. A frame of
-    one row is returned as it stands, sites included - there is nothing that could
-    cover it.
+    one row is NOT short-circuited: whether that row is a domain does not depend on
+    what surrounds it, so a lone Family or site entry is dropped like any other.
     """
     if 'domain_id' not in df_domains.columns or 'type' not in df_domains.columns:
         return df_domains
     if df_domains['type'].isna().all():
-        return df_domains
-    if len(df_domains) <= 1:
         return df_domains
 
     df = df_domains
@@ -436,20 +441,15 @@ def filter_representative_domains(df_domains):
     ends = df['AA_end']
 
     # One definition of the tiers, shared with the PDF - see domain_entry_tiers().
-    # TIER_SITE rows are ranked here with TIER_PARENT, keeping their own label.
+    # TIER_IGNORED rows are not ranked at all: they are simply not domains.
     tiers = domain_entry_tiers(df)
-    primary_idx = df.index[tiers == TIER_PRIMARY].tolist()
-    parent_idx = df.index[tiers.isin(_PARENT_LEVEL_TIERS)].tolist()   # Family/HSF/unknown IPR + sites
-    member_idx = df.index[tiers == TIER_MEMBER].tolist()   # non-InterPro member DBs
+    primary_idx = df.index[tiers == TIER_PRIMARY].tolist()   # InterPro Domain/Repeat
+    member_idx = df.index[tiers == TIER_MEMBER].tolist()     # member-DB hits
 
     keep = list(primary_idx)
     prim_iv = [(starts[i], ends[i]) for i in primary_idx]
-    for pi in parent_idx:                                            # tier 2
-        if _covered_fraction(starts[pi], ends[pi], prim_iv) <= _REDUNDANT_COVER:
-            keep.append(pi)
-    higher_iv = [(starts[i], ends[i]) for i in keep]                 # PRIMARY + kept PARENT
-    for mi in member_idx:                                            # tier 3
-        if _covered_fraction(starts[mi], ends[mi], higher_iv) <= _REDUNDANT_COVER:
+    for mi in member_idx:                                            # tier 2
+        if _covered_fraction(starts[mi], ends[mi], prim_iv) <= _REDUNDANT_COVER:
             keep.append(mi)
 
     # collapse genuine duplicates (same accession, overlapping by a majority of the
