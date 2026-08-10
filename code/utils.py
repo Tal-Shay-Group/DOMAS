@@ -733,17 +733,73 @@ def get_genes_df_transcripts(con, gene_ids):
     return pd.concat(dfs, ignore_index=True)
 
 
+def _link_proteins_by_refseq(df_transcript, df_protein, df_all_proteins):
+    """Recover the protein of a transcript whose protein_ensembl_id names no
+    Proteins row, by falling back to its protein_refseq_id.
+
+    Proteins holds one row per protein, with UNIQUE protein_refseq_id and
+    protein_ensembl_id, so it can only back-link to one transcript. Where two
+    transcripts encode the same protein - the pseudoautosomal genes, whose X and Y
+    copies are identical - the second transcript's protein_ensembl_id matches
+    nothing and its domains are unreachable, even though the protein and its
+    domains are in the database under the sibling. 35 coding transcripts across 12
+    PAR genes (SHOX, PLCXD1, CRLF2, CSF2RA, ...) are in that state; each one's
+    protein IS found by its protein_refseq_id.
+
+    The transcript's own protein_ensembl_id is the broken half, so it is rewritten
+    to the one the Proteins row carries - that is the id DomainEvent and
+    RepresentativeDomains are keyed on, and the point of the exercise is to reach
+    those domains.
+    """
+    linked = set(df_protein['transcript_ensembl_id'])
+    unlinked = df_transcript[~df_transcript['transcript_ensembl_id'].isin(linked)]
+    if 'protein_refseq_id' not in unlinked.columns or unlinked.empty:
+        return df_transcript, df_protein
+    refseq = unlinked['protein_refseq_id'].astype(str).str.strip()
+    unlinked = unlinked[refseq.notna() & ~refseq.isin(('', 'nan', 'None'))]
+    if unlinked.empty:
+        return df_transcript, df_protein
+
+    by_refseq = df_all_proteins.dropna(subset=['protein_refseq_id'])
+    by_refseq = by_refseq[by_refseq['protein_ensembl_id'].notna()]
+    by_refseq = by_refseq.drop_duplicates('protein_refseq_id').set_index('protein_refseq_id')
+
+    recovered, rewritten = [], {}
+    for _, transcript in unlinked.iterrows():
+        key = str(transcript['protein_refseq_id']).strip()
+        if key not in by_refseq.index:
+            continue
+        protein = by_refseq.loc[key].copy()
+        protein['protein_refseq_id'] = key
+        # The record is real; only its back-link names the sibling transcript.
+        protein['transcript_ensembl_id'] = transcript['transcript_ensembl_id']
+        protein['transcript_refseq_id'] = transcript['transcript_refseq_id']
+        recovered.append(protein)
+        rewritten[transcript['transcript_ensembl_id']] = protein['protein_ensembl_id']
+
+    if not recovered:
+        return df_transcript, df_protein
+
+    df_protein = pd.concat([df_protein, pd.DataFrame(recovered)], ignore_index=True)
+    df_transcript = df_transcript.copy()
+    mask = df_transcript['transcript_ensembl_id'].isin(rewritten)
+    df_transcript.loc[mask, 'protein_ensembl_id'] = (
+        df_transcript.loc[mask, 'transcript_ensembl_id'].map(rewritten))
+    logger.log(PROGRESS, 'Linked %d transcript(s) to their protein by protein_refseq_id', len(rewritten))
+    return df_transcript, df_protein
+
+
 def _read_transcripts_and_proteins(con, transcript_ids):
     """Transcripts/Proteins rows for transcript_ids, filtered to a non-empty
     protein_ensembl_id. Shared by get_transcript_domains_db() and
     get_representative_domains_db() so get_domains_db() reads these tables once."""
     df_transcript = pd.read_sql_query('select * from Transcripts', con)
     df_transcript = df_transcript[df_transcript.transcript_ensembl_id.isin(transcript_ids)]
-    df_protein = pd.read_sql_query('select * from Proteins', con)
-    df_protein = df_protein[df_protein.transcript_ensembl_id.isin(transcript_ids)]
+    df_all_proteins = pd.read_sql_query('select * from Proteins', con)
+    df_protein = df_all_proteins[df_all_proteins.transcript_ensembl_id.isin(transcript_ids)]
     df_protein = df_protein.dropna(subset=['protein_ensembl_id'])
     df_protein = df_protein[df_protein.protein_ensembl_id.str.strip() != '']
-    return df_transcript, df_protein
+    return _link_proteins_by_refseq(df_transcript, df_protein, df_all_proteins)
 
 
 def get_transcript_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
