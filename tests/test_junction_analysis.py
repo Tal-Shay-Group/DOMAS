@@ -1582,3 +1582,65 @@ def test_canonical_precedence_ties_and_missing_rank_keep_lowest_id():
                            {'ENST_AAA': 2, 'ENST_BBB': 2}) == 'ENST_AAA'
     assert _canonical_pick(['ENST_BBB', 'ENST_AAA'],
                            {'ENST_AAA': 3, 'ENST_BBB': 3}) == 'ENST_AAA'
+
+
+# ---------------------------------------------------------------------------
+# _group_by_unique_features: a cluster's distinct events
+#
+# A LeafCutter cluster routinely holds more than one event. Transcripts adding
+# the same features to the canonical describe the same thing and share a group;
+# a group whose features are a subset of another's is the lesser account of the
+# same region and is dropped.
+# ---------------------------------------------------------------------------
+
+def _cluster():
+    from junction_analisys import ClusterAnalysisResult
+    result = ClusterAnalysisResult('clu_1', 'ENSG0', 'GENE')
+    result.canonical_transcript_id = 'CANON'
+    return result
+
+
+def _grouped(unique_by_transcript):
+    result = _cluster()
+    groups = result._group_by_unique_features(
+        {tid: frozenset(features) for tid, features in unique_by_transcript.items()})
+    subsumed = sorted(tid for event, tid, *_ in result.events if event == 'subsumed_by_larger_event')
+    return groups, subsumed
+
+
+def test_transcripts_adding_the_same_features_share_a_group():
+    groups, subsumed = _grouped({'t1': {0}, 't2': {0}, 't3': {1}})
+    assert groups == [(1, ['t1', 't2']), (2, ['t3'])]
+    assert subsumed == []
+
+
+def test_a_subset_group_is_dropped_for_the_larger_one():
+    """{0} inside {0,1}: both describe the same region and the larger set is the
+    fuller account, so only it is compared."""
+    groups, subsumed = _grouped({'t1': {0}, 't2': {0, 1}})
+    assert groups == [(1, ['t2'])]
+    assert subsumed == ['t1']
+
+
+def test_a_chain_of_subsets_leaves_only_the_largest():
+    """Subset is transitive, so one pass removes every link below the top."""
+    groups, subsumed = _grouped({'t1': {0}, 't2': {0, 1}, 't3': {0, 1, 2}})
+    assert groups == [(1, ['t3'])]
+    assert subsumed == ['t1', 't2']
+
+
+def test_overlapping_but_incomparable_groups_both_survive():
+    """{0,1} and {1,2} share a feature but neither contains the other: two events."""
+    groups, _ = _grouped({'t1': {0, 1}, 't2': {1, 2}})
+    assert groups == [(1, ['t1']), (2, ['t2'])]
+
+
+def test_group_index_follows_the_features_not_dict_order():
+    """Numbered by the features themselves, so the index does not move between runs."""
+    first, _ = _grouped({'a': {5}, 'b': {2}})
+    second, _ = _grouped({'b': {2}, 'a': {5}})
+    assert first == second == [(1, ['b']), (2, ['a'])]
+
+
+def test_no_comparable_transcripts_yields_no_groups():
+    assert _grouped({}) == ([], [])

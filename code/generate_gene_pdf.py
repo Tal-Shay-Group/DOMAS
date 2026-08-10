@@ -779,7 +779,9 @@ class GeneVisualization:
         if df_results is None or len(df_results) == 0:
             return
 
-        table_df = df_results.fillna('')
+        # astype(object) first: the results frame carries a nullable-Int64 'group'
+        # column, and filling pd.NA with '' in place would raise on its dtype.
+        table_df = df_results.astype(object).fillna('')
         column_names = list(table_df.columns)
         table = ax.table(
             cellText=table_df.astype(str).values,

@@ -111,6 +111,10 @@ UNANALYZABLE_TYPES = [
     "transcript_doesnt_have_features",
     "no_canonical_features",
     "no_domains_in_region",
+    # Has unique features, but they are a subset of another event's in the same
+    # cluster, so the larger event speaks for the region and this transcript is
+    # never compared - nothing to analyze.
+    "subsumed_by_larger_event",
 ]
 
 ANALYZED_TYPES = [
@@ -153,7 +157,7 @@ def _warn(message):
 # length mismatch (e.g. forgetting to add a color when a new event type is
 # added) would otherwise make zip() truncate and shift every later color by
 # one, shifting every later colour by one.
-_UNANALYZABLE_COLORS = ["#8C8C8C", "#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2", "#937860", "#CCB974", "#64B5CD"]
+_UNANALYZABLE_COLORS = ["#8C8C8C", "#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2", "#937860", "#CCB974", "#64B5CD", "#B07AA1"]
 _ANALYZED_COLORS = ["#C00000", "#2E8B57", "#FF8C00", "#FFC000", "#70AD47", "#7030A0", "#4472C4", "#A6761D", "#E7298A"]
 assert len(_UNANALYZABLE_COLORS) == len(UNANALYZABLE_TYPES), \
     f"event_color(): {len(_UNANALYZABLE_COLORS)} unanalyzable colors for {len(UNANALYZABLE_TYPES)} UNANALYZABLE_TYPES"
@@ -494,7 +498,12 @@ def select_representative_transcript(df, on_ambiguous="raise"):
     if not {"is_most_like_canonical", "is_longest_cds"} <= set(analyzed_df.columns):
         return analyzed_df
 
+    # A cluster can hold several distinct events, each with its own representative,
+    # so the group index is part of the key - without it the second event's rows
+    # would be discarded as duplicates of the first's.
     group_cols = ["specie", "event"] if "specie" in analyzed_df.columns else ["event"]
+    if "group" in analyzed_df.columns:
+        group_cols = group_cols + ["group"]
 
     most_like_pick = (
         analyzed_df[analyzed_df["is_most_like_canonical"] == True]

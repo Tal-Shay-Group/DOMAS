@@ -108,17 +108,23 @@ def _compared_transcript_ids(cluster_result):
 
 
 def _assert_tie_break_tags_are_consistent(results):
-    """Each tie-break rule tags at most one compared transcript per cluster."""
+    """Each tie-break rule tags at most one compared transcript per event group.
+
+    Per group, not per cluster: a cluster holding several distinct events runs the
+    selection separately for each, so one tagged transcript per group is expected.
+    """
     for cluster_result in results:
         df = cluster_result.get_results_df()
         if len(df) == 0:
             continue
-        for col in ('is_longest_cds', 'is_most_like_canonical'):
-            tagged_transcripts = set(df.loc[df[col] == True, 'transcript_id'].dropna())
-            assert len(tagged_transcripts) <= 1, (
-                f"Cluster {cluster_result.cluster_name} has {len(tagged_transcripts)} transcripts "
-                f"tagged {col}=True ({tagged_transcripts}) - expected at most one."
-            )
+        for group, rows in df.groupby('group', dropna=True):
+            for col in ('is_longest_cds', 'is_most_like_canonical'):
+                tagged_transcripts = set(rows.loc[rows[col] == True, 'transcript_id'].dropna())
+                assert len(tagged_transcripts) <= 1, (
+                    f"Cluster {cluster_result.cluster_name} group {group} has "
+                    f"{len(tagged_transcripts)} transcripts tagged {col}=True "
+                    f"({tagged_transcripts}) - expected at most one."
+                )
 
 
 def _load_junctions(con, junctions_csv, hadas_format):

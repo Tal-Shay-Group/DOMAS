@@ -1,67 +1,67 @@
-event,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_name,domain_description,c_domain_length,t_domain_length,c_domains_number,t_domains_number,is_longest_cds,is_most_like_canonical
-A5_ENSG00000110375_11_37301,UPK2,human,dropped_domain,ENST00000264031.3,ENST00000534788.1,IPR037881,"RGS14, RGS domain; Homeobox protein GBX-1/2",179,,2,0,True,False
-A5_ENSG00000110375_11_37301,UPK2,human,dropped_domain,ENST00000264031.3,ENST00000534788.1,IPR051282,"Arf-GAP with GTPase, ANK repeat and PH domain-containing protein; alpha-2 adrenergic receptors subtype D, member of the class A family of seven-transmembrane G protein-coupled receptors",154,,1,0,True,False
-AF_ENSG00000100583_14_422208,SAMD15,human,dropped_domain,ENST00000216471.5,ENST00000533095.2,IPR031736,RNA exonuclease 1 homolog-like domain; N-terminal NatB acetyltransferase catalytic subunit,67,,1,0,True,False
-AF_ENSG00000100583_14_422208,SAMD15,human,dropped_domain,ENST00000216471.5,ENST00000533095.2,IPR001660,Sterile alpha motif domain; SAM domain (Sterile alpha motif),67,,2,0,True,False
-A5_ENSG00000089558_17_56917,KCNH4,human,unchanged,ENST00000264661.4,ENST00000607371.5,IPR000014,"PAS motifs appear in archaea, eubacteria and eukarya. Probably the most surprising identification of a PAS domain was that in EAG-like K+-channels. PAS domains have been found to bind ligands, and to act as sensors for light and oxygen in...; PAS domain",105,105,1,1,True,False
-MX_ENSG00000077984_20_45926,CST7,human,reduced_domain_number,ENST00000480798.2,ENST00000874360.1,IPR000010,"Cystatins are a family of cysteine protease inhibitors that occur mainly as single domain proteins. However some extracellular proteins such as kininogen, His-rich glycoprotein and fetuin also contain these domains; Cystatin-like domain; Cystatin domain",112,115,4,2,True,False
-SE_ENSG00000075388_11_83184,FGF4,human,dropped_domain,ENST00000168712.3,ENST00000538040.1,IPR015946,"K homology domain-like, alpha/beta; Proteinase inhibitor I25, cystatin, conserved site",125,,1,0,True,True
-SE_ENSG00000075388_11_83184,FGF4,human,dropped_domain,ENST00000168712.3,ENST00000538040.1,pfam00167,,122,,1,0,True,True
-SE_ENSG00000075388_11_83184,FGF4,human,dropped_domain,ENST00000168712.3,ENST00000538040.1,smart00442,,127,,1,0,True,True
-MX_ENSG00000228590_2_4762,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
-MX_ENSG00000228590_2_4762,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
-MX_ENSG00000228590_2_4762,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
-MX_ENSG00000228590_2_4762,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
-MX_ENSG00000228590_2_4762,LOC124906010,human,no_canonical_features,XM_047446573.1,,,,,,,,,
-RI_ENSG00000174358_5_4997,SLC6A19,human,no_domains_in_region,ENST00000304460.11,ENST00000515652.5,,,,,,,True,False
-AL_ENSG00000147202_X_88460,DIAPH2,human,unchanged_domains,ENST00000324765.13,ENST00000373049.8,pfam02181,Formin Homology 2 Domain,375,375,2,2,True,False
-AL_ENSG00000147202_X_88460,DIAPH2,human,unchanged,ENST00000324765.13,ENST00000373049.8,smart00498,Formin Homology 2 Domain,444,444,1,1,True,False
-RI_ENSG00000162006_16_14761,MSLNL,human,dropped_domain,ENST00000543963.5,ENST00000537221.1,IPR013152,"Gastrin/cholecystokinin, conserved site; Pre-pro-megakaryocyte potentiating factor precursor (Mesothelin)",436,,1,0,True,False
-MX_ENSG00000228590_2_4764,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
-MX_ENSG00000228590_2_4764,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
-MX_ENSG00000228590_2_4764,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
-MX_ENSG00000228590_2_4764,LOC124906010,human,no_unique_features,XM_047446573.1,ENST00000730652.1,,,,,,,,
-AF_ENSG00000106004_7_226468,HOXA5,human,no_domains_in_region,ENST00000222726.4,ENST00000520854.1,,,,,,,True,True
-AF_ENSG00000002745_7_246560,WNT16,human,unchanged,ENST00000222462.3,ENST00000361301.6,IPR026645,"Wnt domain found in protein Wnt-16 and similar proteins; ATPase, nucleotide binding domain; Dermatopontin",314,314,1,1,True,False
-AF_ENSG00000002745_7_246560,WNT16,human,unchanged,ENST00000222462.3,ENST00000361301.6,pfam00110,,314,314,1,1,True,False
-AF_ENSG00000002745_7_246560,WNT16,human,unchanged,ENST00000222462.3,ENST00000361301.6,smart00097,,317,317,1,1,True,False
-AF_ENSG00000069696_11_328728,DRD4,human,dropped_domain,ENST00000176183.6,ENST00000528733.1,IPR025659,"Tubby-like, C-terminal",374,,1,0,True,False
-RI_ENSG00000163352_1_30,LENEP,human,no_domains_in_region,ENST00000392487.2,ENST00000368427.3,,,,,,,True,True
-A5_ENSG00000105610_19_64274,KLF1,human,longer,ENST00000264834.6,ENST00000876185.1,cd11382,,270,309.0,1,1,True,False
-A5_ENSG00000105610_19_64274,KLF1,human,dropped_domain,ENST00000264834.6,ENST00000876185.1,IPR027837,Kinocilin protein,26,,1,0,True,False
-AL_ENSG00000166569_18_154926,CPLX4,human,shorter,ENST00000299721.3,ENST00000587244.5,IPR008012,Proteasome maturation factor Ump1,44,43.0,1,1,True,False
-AL_ENSG00000166569_18_154926,CPLX4,human,shorter,ENST00000299721.3,ENST00000587244.5,pfam05835,Synaphin protein,140,85.0,1,1,True,False
-SE_ENSG00000006116_16_113457,CACNG3,human,shorter,ENST00000005284.4,ENST00000876789.1,pfam00822,PMP-22/EMP/MP20/Claudin family,189,92,1,1,True,False
-A5_ENSG00000099984_22_69056,GSTT2,human,no_domains_in_region,ENST00000634759.1,ENST00000402588.6,,,,,,,True,True
-RI_ENSG00000142684_1_269,ZNF593,human,unchanged,ENST00000374266.7,ENST00000270812.6,pfam12171,Zinc-finger double-stranded RNA-binding,26,26.0,1,1,True,False
-RI_ENSG00000142684_1_269,ZNF593,human,dropped_domain,ENST00000374266.7,ENST00000270812.6,smart00451,U1-like zinc finger,35,,1,0,True,False
-A3_ENSG00000029559_4_18475,IBSP,human,unchanged,ENST00000226284.7,ENST00000883247.1,pfam05432,Bone sialoprotein II (BSP-II),298,298.0,1,1,True,False
-SE_ENSG00000078579_8_66887,FGF20,human,dropped_domain,ENST00000180166.6,ENST00000519941.1,IPR053237,"Natterin, C-terminal; eIF3G domain found in eukaryotic translation initiation factor 3 subunit G (eIF-3G) and similar proteins",153,,1,0,True,True
-SE_ENSG00000078579_8_66887,FGF20,human,shorter,ENST00000180166.6,ENST00000519941.1,pfam00167,,127,68.0,1,1,True,True
-SE_ENSG00000078579_8_66887,FGF20,human,shorter,ENST00000180166.6,ENST00000519941.1,smart00442,,132,84.0,1,1,True,True
-AF_ENSG00000104499_8_286658,GML,human,no_domains_in_region,ENST00000220940.2,ENST00000522728.5,,,,,,,True,False
-AL_ENSG00000164900_7_68480,GBX1,human,no_domains_in_region,ENST00000297537.5,ENST00000475831.1,,,,,,,True,False
-A3_ENSG00000078898_20_69042,BPIFB2,human,merged_domain,ENST00000170150.4,ENST00000864169.1,IPR012562,GUCT,152,150,2,1,True,False
-SE_ENSG00000075461_17_123102,CACNG4,human,shorter,ENST00000262138.4,ENST00000921465.1,pfam00822,PMP-22/EMP/MP20/Claudin family,195,86,1,1,True,False
-RI_ENSG00000169551_X_7507,CT55,human,no_domains_in_region,ENST00000276241.11,ENST00000344129.2,,,,,,,True,True
-MX_ENSG00000227082_1_185,LINC02798,human,feature_not_mapped,XM_047438021.1,,,,,,,,,
-MX_ENSG00000227082_1_185,LINC02798,human,feature_not_mapped,XM_047438021.1,,,,,,,,,
-MX_ENSG00000227082_1_185,LINC02798,human,feature_not_mapped,XM_047438021.1,,,,,,,,,
-MX_ENSG00000227082_1_185,LINC02798,human,feature_not_mapped,XM_047438021.1,,,,,,,,,
-MX_ENSG00000227082_1_185,LINC02798,human,no_canonical_features,XM_047438021.1,,,,,,,,,
-A3_ENSG00000100314_22_77375,CABP7,human,unchanged,ENST00000216144.4,ENST00000952608.1,cd00051,"A diverse superfamily of calcium sensors and calcium signal modulators; EF-hand, calcium binding motif; most examples in this alignment model have 2 active canonical EF hands. Ca2+ binding induces a conformational change in the EF-hand motif, leading to...",62,62,1,1,True,False
-A3_ENSG00000100314_22_77375,CABP7,human,unchanged,ENST00000216144.4,ENST00000952608.1,pfam13499,EF-hand domain pair,62,62,1,1,True,False
-A3_ENSG00000100314_22_77375,CABP7,human,unchanged_domains,ENST00000216144.4,ENST00000952608.1,smart00054,"EF-hand, calcium binding motif",58,58,2,2,True,False
-MX_ENSG00000228590_2_4763,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
-MX_ENSG00000228590_2_4763,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
-MX_ENSG00000228590_2_4763,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
-MX_ENSG00000228590_2_4763,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
-MX_ENSG00000228590_2_4763,LOC124906010,human,no_canonical_features,XM_047446573.1,,,,,,,,,
-A3_ENSG00000101098_20_67494,RIMS4,human,no_domains_in_region,ENST00000372851.8,ENST00000541604.2,,,,,,,True,False
-SE_ENSG00000090776_X_65336,EFNB1,human,unchanged,ENST00000204961.5,ENST00000851101.1,IPR051503,Complement System Regulators and Virion Entry Mediators; Ectodomain of Ephrin B,135,135,1,1,True,False
-SE_ENSG00000090776_X_65336,EFNB1,human,unchanged,ENST00000204961.5,ENST00000851101.1,pfam00812,,136,136,1,1,True,False
-AL_ENSG00000079257_3_35682,LXN,human,shorter,ENST00000264265.4,ENST00000482640.5,pfam06907,,216,120,1,1,True,False
-AL_ENSG00000148082_9_105148,SHC3,human,dropped_domain,ENST00000375835.9,ENST00000375831.1,cd09925,Src homology 2 (SH2) domain found in SH2 adaptor protein C (SHC),103,,1,0,True,False
-AL_ENSG00000148082_9_105148,SHC3,human,merged_domain,ENST00000375835.9,ENST00000375831.1,IPR000980,SH2 domain; Src homology 2 domains,80,60.0,2,1,True,False
-A3_ENSG00000073169_22_76744,SELENOO,human,dropped_domain,ENST00000380903.7,ENST00000492092.1,IPR044612,ADP-ribosylation factor-like protein 2/3,540,,1,0,True,False
-A5_ENSG00000101421_20_63100,CHMP4B,human,shorter,ENST00000217402.3,ENST00000873319.1,pfam03357,,175,136,1,1,True,False
+event,group,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_name,domain_description,c_domain_length,t_domain_length,c_domains_number,t_domains_number,is_longest_cds,is_most_like_canonical
+A5_ENSG00000110375_11_37301,1,UPK2,human,dropped_domain,ENST00000264031.3,ENST00000534788.1,IPR037881,"RGS14, RGS domain; Homeobox protein GBX-1/2",179,,2,0,True,False
+A5_ENSG00000110375_11_37301,1,UPK2,human,dropped_domain,ENST00000264031.3,ENST00000534788.1,IPR051282,"Arf-GAP with GTPase, ANK repeat and PH domain-containing protein; alpha-2 adrenergic receptors subtype D, member of the class A family of seven-transmembrane G protein-coupled receptors",154,,1,0,True,False
+AF_ENSG00000100583_14_422208,1,SAMD15,human,dropped_domain,ENST00000216471.5,ENST00000533095.2,IPR031736,RNA exonuclease 1 homolog-like domain; N-terminal NatB acetyltransferase catalytic subunit,67,,1,0,True,False
+AF_ENSG00000100583_14_422208,1,SAMD15,human,dropped_domain,ENST00000216471.5,ENST00000533095.2,IPR001660,Sterile alpha motif domain; SAM domain (Sterile alpha motif),67,,2,0,True,False
+A5_ENSG00000089558_17_56917,1,KCNH4,human,unchanged,ENST00000264661.4,ENST00000607371.5,IPR000014,"PAS motifs appear in archaea, eubacteria and eukarya. Probably the most surprising identification of a PAS domain was that in EAG-like K+-channels. PAS domains have been found to bind ligands, and to act as sensors for light and oxygen in...; PAS domain",105,105,1,1,True,False
+MX_ENSG00000077984_20_45926,1,CST7,human,reduced_domain_number,ENST00000480798.2,ENST00000874360.1,IPR000010,"Cystatins are a family of cysteine protease inhibitors that occur mainly as single domain proteins. However some extracellular proteins such as kininogen, His-rich glycoprotein and fetuin also contain these domains; Cystatin-like domain; Cystatin domain",112,115,4,2,True,False
+SE_ENSG00000075388_11_83184,1,FGF4,human,dropped_domain,ENST00000168712.3,ENST00000538040.1,IPR015946,"K homology domain-like, alpha/beta; Proteinase inhibitor I25, cystatin, conserved site",125,,1,0,True,True
+SE_ENSG00000075388_11_83184,1,FGF4,human,dropped_domain,ENST00000168712.3,ENST00000538040.1,pfam00167,,122,,1,0,True,True
+SE_ENSG00000075388_11_83184,1,FGF4,human,dropped_domain,ENST00000168712.3,ENST00000538040.1,smart00442,,127,,1,0,True,True
+MX_ENSG00000228590_2_4762,,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
+MX_ENSG00000228590_2_4762,,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
+MX_ENSG00000228590_2_4762,,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
+MX_ENSG00000228590_2_4762,,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
+MX_ENSG00000228590_2_4762,,LOC124906010,human,no_canonical_features,XM_047446573.1,,,,,,,,,
+RI_ENSG00000174358_5_4997,1,SLC6A19,human,no_domains_in_region,ENST00000304460.11,ENST00000515652.5,,,,,,,True,False
+AL_ENSG00000147202_X_88460,1,DIAPH2,human,unchanged_domains,ENST00000324765.13,ENST00000373049.8,pfam02181,Formin Homology 2 Domain,375,375,2,2,True,False
+AL_ENSG00000147202_X_88460,1,DIAPH2,human,unchanged,ENST00000324765.13,ENST00000373049.8,smart00498,Formin Homology 2 Domain,444,444,1,1,True,False
+RI_ENSG00000162006_16_14761,1,MSLNL,human,dropped_domain,ENST00000543963.5,ENST00000537221.1,IPR013152,"Gastrin/cholecystokinin, conserved site; Pre-pro-megakaryocyte potentiating factor precursor (Mesothelin)",436,,1,0,True,False
+MX_ENSG00000228590_2_4764,,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
+MX_ENSG00000228590_2_4764,,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
+MX_ENSG00000228590_2_4764,,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
+MX_ENSG00000228590_2_4764,,LOC124906010,human,no_unique_features,XM_047446573.1,ENST00000730652.1,,,,,,,,
+AF_ENSG00000106004_7_226468,1,HOXA5,human,no_domains_in_region,ENST00000222726.4,ENST00000520854.1,,,,,,,True,True
+AF_ENSG00000002745_7_246560,1,WNT16,human,unchanged,ENST00000222462.3,ENST00000361301.6,IPR026645,"Wnt domain found in protein Wnt-16 and similar proteins; ATPase, nucleotide binding domain; Dermatopontin",314,314,1,1,True,False
+AF_ENSG00000002745_7_246560,1,WNT16,human,unchanged,ENST00000222462.3,ENST00000361301.6,pfam00110,,314,314,1,1,True,False
+AF_ENSG00000002745_7_246560,1,WNT16,human,unchanged,ENST00000222462.3,ENST00000361301.6,smart00097,,317,317,1,1,True,False
+AF_ENSG00000069696_11_328728,1,DRD4,human,dropped_domain,ENST00000176183.6,ENST00000528733.1,IPR025659,"Tubby-like, C-terminal",374,,1,0,True,False
+RI_ENSG00000163352_1_30,1,LENEP,human,no_domains_in_region,ENST00000392487.2,ENST00000368427.3,,,,,,,True,True
+A5_ENSG00000105610_19_64274,1,KLF1,human,longer,ENST00000264834.6,ENST00000876185.1,cd11382,,270,309.0,1,1,True,False
+A5_ENSG00000105610_19_64274,1,KLF1,human,dropped_domain,ENST00000264834.6,ENST00000876185.1,IPR027837,Kinocilin protein,26,,1,0,True,False
+AL_ENSG00000166569_18_154926,1,CPLX4,human,shorter,ENST00000299721.3,ENST00000587244.5,IPR008012,Proteasome maturation factor Ump1,44,43.0,1,1,True,False
+AL_ENSG00000166569_18_154926,1,CPLX4,human,shorter,ENST00000299721.3,ENST00000587244.5,pfam05835,Synaphin protein,140,85.0,1,1,True,False
+SE_ENSG00000006116_16_113457,1,CACNG3,human,shorter,ENST00000005284.4,ENST00000876789.1,pfam00822,PMP-22/EMP/MP20/Claudin family,189,92,1,1,True,False
+A5_ENSG00000099984_22_69056,1,GSTT2,human,no_domains_in_region,ENST00000634759.1,ENST00000402588.6,,,,,,,True,True
+RI_ENSG00000142684_1_269,1,ZNF593,human,unchanged,ENST00000374266.7,ENST00000270812.6,pfam12171,Zinc-finger double-stranded RNA-binding,26,26.0,1,1,True,False
+RI_ENSG00000142684_1_269,1,ZNF593,human,dropped_domain,ENST00000374266.7,ENST00000270812.6,smart00451,U1-like zinc finger,35,,1,0,True,False
+A3_ENSG00000029559_4_18475,1,IBSP,human,unchanged,ENST00000226284.7,ENST00000883247.1,pfam05432,Bone sialoprotein II (BSP-II),298,298.0,1,1,True,False
+SE_ENSG00000078579_8_66887,1,FGF20,human,dropped_domain,ENST00000180166.6,ENST00000519941.1,IPR053237,"Natterin, C-terminal; eIF3G domain found in eukaryotic translation initiation factor 3 subunit G (eIF-3G) and similar proteins",153,,1,0,True,True
+SE_ENSG00000078579_8_66887,1,FGF20,human,shorter,ENST00000180166.6,ENST00000519941.1,pfam00167,,127,68.0,1,1,True,True
+SE_ENSG00000078579_8_66887,1,FGF20,human,shorter,ENST00000180166.6,ENST00000519941.1,smart00442,,132,84.0,1,1,True,True
+AF_ENSG00000104499_8_286658,1,GML,human,no_domains_in_region,ENST00000220940.2,ENST00000522728.5,,,,,,,True,False
+AL_ENSG00000164900_7_68480,1,GBX1,human,no_domains_in_region,ENST00000297537.5,ENST00000475831.1,,,,,,,True,False
+A3_ENSG00000078898_20_69042,1,BPIFB2,human,merged_domain,ENST00000170150.4,ENST00000864169.1,IPR012562,GUCT,152,150,2,1,True,False
+SE_ENSG00000075461_17_123102,1,CACNG4,human,shorter,ENST00000262138.4,ENST00000921465.1,pfam00822,PMP-22/EMP/MP20/Claudin family,195,86,1,1,True,False
+RI_ENSG00000169551_X_7507,1,CT55,human,no_domains_in_region,ENST00000276241.11,ENST00000344129.2,,,,,,,True,True
+MX_ENSG00000227082_1_185,,LINC02798,human,feature_not_mapped,XM_047438021.1,,,,,,,,,
+MX_ENSG00000227082_1_185,,LINC02798,human,feature_not_mapped,XM_047438021.1,,,,,,,,,
+MX_ENSG00000227082_1_185,,LINC02798,human,feature_not_mapped,XM_047438021.1,,,,,,,,,
+MX_ENSG00000227082_1_185,,LINC02798,human,feature_not_mapped,XM_047438021.1,,,,,,,,,
+MX_ENSG00000227082_1_185,,LINC02798,human,no_canonical_features,XM_047438021.1,,,,,,,,,
+A3_ENSG00000100314_22_77375,1,CABP7,human,unchanged,ENST00000216144.4,ENST00000952608.1,cd00051,"A diverse superfamily of calcium sensors and calcium signal modulators; EF-hand, calcium binding motif; most examples in this alignment model have 2 active canonical EF hands. Ca2+ binding induces a conformational change in the EF-hand motif, leading to...",62,62,1,1,True,False
+A3_ENSG00000100314_22_77375,1,CABP7,human,unchanged,ENST00000216144.4,ENST00000952608.1,pfam13499,EF-hand domain pair,62,62,1,1,True,False
+A3_ENSG00000100314_22_77375,1,CABP7,human,unchanged_domains,ENST00000216144.4,ENST00000952608.1,smart00054,"EF-hand, calcium binding motif",58,58,2,2,True,False
+MX_ENSG00000228590_2_4763,,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
+MX_ENSG00000228590_2_4763,,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
+MX_ENSG00000228590_2_4763,,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
+MX_ENSG00000228590_2_4763,,LOC124906010,human,feature_not_mapped,XM_047446573.1,,,,,,,,,
+MX_ENSG00000228590_2_4763,,LOC124906010,human,no_canonical_features,XM_047446573.1,,,,,,,,,
+A3_ENSG00000101098_20_67494,1,RIMS4,human,no_domains_in_region,ENST00000372851.8,ENST00000541604.2,,,,,,,True,False
+SE_ENSG00000090776_X_65336,1,EFNB1,human,unchanged,ENST00000204961.5,ENST00000851101.1,IPR051503,Complement System Regulators and Virion Entry Mediators; Ectodomain of Ephrin B,135,135,1,1,True,False
+SE_ENSG00000090776_X_65336,1,EFNB1,human,unchanged,ENST00000204961.5,ENST00000851101.1,pfam00812,,136,136,1,1,True,False
+AL_ENSG00000079257_3_35682,1,LXN,human,shorter,ENST00000264265.4,ENST00000482640.5,pfam06907,,216,120,1,1,True,False
+AL_ENSG00000148082_9_105148,1,SHC3,human,dropped_domain,ENST00000375835.9,ENST00000375831.1,cd09925,Src homology 2 (SH2) domain found in SH2 adaptor protein C (SHC),103,,1,0,True,False
+AL_ENSG00000148082_9_105148,1,SHC3,human,merged_domain,ENST00000375835.9,ENST00000375831.1,IPR000980,SH2 domain; Src homology 2 domains,80,60.0,2,1,True,False
+A3_ENSG00000073169_22_76744,1,SELENOO,human,dropped_domain,ENST00000380903.7,ENST00000492092.1,IPR044612,ADP-ribosylation factor-like protein 2/3,540,,1,0,True,False
+A5_ENSG00000101421_20_63100,1,CHMP4B,human,shorter,ENST00000217402.3,ENST00000873319.1,pfam03357,,175,136,1,1,True,False

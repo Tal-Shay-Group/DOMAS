@@ -832,8 +832,9 @@ class ClusterAnalysisResult:
 
     def add_event(self, event, transcript_id=None, domain_name=None, domain_description=None,
                   canonical_domain_length=None, transcript_domain_length=None,
-                  canonical_domains_number=None, transcript_domains_number=None, is_longest_cds=None, is_most_like_canonical=None):
-        self.events.append((event, transcript_id, domain_name, domain_description, canonical_domain_length,
+                  canonical_domains_number=None, transcript_domains_number=None, is_longest_cds=None,
+                  is_most_like_canonical=None, group=None):
+        self.events.append((event, transcript_id, group, domain_name, domain_description, canonical_domain_length,
                             transcript_domain_length, canonical_domains_number, transcript_domains_number,
                             is_longest_cds, is_most_like_canonical))
 
@@ -849,13 +850,17 @@ class ClusterAnalysisResult:
         transcript stands in for it (protein-coding candidates first), so the
         cluster is still analyzed rather than dropped.
 
-        Phase 1.5 - tag each comparable transcript with whether it's the one the
+        Phase 1.5 - split the comparable transcripts into the cluster's distinct
+        events: transcripts adding the same set of features to the canonical form one
+        group, and a group whose set is a subset of another's is dropped as the
+        lesser account of the same region (see _group_by_unique_features()). Each
+        surviving group then gets its own representative, tagged with whether the
         longest-CDS rule and/or the most-like-canonical rule (see
-        select_most_like_canonical()) would pick - none are skipped. Both rules run
-        over the protein-coding candidates where there are any (step 1 of the
-        priority), falling through to all of them where there are none. Exactly one
-        transcript is tagged is_longest_cds; is_most_like_canonical is left unset
-        across the whole cluster when no transcript qualifies.
+        select_most_like_canonical()) picked it. Both rules run over the group's
+        protein-coding candidates where there are any (step 1 of the priority),
+        falling through to all of them where there are none. Exactly one transcript
+        per group is tagged is_longest_cds; is_most_like_canonical is left unset
+        across a group when none of its transcripts qualifies.
 
         "Longest CDS" means the coding length in bases, not the genomic span from
         cds_start to cds_end - see _load_exons_and_cds_lengths().
@@ -884,26 +889,29 @@ class ClusterAnalysisResult:
         if canonical_junctions is None:
             return
 
-        comparable_transcript_ids = self._find_comparable_transcripts(
+        unique_by_transcript = self._find_comparable_transcripts(
             transcript_junctions, canonical_junctions)
 
-        longest_cds_transcript_id, most_like_canonical_transcript_id = self._select_representatives(
-            comparable_transcript_ids, coding_by_transcript, cds_length_by_transcript, transcript_exons)
+        # One comparison per distinct event in the cluster, not one per cluster.
+        for group_index, group_transcript_ids in self._group_by_unique_features(unique_by_transcript):
+            longest_cds_transcript_id, most_like_canonical_transcript_id = self._select_representatives(
+                group_transcript_ids, coding_by_transcript, cds_length_by_transcript, transcript_exons)
 
-        # Same priority as selected_comparable_rows() and
-        # results_stats.select_representative_transcript(): most-like-canonical
-        # where one qualifies, else longest-CDS. Applied here rather than at write
-        # time so the domains of the transcripts that would be discarded are never
-        # fetched or compared.
-        if not write_all_comparable:
-            selected = most_like_canonical_transcript_id or longest_cds_transcript_id
-            if selected is not None:
-                comparable_transcript_ids = [selected]
+            # Same priority as selected_comparable_rows() and
+            # results_stats.select_representative_transcript(): most-like-canonical
+            # where one qualifies, else longest-CDS. Applied here rather than at write
+            # time so the domains of the transcripts that would be discarded are never
+            # fetched or compared.
+            compared = group_transcript_ids
+            if not write_all_comparable:
+                selected = most_like_canonical_transcript_id or longest_cds_transcript_id
+                if selected is not None:
+                    compared = [selected]
 
-        self._compare_transcripts(
-            comparable_transcript_ids, transcript_junctions, canonical_junctions,
-            transcript_exons, domain_lookup,
-            longest_cds_transcript_id, most_like_canonical_transcript_id)
+            self._compare_transcripts(
+                compared, transcript_junctions, canonical_junctions,
+                transcript_exons, domain_lookup,
+                longest_cds_transcript_id, most_like_canonical_transcript_id, group_index)
 
     def _resolve_gene_transcripts(self, df_gene_transcripts):
         """The gene's usable transcript ids and which of them are protein-coding,
@@ -1064,10 +1072,15 @@ class ClusterAnalysisResult:
         return transcript_junctions, canonical_junctions
 
     def _find_comparable_transcripts(self, transcript_junctions, canonical_junctions):
-        """The transcripts carrying at least one feature the canonical one lacks.
-        The rest are recorded as carrying no feature of the event, or none unique
-        to them."""
-        comparable_transcript_ids = []
+        """{transcript_id: the features it carries that the canonical one lacks}, for
+        the transcripts that carry at least one. The rest are recorded as carrying no
+        feature of the event, or none unique to them.
+
+        The unique set is returned, not just the id: which features a transcript adds
+        is what separates one event in the cluster from another (see
+        _group_by_unique_features()).
+        """
+        unique_by_transcript = {}
         for transcript_id, junction_idxs in transcript_junctions.items():
             if transcript_id == self.canonical_transcript_id:
                 continue
@@ -1085,8 +1098,49 @@ class ClusterAnalysisResult:
                 self.add_event('no_unique_features', transcript_id=transcript_id)
                 continue
 
-            comparable_transcript_ids.append(transcript_id)
-        return comparable_transcript_ids
+            unique_by_transcript[transcript_id] = frozenset(unique_junctions)
+        return unique_by_transcript
+
+    def _group_by_unique_features(self, unique_by_transcript):
+        """The cluster's distinct events, as [(group_index, transcript_ids)].
+
+        A LeafCutter cluster is a set of junctions that share a splice site, and it
+        routinely holds more than one event: transcripts that add different features
+        to the canonical are describing different things and cannot be represented by
+        a single comparison. Transcripts are therefore grouped by the exact set of
+        features they add, and each surviving group is compared in its own right.
+
+        A group whose feature set is a proper subset of another group's is dropped:
+        both describe the same region, and the larger set is the fuller account of
+        it, so the smaller one would only report a partial version of the same
+        change. Its transcripts are recorded as subsumed_by_larger_event rather than
+        dropped silently. Subset is transitive, so one pass over the pairs is enough.
+
+        Groups are numbered from 1 in order of their features, which keeps the index
+        stable between runs rather than dependent on dict iteration order.
+        """
+        if not unique_by_transcript:
+            return []
+
+        by_features = {}
+        for transcript_id, features in unique_by_transcript.items():
+            by_features.setdefault(features, []).append(transcript_id)
+
+        kept = [features for features in by_features
+                if not any(features < other for other in by_features)]
+
+        for features, transcript_ids in by_features.items():
+            if features in kept:
+                continue
+            for transcript_id in sorted(transcript_ids):
+                logger.debug(
+                    f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} adds "
+                    f"{sorted(features)}, a subset of a larger event in the same cluster. Not compared."
+                )
+                self.add_event('subsumed_by_larger_event', transcript_id=transcript_id)
+
+        return [(index, by_features[features])
+                for index, features in enumerate(sorted(kept, key=sorted), start=1)]
 
     def _select_representatives(self, comparable_transcript_ids, coding_by_transcript,
                                 cds_length_by_transcript, transcript_exons):
@@ -1115,10 +1169,14 @@ class ClusterAnalysisResult:
 
     def _compare_transcripts(self, comparable_transcript_ids, transcript_junctions,
                              canonical_junctions, transcript_exons, domain_lookup,
-                             longest_cds_transcript_id, most_like_canonical_transcript_id):
+                             longest_cds_transcript_id, most_like_canonical_transcript_id,
+                             group_index):
         """Compare each transcript's domains against the canonical transcript's,
         recording one event per domain group - or no_domains_in_region where the
-        comparison happened but neither side has a domain there."""
+        comparison happened but neither side has a domain there.
+
+        The tags are per group: with several events in a cluster each one has its own
+        longest-CDS and most-like-canonical transcript."""
         for transcript_id in comparable_transcript_ids:
             junction_idxs = transcript_junctions[transcript_id]
             is_longest_cds = transcript_id == longest_cds_transcript_id
@@ -1129,19 +1187,26 @@ class ClusterAnalysisResult:
             ))
             if events:
                 for event in events:
-                    self.add_event(**event, is_longest_cds=is_longest_cds, is_most_like_canonical=is_most_like_canonical)
+                    self.add_event(**event, is_longest_cds=is_longest_cds,
+                                   is_most_like_canonical=is_most_like_canonical, group=group_index)
             else:
                 self.add_event('no_domains_in_region', transcript_id=transcript_id,
-                                is_longest_cds=is_longest_cds, is_most_like_canonical=is_most_like_canonical)
+                                is_longest_cds=is_longest_cds,
+                                is_most_like_canonical=is_most_like_canonical, group=group_index)
 
 
     def get_results_df(self):
-        return pd.DataFrame(
+        df = pd.DataFrame(
             self.events,
-            columns=['event', 'transcript_id', 'domain_name', 'domain_description',
+            columns=['event', 'transcript_id', 'group', 'domain_name', 'domain_description',
                         'c_domain_length', 't_domain_length',
                         'c_domains_number', 't_domains_number', 'is_longest_cds', 'is_most_like_canonical']
         )
+        # Nullable integer, not float: the rows that belong to no group (the
+        # cluster-level outcomes) leave it empty, and a plain int column holding
+        # NaN would print every group index as "1.0".
+        df['group'] = df['group'].astype('Int64')
+        return df
         
 
 def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None, canonical_transcript_ids=None,
@@ -1182,15 +1247,17 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
 NON_COMPARISON_EVENTS = frozenset({
     'no_gene_specified', 'gene_not_in_db', 'no_canonical_transcript', 'only_one_transcript',
     'no_canonical_features', 'feature_not_mapped',
-    'transcript_doesnt_have_features', 'no_unique_features',
+    'transcript_doesnt_have_features', 'no_unique_features', 'subsumed_by_larger_event',
 })
 
 
 def selected_comparable_rows(df_cluster_results):
-    """One cluster's result rows with the COMPARISON rows reduced to the single
-    transcript the selection rule picks: the one tagged is_most_like_canonical where
-    any is, otherwise the one tagged is_longest_cds. Same priority as
-    results_stats.select_representative_transcript(), applied before writing.
+    """One cluster's result rows with the COMPARISON rows of each group reduced to
+    the single transcript the selection rule picks there: the one tagged
+    is_most_like_canonical where any is, otherwise the one tagged is_longest_cds.
+    Same priority as results_stats.select_representative_transcript(), applied
+    before writing. A cluster holding several distinct events keeps one transcript
+    per event, not one overall.
 
     Non-comparison rows (no junctions, no unique junction, a cluster-level outcome)
     are left alone - which of those to write is filter_non_comparable's decision. So
@@ -1203,13 +1270,19 @@ def selected_comparable_rows(df_cluster_results):
         return df_cluster_results
 
     comparisons = df_cluster_results[is_comparison]
-    for column in ('is_most_like_canonical', 'is_longest_cds'):
-        tagged = comparisons.loc[comparisons[column] == True, 'transcript_id'].dropna()  # noqa: E712
-        if len(tagged):
-            selected = tagged.iat[0]
-            return df_cluster_results[~is_comparison
-                                      | (df_cluster_results['transcript_id'] == selected)]
-    return df_cluster_results
+    # Per group, not per cluster: a cluster holding several distinct events keeps
+    # one transcript for each of them.
+    keep = pd.Series(False, index=df_cluster_results.index)
+    for group, rows in comparisons.groupby('group', dropna=False):
+        for column in ('is_most_like_canonical', 'is_longest_cds'):
+            tagged = rows.loc[rows[column] == True, 'transcript_id'].dropna()  # noqa: E712
+            if len(tagged):
+                keep |= is_comparison & (df_cluster_results['group'] == group) \
+                        & (df_cluster_results['transcript_id'] == tagged.iat[0])
+                break
+        else:
+            keep |= is_comparison & (df_cluster_results['group'] == group)
+    return df_cluster_results[~is_comparison | keep]
 
 
 def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_instance=None,
@@ -1546,7 +1619,7 @@ class JunctionsAnalysis:
         # only under write_all_comparable, where several transcripts share a
         # cluster and the reader needs to know which one the rule picked. With one
         # comparison row per cluster they would be True on every row of it.
-        df_results_columns = ['event', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
+        df_results_columns = ['event', 'group', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id', 'transcript_id', 'domain_name',
                               'domain_description',
                               'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
         if write_all_comparable:
@@ -1616,7 +1689,7 @@ class JunctionsAnalysis:
     # canonical transcript (it was skipped for lacking junctions or lacking a
     # unique junction).
     _SKIPPED_TRANSCRIPT_EVENTS = {
-        'transcript_doesnt_have_features', 'no_unique_features',
+        'transcript_doesnt_have_features', 'no_unique_features', 'subsumed_by_larger_event',
     }
 
     def _comparable_transcript_ids(self, cluster_result):
