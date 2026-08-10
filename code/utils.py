@@ -953,18 +953,17 @@ def get_domains_db(con, transcript_ids, use_representative_domains=False):
     DomainEvent/DomainType exactly as get_transcript_domains_db() always has, so the
     existing algorithm runs without any change.
 
-    use_representative_domains=True: domains come from RepresentativeDomains where a
-    protein has an entry there; a protein with no RepresentativeDomains entry falls back
-    to its DomainEvent/DomainType domains, so no protein silently loses domain coverage.
+    use_representative_domains=True: domains come from RepresentativeDomains and
+    nowhere else. A protein with no entry there has no domains, rather than falling
+    back to DomainEvent/DomainType: the two sources carry different coordinates and
+    different notions of what a domain is, so mixing them within one run makes a
+    comparison's result depend on which source each side happened to be drawn from.
+    A protein that drops out is visible as no_domains_in_region, not as a silent
+    substitution.
     """
     df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
-    df_event_domains = get_transcript_domains_db(con, transcript_ids, df_transcript=df_transcript, df_protein=df_protein)
-    if not use_representative_domains:
-        return df_event_domains
-
-    df_rep_domains = get_representative_domains_db(con, transcript_ids, df_transcript=df_transcript, df_protein=df_protein)
-    proteins_with_rep_domains = set(df_rep_domains['protein_ensembl_id_version'].unique())
-    df_fallback = df_event_domains[
-        ~df_event_domains['protein_ensembl_id_version'].isin(proteins_with_rep_domains)
-    ]
-    return pd.concat([df_rep_domains, df_fallback], ignore_index=True)
+    if use_representative_domains:
+        return get_representative_domains_db(con, transcript_ids, df_transcript=df_transcript,
+                                             df_protein=df_protein)
+    return get_transcript_domains_db(con, transcript_ids, df_transcript=df_transcript,
+                                     df_protein=df_protein)

@@ -20,10 +20,8 @@ AL_ENSG00000116678_1_17,LEPR,human,transcript_doesnt_have_features,ENST000003495
 AL_ENSG00000116678_1_17,LEPR,human,no_domains_in_region,ENST00000349533.11,ENST00000371060.7,,,,,,,False,False
 AL_ENSG00000116678_1_17,LEPR,human,no_domains_in_region,ENST00000349533.11,ENST00000616738.4,,,,,,,True,False
 A3_ENSG00000243364_1_16,EFNA4,human,transcript_doesnt_have_features,ENST00000368409.8,ENST00000359751.8,,,,,,,,
-A3_ENSG00000243364_1_16,EFNA4,human,dropped_domain,ENST00000368409.8,NM_001406810.1,cd10425,Ectodomain of Ephrin A,126.0,,1.0,0.0,False,False
-A3_ENSG00000243364_1_16,EFNA4,human,dropped_domain,ENST00000368409.8,NM_001406810.1,pfam00812,,127.0,,1.0,0.0,False,False
-A3_ENSG00000243364_1_16,EFNA4,human,unchanged,ENST00000368409.8,ENST00000427683.2,cd10425,Ectodomain of Ephrin A,126.0,126.0,1.0,1.0,True,False
-A3_ENSG00000243364_1_16,EFNA4,human,unchanged,ENST00000368409.8,ENST00000427683.2,pfam00812,,127.0,127.0,1.0,1.0,True,False
+A3_ENSG00000243364_1_16,EFNA4,human,no_domains_in_region,ENST00000368409.8,NM_001406810.1,,,,,,,False,False
+A3_ENSG00000243364_1_16,EFNA4,human,no_domains_in_region,ENST00000368409.8,ENST00000427683.2,,,,,,,True,False
 AL_ENSG00000213625_1_2,LEPROT,human,no_canonical_features,ENST00000371065.9,,,,,,,,,
 RI_ENSG00000048707_1_1,VPS13D,human,no_unique_features,ENST00000620676.6,ENST00000613099.4,,,,,,,,
 RI_ENSG00000048707_1_1,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000476169.1,,,,,,,,
@@ -43,8 +41,7 @@ RI_ENSG00000048707_1_1,VPS13D,human,transcript_doesnt_have_features,ENST00000620
 RI_ENSG00000048707_1_1,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000476045.5,,,,,,,,
 RI_ENSG00000048707_1_1,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000481484.1,,,,,,,,
 RI_ENSG00000048707_1_1,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000645148.1,,,,,,,,
-RI_ENSG00000048707_1_1,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000460333.5,pfam06650,SHR-binding domain of vacuolar-sorting associated protein 13,284.0,,1.0,0.0,True,False
-RI_ENSG00000048707_1_1,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000460333.5,pfam25036,,528.0,,1.0,0.0,True,False
+RI_ENSG00000048707_1_1,VPS13D,human,no_domains_in_region,ENST00000620676.6,ENST00000460333.5,,,,,,,True,False
 AF_ENSG00000154027_1_20,AK5,human,no_unique_features,ENST00000354567.7,XM_005270739.6,,,,,,,,
 AF_ENSG00000154027_1_20,AK5,human,no_unique_features,ENST00000354567.7,XM_017001012.2,,,,,,,,
 AF_ENSG00000154027_1_20,AK5,human,no_unique_features,ENST00000354567.7,XM_047417740.1,,,,,,,,
@@ -62,7 +59,7 @@ AF_ENSG00000154027_1_20,AK5,human,transcript_doesnt_have_features,ENST0000035456
 AF_ENSG00000154027_1_20,AK5,human,transcript_doesnt_have_features,ENST00000354567.7,ENST00000317704.8,,,,,,,,
 AF_ENSG00000154027_1_20,AK5,human,transcript_doesnt_have_features,ENST00000354567.7,ENST00000466393.1,,,,,,,,
 AF_ENSG00000154027_1_20,AK5,human,transcript_doesnt_have_features,ENST00000354567.7,ENST00000531672.1,,,,,,,,
-AF_ENSG00000154027_1_20,AK5,human,dropped_domain,ENST00000354567.7,ENST00000530826.1,pfam00406,Adenylate kinase,157.0,,1.0,0.0,True,False
+AF_ENSG00000154027_1_20,AK5,human,no_domains_in_region,ENST00000354567.7,ENST00000530826.1,,,,,,,True,False
 RI_ENSG00000154358_1_18,OBSCN,human,no_unique_features,ENST00000680850.1,ENST00000570156.7,,,,,,,,
 RI_ENSG00000154358_1_18,OBSCN,human,transcript_doesnt_have_features,ENST00000680850.1,ENST00000284548.16,,,,,,,,
 RI_ENSG00000154358_1_18,OBSCN,human,no_unique_features,ENST00000680850.1,ENST00000422127.5,,,,,,,,
@@ -108,8 +105,7 @@ A3_ENSG00000048707_1_5,VPS13D,human,transcript_doesnt_have_features,ENST00000620
 A3_ENSG00000048707_1_5,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000476045.5,,,,,,,,
 A3_ENSG00000048707_1_5,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000481484.1,,,,,,,,
 A3_ENSG00000048707_1_5,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000645148.1,,,,,,,,
-A3_ENSG00000048707_1_5,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000489961.1,pfam16908,"Vacuolar sorting-associated protein 13, N-terminal",220.0,,1.0,0.0,True,False
-A3_ENSG00000048707_1_5,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000489961.1,pfam12624,N-terminal region of Chorein or VPS13,1839.0,,1.0,0.0,True,False
+A3_ENSG00000048707_1_5,VPS13D,human,no_domains_in_region,ENST00000620676.6,ENST00000489961.1,,,,,,,True,False
 SE_ENSG00000213625_1_9,LEPROT,human,no_unique_features,ENST00000371065.9,ENST00000613538.1,,,,,,,,
 SE_ENSG00000213625_1_9,LEPROT,human,transcript_doesnt_have_features,ENST00000371065.9,NM_001198683.2,,,,,,,,
 SE_ENSG00000213625_1_9,LEPROT,human,no_unique_features,ENST00000371065.9,ENST00000488747.5,,,,,,,,
@@ -262,12 +258,9 @@ A5_ENSG00000137948_1_20,BRDT,human,transcript_doesnt_have_features,ENST000003995
 A5_ENSG00000137948_1_20,BRDT,human,transcript_doesnt_have_features,ENST00000399546.7,ENST00000476711.5,,,,,,,,
 A5_ENSG00000137948_1_20,BRDT,human,transcript_doesnt_have_features,ENST00000399546.7,ENST00000484833.5,,,,,,,,
 A5_ENSG00000137948_1_20,BRDT,human,transcript_doesnt_have_features,ENST00000399546.7,ENST00000484781.1,,,,,,,,
-A5_ENSG00000137948_1_20,BRDT,human,dropped_domain,ENST00000399546.7,NM_001242807.2,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-A5_ENSG00000137948_1_20,BRDT,human,dropped_domain,ENST00000399546.7,NM_001242807.2,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-A5_ENSG00000137948_1_20,BRDT,human,dropped_domain,ENST00000399546.7,XM_011542036.4,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,True,False
-A5_ENSG00000137948_1_20,BRDT,human,dropped_domain,ENST00000399546.7,XM_011542036.4,IPR001487,Bromodomain,111.0,,2.0,0.0,True,False
-A5_ENSG00000137948_1_20,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000426141.6,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-A5_ENSG00000137948_1_20,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000426141.6,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
+A5_ENSG00000137948_1_20,BRDT,human,no_domains_in_region,ENST00000399546.7,NM_001242807.2,,,,,,,False,False
+A5_ENSG00000137948_1_20,BRDT,human,no_domains_in_region,ENST00000399546.7,XM_011542036.4,,,,,,,True,False
+A5_ENSG00000137948_1_20,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000426141.6,,,,,,,False,False
 A3_ENSG00000271723_1_10,MROH7-TTC4,human,transcript_doesnt_have_features,ENST00000414150.6,ENST00000460155.1,,,,,,,,
 A3_ENSG00000271723_1_10,MROH7-TTC4,human,no_unique_features,ENST00000414150.6,ENST00000606515.5,,,,,,,,
 A3_ENSG00000271723_1_10,MROH7-TTC4,human,no_domains_in_region,ENST00000414150.6,ENST00000425300.6,,,,,,,True,False
@@ -322,7 +315,7 @@ A5_ENSG00000179397_1_3,CATSPERE,human,no_unique_features,ENST00000366534.9,ENST0
 A5_ENSG00000179397_1_3,CATSPERE,human,no_unique_features,ENST00000366534.9,ENST00000478554.5,,,,,,,,
 A5_ENSG00000179397_1_3,CATSPERE,human,transcript_doesnt_have_features,ENST00000366534.9,ENST00000485888.1,,,,,,,,
 A5_ENSG00000179397_1_3,CATSPERE,human,transcript_doesnt_have_features,ENST00000366534.9,ENST00000487449.1,,,,,,,,
-A5_ENSG00000179397_1_3,CATSPERE,human,dropped_domain,ENST00000366534.9,ENST00000464170.1,pfam22841,,89.0,,1.0,0.0,True,False
+A5_ENSG00000179397_1_3,CATSPERE,human,no_domains_in_region,ENST00000366534.9,ENST00000464170.1,,,,,,,True,False
 MX_ENSG00000169224_1_8,GCSAML,human,no_unique_features,ENST00000366488.5,ENST00000536561.5,,,,,,,,
 MX_ENSG00000169224_1_8,GCSAML,human,no_unique_features,ENST00000366488.5,XM_047447035.1,,,,,,,,
 MX_ENSG00000169224_1_8,GCSAML,human,transcript_doesnt_have_features,ENST00000366488.5,ENST00000527541.5,,,,,,,,
@@ -426,15 +419,8 @@ SE_ENSG00000048707_1_4,VPS13D,human,transcript_doesnt_have_features,ENST00000620
 SE_ENSG00000048707_1_4,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000476045.5,,,,,,,,
 SE_ENSG00000048707_1_4,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000481484.1,,,,,,,,
 SE_ENSG00000048707_1_4,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000645148.1,,,,,,,,
-SE_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000613099.4,cd14306,UBA domain found in vacuolar protein sorting-associated protein 13D (VP13D) and similar proteins,36.0,,1.0,0.0,True,False
-SE_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000613099.4,pfam22562,,38.0,,1.0,0.0,True,False
-SE_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000613099.4,pfam25033,,525.0,,1.0,0.0,True,False
-SE_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000613099.4,smart00165,,38.0,,1.0,0.0,True,False
 SE_ENSG00000048707_1_4,VPS13D,human,added_domain,ENST00000620676.6,ENST00000613099.4,IPR056747,"This entry represents the middle region of the VPS13 proteins. VPS13 proteins have been implicated in processes including vesicle fusion, autophagy, and actin regulation. They bind phospholipids and act as channels that mediate the transfer of lipids between membranes at organelle contact sites [ , , , ]. It has been proposed that members of this entry have the capacity to bind and likely transfer tens of glycerolipids at once. Yeast VPS13 acts at multiple cellular sites, namely the interface between mitochondria and the vacuole, on endosomes, on the nuclear-vacuole junction and the vacuole, depending on the carbon source and metabolic state. VPS13A, VPS13C and VPS13D from mammals localise at contacts at contacts between the ER and other organelles, i.e. VPS13A and VPS13D bridge the ER to mitochondria, VPS13C bridges the ER to late endosomes and lysosomes and VPS13B may localise to endosome-endosome contacts [ , , ]. Mutations in human VPS13 proteins cause different diseases such as Chorea-acanthocytosis, Cohen syndrome, Parkinson's disease, and spastic ataxia [ ].",,560.0,0.0,1.0,True,False
-SE_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000460333.5,cd14306,UBA domain found in vacuolar protein sorting-associated protein 13D (VP13D) and similar proteins,36.0,,1.0,0.0,False,False
-SE_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000460333.5,pfam22562,,38.0,,1.0,0.0,False,False
-SE_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000460333.5,pfam25033,,525.0,,1.0,0.0,False,False
-SE_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000460333.5,smart00165,,38.0,,1.0,0.0,False,False
+SE_ENSG00000048707_1_4,VPS13D,human,no_domains_in_region,ENST00000620676.6,ENST00000460333.5,,,,,,,False,False
 AL_ENSG00000198162_1_6,MAN1A2,human,no_unique_features,ENST00000356554.7,XM_006710302.4,,,,,,,,
 AL_ENSG00000198162_1_6,MAN1A2,human,transcript_doesnt_have_features,ENST00000356554.7,XM_017000115.2,,,,,,,,
 AL_ENSG00000198162_1_6,MAN1A2,human,no_unique_features,ENST00000356554.7,ENST00000421535.5,,,,,,,,
@@ -490,16 +476,13 @@ SE_ENSG00000048707_1_5,VPS13D,human,transcript_doesnt_have_features,ENST00000620
 SE_ENSG00000048707_1_5,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000476045.5,,,,,,,,
 SE_ENSG00000048707_1_5,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000481484.1,,,,,,,,
 SE_ENSG00000048707_1_5,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000645148.1,,,,,,,,
-SE_ENSG00000048707_1_5,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000646411.1,pfam06650,SHR-binding domain of vacuolar-sorting associated protein 13,284.0,,1.0,0.0,False,False
-SE_ENSG00000048707_1_5,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000646411.1,pfam25036,,528.0,,1.0,0.0,False,False
-SE_ENSG00000048707_1_5,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000646917.1,pfam06650,SHR-binding domain of vacuolar-sorting associated protein 13,284.0,,1.0,0.0,True,False
-SE_ENSG00000048707_1_5,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000646917.1,pfam25036,,528.0,,1.0,0.0,True,False
-SE_ENSG00000048707_1_5,VPS13D,human,added_domain,ENST00000620676.6,ENST00000646917.1,IPR056747,"This entry represents the middle region of the VPS13 proteins. VPS13 proteins have been implicated in processes including vesicle fusion, autophagy, and actin regulation. They bind phospholipids and act as channels that mediate the transfer of lipids between membranes at organelle contact sites [ , , , ]. It has been proposed that members of this entry have the capacity to bind and likely transfer tens of glycerolipids at once. Yeast VPS13 acts at multiple cellular sites, namely the interface between mitochondria and the vacuole, on endosomes, on the nuclear-vacuole junction and the vacuole, depending on the carbon source and metabolic state. VPS13A, VPS13C and VPS13D from mammals localise at contacts at contacts between the ER and other organelles, i.e. VPS13A and VPS13D bridge the ER to mitochondria, VPS13C bridges the ER to late endosomes and lysosomes and VPS13B may localise to endosome-endosome contacts [ , , ]. Mutations in human VPS13 proteins cause different diseases such as Chorea-acanthocytosis, Cohen syndrome, Parkinson's disease, and spastic ataxia [ ].",,735.0,0.0,2.0,True,False
+SE_ENSG00000048707_1_5,VPS13D,human,no_domains_in_region,ENST00000620676.6,ENST00000646411.1,,,,,,,False,False
+SE_ENSG00000048707_1_5,VPS13D,human,added_domain,ENST00000620676.6,ENST00000646917.1,IPR009543,"This entry represents the VPS13 adaptor binding (VAB) domain, previously known as SHR-BD, found in VPS13 [ , ]. This domain interacts with Ypt35 which recruits VPS13 to endosomal and vacuolar membranes, and with Mcp1 to target VPS13 at mitochondria [ ]. In plants, this domain is found to be the region which interacts with SHR or the SHORT-ROOT transcription factor, a regulator of root-growth and asymmetric cell division that separates ground tissue into endodermis and cortex. The plant protein containing the SHR-BD is named SHRUBBY or SHBY ( ) [ ]. This domain interacts with Proline-X-Proline (Pro-X-Pro) motif present in receptor proteins at contact sites [ ]. This domain comprises six repeated modules, each of them containing nine β-strands connected by loops and arranged into a β-sandwich [ ]. VPS13 proteins have been implicated in processes including vesicle fusion, autophagy, and actin regulation. They bind phospholipids and act as channels that mediate the transfer of lipids between membranes at organelle contact sites [ , , ]. It has been proposed that members of this entry have the capacity to bind and likely transfer tens of glycerolipids at once. Yeast VPS13 acts at multiple cellular sites, namely the interface between mitochondria and the vacuole, on endosomes, on the nuclear-vacuole junction and the vacuole, depending on the carbon source and metabolic state. Most evidence showed that mammalian VPS13A, VPS13C and VPS13D localize at contacts between the ER and other organelles, i.e. VPS13A and VPS13D bridge the ER to mitochondria, VPS13C bridges the ER to late endosomes and lysosomes and VPS13B may localize to endosome-endosome contacts [ , , ]. Mutations in human VPS13 proteins (VPS13A-D) cause different diseases such as Chorea-acanthocytosis, Cohen syndrome, Parkinson's disease, and spastic ataxia, respectively which suggests they have different functions [ , ]. Members of this entry belong to the repeating β-groove (RBG) superfamily. These proteins share a structure made of multiple repeating modules consisting of five β-sheets followed by a loop [ ].",,303.0,0.0,1.0,True,False
 RI_ENSG00000173947_1_6,CIMAP3,human,no_unique_features,ENST00000369738.9,XM_005270472.2,,,,,,,,
 RI_ENSG00000173947_1_6,CIMAP3,human,no_unique_features,ENST00000369738.9,XM_017000322.2,,,,,,,,
 RI_ENSG00000173947_1_6,CIMAP3,human,no_unique_features,ENST00000369738.9,ENST00000369737.4,,,,,,,,
 RI_ENSG00000173947_1_6,CIMAP3,human,no_unique_features,ENST00000369738.9,ENST00000468395.1,,,,,,,,
-RI_ENSG00000173947_1_6,CIMAP3,human,dropped_domain,ENST00000369738.9,ENST00000484512.1,pfam07004,Sperm-tail PG-rich repeat,17.0,,1.0,0.0,True,False
+RI_ENSG00000173947_1_6,CIMAP3,human,no_domains_in_region,ENST00000369738.9,ENST00000484512.1,,,,,,,True,False
 A3_ENSG00000120949_1_19,TNFRSF8,human,no_unique_features,ENST00000263932.7,XM_047434793.1,,,,,,,,
 A3_ENSG00000120949_1_19,TNFRSF8,human,no_unique_features,ENST00000263932.7,XM_011542443.3,,,,,,,,
 A3_ENSG00000120949_1_19,TNFRSF8,human,no_unique_features,ENST00000263932.7,ENST00000413146.6,,,,,,,,
@@ -573,7 +556,7 @@ RI_ENSG00000198160_1_11,MIER1,human,no_unique_features,ENST00000401041.6,XM_0170
 RI_ENSG00000198160_1_11,MIER1,human,no_unique_features,ENST00000401041.6,XM_017001934.2,,,,,,,,
 RI_ENSG00000198160_1_11,MIER1,human,transcript_doesnt_have_features,ENST00000401041.6,ENST00000479067.1,,,,,,,,
 RI_ENSG00000198160_1_11,MIER1,human,transcript_doesnt_have_features,ENST00000401041.6,ENST00000493357.1,,,,,,,,
-RI_ENSG00000198160_1_11,MIER1,human,shorter_domains,ENST00000401041.6,ENST00000371018.7,pfam19426,Mesoderm induction early response protein 1/3 C-terminal,147.0,78.0,2.0,2.0,True,False
+RI_ENSG00000198160_1_11,MIER1,human,no_domains_in_region,ENST00000401041.6,ENST00000371018.7,,,,,,,True,False
 AL_ENSG00000116678_1_14,LEPR,human,no_canonical_features,ENST00000349533.11,,,,,,,,,
 RI_ENSG00000133216_1_15,EPHB2,human,no_unique_features,ENST00000374630.8,ENST00000374632.7,,,,,,,,
 RI_ENSG00000133216_1_15,EPHB2,human,no_unique_features,ENST00000374630.8,XM_006710442.5,,,,,,,,
@@ -584,8 +567,7 @@ RI_ENSG00000133216_1_15,EPHB2,human,transcript_doesnt_have_features,ENST00000374
 RI_ENSG00000133216_1_15,EPHB2,human,no_unique_features,ENST00000374630.8,ENST00000374627.1,,,,,,,,
 RI_ENSG00000133216_1_15,EPHB2,human,transcript_doesnt_have_features,ENST00000374630.8,ENST00000465676.1,,,,,,,,
 RI_ENSG00000133216_1_15,EPHB2,human,transcript_doesnt_have_features,ENST00000374630.8,ENST00000490436.1,,,,,,,,
-RI_ENSG00000133216_1_15,EPHB2,human,added_domain,ENST00000374630.8,ENST00000400191.7,cd09552,SAM domain of EPH-B2 subfamily of tyrosine kinase receptors,,71.0,0.0,1.0,True,False
-RI_ENSG00000133216_1_15,EPHB2,human,added_domain,ENST00000374630.8,ENST00000400191.7,IPR001660,Sterile alpha motif domain; SAM domain (Sterile alpha motif),,68.0,0.0,2.0,True,False
+RI_ENSG00000133216_1_15,EPHB2,human,no_domains_in_region,ENST00000374630.8,ENST00000400191.7,,,,,,,True,False
 AL_ENSG00000116678_1_15,LEPR,human,transcript_doesnt_have_features,ENST00000349533.11,ENST00000371060.7,,,,,,,,
 AL_ENSG00000116678_1_15,LEPR,human,transcript_doesnt_have_features,ENST00000349533.11,ENST00000616738.4,,,,,,,,
 AL_ENSG00000116678_1_15,LEPR,human,transcript_doesnt_have_features,ENST00000349533.11,ENST00000344610.12,,,,,,,,
@@ -625,8 +607,7 @@ AL_ENSG00000179397_1_9,CATSPERE,human,transcript_doesnt_have_features,ENST000003
 AL_ENSG00000179397_1_9,CATSPERE,human,transcript_doesnt_have_features,ENST00000366534.9,ENST00000478554.5,,,,,,,,
 AL_ENSG00000179397_1_9,CATSPERE,human,transcript_doesnt_have_features,ENST00000366534.9,ENST00000464170.1,,,,,,,,
 AL_ENSG00000179397_1_9,CATSPERE,human,transcript_doesnt_have_features,ENST00000366534.9,ENST00000487449.1,,,,,,,,
-AL_ENSG00000179397_1_9,CATSPERE,human,dropped_domain,ENST00000366534.9,ENST00000485888.1,pfam15020,Cation channel sperm-associated protein subunit delta,204.0,,1.0,0.0,True,False
-AL_ENSG00000179397_1_9,CATSPERE,human,dropped_domain,ENST00000366534.9,ENST00000485888.1,pfam22850,,203.0,,1.0,0.0,True,False
+AL_ENSG00000179397_1_9,CATSPERE,human,no_domains_in_region,ENST00000366534.9,ENST00000485888.1,,,,,,,True,False
 RI_ENSG00000198160_1_10,MIER1,human,no_unique_features,ENST00000401041.6,ENST00000357692.6,,,,,,,,
 RI_ENSG00000198160_1_10,MIER1,human,no_unique_features,ENST00000401041.6,NM_001350530.2,,,,,,,,
 RI_ENSG00000198160_1_10,MIER1,human,no_unique_features,ENST00000401041.6,NM_020948.4,,,,,,,,
@@ -654,10 +635,10 @@ RI_ENSG00000198160_1_10,MIER1,human,no_unique_features,ENST00000401041.6,XM_0170
 RI_ENSG00000198160_1_10,MIER1,human,no_unique_features,ENST00000401041.6,XM_017001934.2,,,,,,,,
 RI_ENSG00000198160_1_10,MIER1,human,transcript_doesnt_have_features,ENST00000401041.6,ENST00000479067.1,,,,,,,,
 RI_ENSG00000198160_1_10,MIER1,human,transcript_doesnt_have_features,ENST00000401041.6,ENST00000493357.1,,,,,,,,
-RI_ENSG00000198160_1_10,MIER1,human,shorter_domains,ENST00000401041.6,ENST00000371016.5,pfam19426,Mesoderm induction early response protein 1/3 C-terminal,147.0,66.0,2.0,2.0,False,False
-RI_ENSG00000198160_1_10,MIER1,human,shorter_domains,ENST00000401041.6,ENST00000371014.5,pfam19426,Mesoderm induction early response protein 1/3 C-terminal,147.0,66.0,2.0,2.0,True,False
-RI_ENSG00000198160_1_10,MIER1,human,shorter_domains,ENST00000401041.6,ENST00000355977.10,pfam19426,Mesoderm induction early response protein 1/3 C-terminal,147.0,66.0,2.0,2.0,False,False
-RI_ENSG00000198160_1_10,MIER1,human,shorter_domains,ENST00000401041.6,ENST00000401042.7,pfam19426,Mesoderm induction early response protein 1/3 C-terminal,147.0,66.0,2.0,2.0,False,False
+RI_ENSG00000198160_1_10,MIER1,human,no_domains_in_region,ENST00000401041.6,ENST00000371016.5,,,,,,,False,False
+RI_ENSG00000198160_1_10,MIER1,human,no_domains_in_region,ENST00000401041.6,ENST00000371014.5,,,,,,,True,False
+RI_ENSG00000198160_1_10,MIER1,human,no_domains_in_region,ENST00000401041.6,ENST00000355977.10,,,,,,,False,False
+RI_ENSG00000198160_1_10,MIER1,human,no_domains_in_region,ENST00000401041.6,ENST00000401042.7,,,,,,,False,False
 MX_ENSG00000137948_1_9,BRDT,human,transcript_doesnt_have_features,ENST00000399546.7,ENST00000370389.6,,,,,,,,
 MX_ENSG00000137948_1_9,BRDT,human,transcript_doesnt_have_features,ENST00000399546.7,ENST00000362005.7,,,,,,,,
 MX_ENSG00000137948_1_9,BRDT,human,no_unique_features,ENST00000399546.7,NM_001242806.2,,,,,,,,
@@ -681,28 +662,17 @@ MX_ENSG00000137948_1_9,BRDT,human,transcript_doesnt_have_features,ENST0000039954
 MX_ENSG00000137948_1_9,BRDT,human,transcript_doesnt_have_features,ENST00000399546.7,ENST00000461218.5,,,,,,,,
 MX_ENSG00000137948_1_9,BRDT,human,transcript_doesnt_have_features,ENST00000399546.7,ENST00000484833.5,,,,,,,,
 MX_ENSG00000137948_1_9,BRDT,human,transcript_doesnt_have_features,ENST00000399546.7,ENST00000484781.1,,,,,,,,
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,XM_006710855.5,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,XM_006710855.5,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,XM_006710856.5,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,XM_006710856.5,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,XM_011542035.4,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,XM_011542035.4,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,XM_047428955.1,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,True,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,XM_047428955.1,IPR001487,Bromodomain,111.0,,2.0,0.0,True,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000448194.6,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000448194.6,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000470955.6,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000470955.6,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000440509.5,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000440509.5,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000427104.5,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000427104.5,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000355011.7,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000355011.7,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000457265.1,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000457265.1,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000476711.5,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_9,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000476711.5,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
+MX_ENSG00000137948_1_9,BRDT,human,no_domains_in_region,ENST00000399546.7,XM_006710855.5,,,,,,,False,False
+MX_ENSG00000137948_1_9,BRDT,human,no_domains_in_region,ENST00000399546.7,XM_006710856.5,,,,,,,False,False
+MX_ENSG00000137948_1_9,BRDT,human,no_domains_in_region,ENST00000399546.7,XM_011542035.4,,,,,,,False,False
+MX_ENSG00000137948_1_9,BRDT,human,no_domains_in_region,ENST00000399546.7,XM_047428955.1,,,,,,,True,False
+MX_ENSG00000137948_1_9,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000448194.6,,,,,,,False,False
+MX_ENSG00000137948_1_9,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000470955.6,,,,,,,False,False
+MX_ENSG00000137948_1_9,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000440509.5,,,,,,,False,False
+MX_ENSG00000137948_1_9,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000427104.5,,,,,,,False,False
+MX_ENSG00000137948_1_9,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000355011.7,,,,,,,False,False
+MX_ENSG00000137948_1_9,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000457265.1,,,,,,,False,False
+MX_ENSG00000137948_1_9,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000476711.5,,,,,,,False,False
 AL_ENSG00000150681_1_12,RGS18,human,no_canonical_features,ENST00000367460.4,,,,,,,,,
 A5_ENSG00000162521_1_10,RBBP4,human,no_canonical_features,ENST00000373493.10,,,,,,,,,
 MX_ENSG00000137948_1_10,BRDT,human,no_unique_features,ENST00000399546.7,NM_001242806.2,,,,,,,,
@@ -731,22 +701,14 @@ MX_ENSG00000137948_1_10,BRDT,human,no_unique_features,ENST00000399546.7,ENST0000
 MX_ENSG00000137948_1_10,BRDT,human,transcript_doesnt_have_features,ENST00000399546.7,ENST00000680194.1,,,,,,,,
 MX_ENSG00000137948_1_10,BRDT,human,transcript_doesnt_have_features,ENST00000399546.7,ENST00000461218.5,,,,,,,,
 MX_ENSG00000137948_1_10,BRDT,human,transcript_doesnt_have_features,ENST00000399546.7,ENST00000484781.1,,,,,,,,
-MX_ENSG00000137948_1_10,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000370389.6,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_10,BRDT,human,shorter_domains,ENST00000399546.7,ENST00000370389.6,IPR001487,Bromodomain,111.0,62.0,2.0,2.0,False,False
-MX_ENSG00000137948_1_10,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000362005.7,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,True
-MX_ENSG00000137948_1_10,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000362005.7,IPR001487,Bromodomain,111.0,,2.0,0.0,False,True
-MX_ENSG00000137948_1_10,BRDT,human,dropped_domain,ENST00000399546.7,XM_006710855.5,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_10,BRDT,human,dropped_domain,ENST00000399546.7,XM_006710855.5,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_10,BRDT,human,dropped_domain,ENST00000399546.7,XM_011542032.4,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,True,False
-MX_ENSG00000137948_1_10,BRDT,human,dropped_domain,ENST00000399546.7,XM_011542032.4,IPR001487,Bromodomain,111.0,,2.0,0.0,True,False
-MX_ENSG00000137948_1_10,BRDT,human,dropped_domain,ENST00000399546.7,XM_006710856.5,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_10,BRDT,human,dropped_domain,ENST00000399546.7,XM_006710856.5,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_10,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000548992.5,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_10,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000548992.5,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_10,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000476711.5,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_10,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000476711.5,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_10,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000484833.5,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_10,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000484833.5,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
+MX_ENSG00000137948_1_10,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000370389.6,,,,,,,False,False
+MX_ENSG00000137948_1_10,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000362005.7,,,,,,,False,True
+MX_ENSG00000137948_1_10,BRDT,human,no_domains_in_region,ENST00000399546.7,XM_006710855.5,,,,,,,False,False
+MX_ENSG00000137948_1_10,BRDT,human,no_domains_in_region,ENST00000399546.7,XM_011542032.4,,,,,,,True,False
+MX_ENSG00000137948_1_10,BRDT,human,no_domains_in_region,ENST00000399546.7,XM_006710856.5,,,,,,,False,False
+MX_ENSG00000137948_1_10,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000548992.5,,,,,,,False,False
+MX_ENSG00000137948_1_10,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000476711.5,,,,,,,False,False
+MX_ENSG00000137948_1_10,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000484833.5,,,,,,,False,False
 AF_ENSG00000048707_1_3,VPS13D,human,no_unique_features,ENST00000620676.6,ENST00000613099.4,,,,,,,,
 AF_ENSG00000048707_1_3,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000476169.1,,,,,,,,
 AF_ENSG00000048707_1_3,VPS13D,human,no_unique_features,ENST00000620676.6,ENST00000460333.5,,,,,,,,
@@ -836,24 +798,14 @@ MX_ENSG00000179397_1_3,CATSPERE,human,transcript_doesnt_have_features,ENST000003
 MX_ENSG00000179397_1_3,CATSPERE,human,no_unique_features,ENST00000366534.9,ENST00000464170.1,,,,,,,,
 MX_ENSG00000179397_1_3,CATSPERE,human,transcript_doesnt_have_features,ENST00000366534.9,ENST00000485888.1,,,,,,,,
 MX_ENSG00000179397_1_3,CATSPERE,human,transcript_doesnt_have_features,ENST00000366534.9,ENST00000487449.1,,,,,,,,
-MX_ENSG00000179397_1_3,CATSPERE,human,dropped_domain,ENST00000366534.9,ENST00000366531.7,pfam22844,,350.0,,1.0,0.0,False,False
-MX_ENSG00000179397_1_3,CATSPERE,human,dropped_domain,ENST00000366534.9,ENST00000366531.7,pfam22843,,86.0,,1.0,0.0,False,False
-MX_ENSG00000179397_1_3,CATSPERE,human,dropped_domain,ENST00000366534.9,ENST00000366531.7,pfam22841,,89.0,,1.0,0.0,False,False
 MX_ENSG00000179397_1_3,CATSPERE,human,added_domain,ENST00000366534.9,ENST00000366531.7,IPR053818,"This entry includes CATSPERE, the auxiliary subunit epsilon of the CatSper complex, a complex involved in sperm cell hyperactivation. This process is needed for sperm motility, which is essential late in the preparation of sperm for fertilisation [ ]. This is a multi-domain protein which has a similar domain organisation as the other auxiliary subunits, beta, gamma and delta. The epsilon subunit has an additional N-terminal domain (NTD2). This entry represents the first N-terminal domain (NTD1) [ ].",,89.0,0.0,1.0,False,False
 MX_ENSG00000179397_1_3,CATSPERE,human,added_domain,ENST00000366534.9,ENST00000366531.7,IPR053817,"This entry includes CATSPERE, the auxiliary subunit epsilon of the CatSper complex, a complex involved in sperm cell hyperactivation. This process is needed for sperm motility, which is essential late in the preparation of sperm for fertilisation [ ]. This is a multi-domain protein which has a similar domain organisation as the other auxiliary subunits, beta, gamma and delta. The epsilon subunit has two N-terminal domains (NTD1/2); this entry represents the second one (NTD2) [ ].",,86.0,0.0,1.0,False,False
-MX_ENSG00000179397_1_3,CATSPERE,human,added_domain,ENST00000366534.9,ENST00000366531.7,IPR053816,"The CatSper (cation channel of sperm) complex is a tetrameric complex consisting of CATSPER1, CATSPER2, CATSPER3 and CATSPER4, it functions as an alkalinisation-activated calcium channel. This complex is involved in sperm cell hyperactivation, a process needed for sperm motility, which is essential late in the preparation of sperm for fertilisation [ ]. This complex requires four auxiliary subunits (beta, gamma, delta and epsilon), which play a role in channel assembly [ ]. This entry includes CATSPERE, the auxiliary subunit epsilon of the CatSper complex. This is a multi-domain protein which has a similar domain organisation as the other auxiliary subunits, beta, gamma and delta. The epsilon subunit has an additional N-terminal domain (NTD2) which is followed by a β-propeller domain, represented in this entry.",,350.0,0.0,1.0,False,False
-MX_ENSG00000179397_1_3,CATSPERE,human,dropped_domain,ENST00000366534.9,XM_047417115.1,pfam22844,,350.0,,1.0,0.0,True,False
-MX_ENSG00000179397_1_3,CATSPERE,human,dropped_domain,ENST00000366534.9,XM_047417115.1,pfam22843,,86.0,,1.0,0.0,True,False
-MX_ENSG00000179397_1_3,CATSPERE,human,dropped_domain,ENST00000366534.9,XM_047417115.1,pfam22841,,89.0,,1.0,0.0,True,False
-MX_ENSG00000179397_1_3,CATSPERE,human,dropped_domain,ENST00000366534.9,XM_047417123.1,pfam22844,,350.0,,1.0,0.0,False,False
-MX_ENSG00000179397_1_3,CATSPERE,human,dropped_domain,ENST00000366534.9,XM_047417123.1,pfam22843,,86.0,,1.0,0.0,False,False
-MX_ENSG00000179397_1_3,CATSPERE,human,dropped_domain,ENST00000366534.9,XM_047417123.1,pfam22841,,89.0,,1.0,0.0,False,False
-MX_ENSG00000179397_1_3,CATSPERE,human,dropped_domain,ENST00000366534.9,ENST00000478554.5,pfam22844,,350.0,,1.0,0.0,False,False
-MX_ENSG00000179397_1_3,CATSPERE,human,dropped_domain,ENST00000366534.9,ENST00000478554.5,pfam22843,,86.0,,1.0,0.0,False,False
-MX_ENSG00000179397_1_3,CATSPERE,human,dropped_domain,ENST00000366534.9,ENST00000478554.5,pfam22841,,89.0,,1.0,0.0,False,False
+MX_ENSG00000179397_1_3,CATSPERE,human,no_domains_in_region,ENST00000366534.9,XM_047417115.1,,,,,,,True,False
+MX_ENSG00000179397_1_3,CATSPERE,human,no_domains_in_region,ENST00000366534.9,XM_047417123.1,,,,,,,False,False
+MX_ENSG00000179397_1_3,CATSPERE,human,no_domains_in_region,ENST00000366534.9,ENST00000478554.5,,,,,,,False,False
 A3_ENSG00000260238_1_18,PMF1-BGLAP,human,transcript_doesnt_have_features,ENST00000490491.5,ENST00000320139.5,,,,,,,,
 A3_ENSG00000260238_1_18,PMF1-BGLAP,human,transcript_doesnt_have_features,ENST00000490491.5,ENST00000567140.3,,,,,,,,
-A3_ENSG00000260238_1_18,PMF1-BGLAP,human,added_domain,ENST00000490491.5,ENST00000368276.8,pfam03980,,,50.0,0.0,1.0,True,False
+A3_ENSG00000260238_1_18,PMF1-BGLAP,human,no_domains_in_region,ENST00000490491.5,ENST00000368276.8,,,,,,,True,False
 AF_ENSG00000048707_1_5,VPS13D,human,no_canonical_features,ENST00000620676.6,,,,,,,,,
 SE_ENSG00000271723_1_14,MROH7-TTC4,human,no_unique_features,ENST00000414150.6,ENST00000460155.1,,,,,,,,
 SE_ENSG00000271723_1_14,MROH7-TTC4,human,no_unique_features,ENST00000414150.6,ENST00000606515.5,,,,,,,,
@@ -904,7 +856,6 @@ MX_ENSG00000185842_1_20,DNAH14,human,transcript_doesnt_have_features,ENST0000068
 MX_ENSG00000185842_1_20,DNAH14,human,transcript_doesnt_have_features,ENST00000682510.1,ENST00000498360.5,,,,,,,,
 MX_ENSG00000185842_1_20,DNAH14,human,transcript_doesnt_have_features,ENST00000682510.1,ENST00000453375.1,,,,,,,,
 MX_ENSG00000185842_1_20,DNAH14,human,dropped_domain,ENST00000682510.1,ENST00000445597.6,G3DSA:6.10.140.1060,,77.0,,1.0,0.0,True,False
-MX_ENSG00000185842_1_20,DNAH14,human,added_domain,ENST00000682510.1,ENST00000445597.6,pfam12781,ATP-binding dynein motor region,,183.0,0.0,2.0,True,False
 AF_ENSG00000154027_1_18,AK5,human,no_unique_features,ENST00000354567.7,XM_005270739.6,,,,,,,,
 AF_ENSG00000154027_1_18,AK5,human,no_unique_features,ENST00000354567.7,XM_017001012.2,,,,,,,,
 AF_ENSG00000154027_1_18,AK5,human,no_unique_features,ENST00000354567.7,XM_047417740.1,,,,,,,,
@@ -921,8 +872,8 @@ AF_ENSG00000154027_1_18,AK5,human,no_unique_features,ENST00000354567.7,ENST00000
 AF_ENSG00000154027_1_18,AK5,human,transcript_doesnt_have_features,ENST00000354567.7,ENST00000530826.1,,,,,,,,
 AF_ENSG00000154027_1_18,AK5,human,transcript_doesnt_have_features,ENST00000354567.7,ENST00000466393.1,,,,,,,,
 AF_ENSG00000154027_1_18,AK5,human,transcript_doesnt_have_features,ENST00000354567.7,ENST00000531672.1,,,,,,,,
-AF_ENSG00000154027_1_18,AK5,human,dropped_domain,ENST00000354567.7,XM_006710572.4,cd22978,dimerization/docking (D/D) domain found in adenylate kinase isoenzyme 5 (AK5) and similar proteins,44.0,,1.0,0.0,True,True
-AF_ENSG00000154027_1_18,AK5,human,dropped_domain,ENST00000354567.7,ENST00000478407.1,cd22978,dimerization/docking (D/D) domain found in adenylate kinase isoenzyme 5 (AK5) and similar proteins,44.0,,1.0,0.0,False,False
+AF_ENSG00000154027_1_18,AK5,human,no_domains_in_region,ENST00000354567.7,XM_006710572.4,,,,,,,True,True
+AF_ENSG00000154027_1_18,AK5,human,no_domains_in_region,ENST00000354567.7,ENST00000478407.1,,,,,,,False,False
 RI_ENSG00000137948_1_16,BRDT,human,no_unique_features,ENST00000399546.7,ENST00000370389.6,,,,,,,,
 RI_ENSG00000137948_1_16,BRDT,human,no_unique_features,ENST00000399546.7,ENST00000362005.7,,,,,,,,
 RI_ENSG00000137948_1_16,BRDT,human,no_unique_features,ENST00000399546.7,NM_001242806.2,,,,,,,,
@@ -980,28 +931,17 @@ MX_ENSG00000137948_1_11,BRDT,human,transcript_doesnt_have_features,ENST000003995
 MX_ENSG00000137948_1_11,BRDT,human,transcript_doesnt_have_features,ENST00000399546.7,ENST00000461218.5,,,,,,,,
 MX_ENSG00000137948_1_11,BRDT,human,transcript_doesnt_have_features,ENST00000399546.7,ENST00000484833.5,,,,,,,,
 MX_ENSG00000137948_1_11,BRDT,human,transcript_doesnt_have_features,ENST00000399546.7,ENST00000484781.1,,,,,,,,
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,XM_006710855.5,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,XM_006710855.5,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,XM_006710856.5,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,XM_006710856.5,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,XM_011542035.4,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,XM_011542035.4,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,XM_047428955.1,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,True,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,XM_047428955.1,IPR001487,Bromodomain,111.0,,2.0,0.0,True,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000448194.6,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000448194.6,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000470955.6,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000470955.6,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000440509.5,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000440509.5,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000427104.5,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000427104.5,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000355011.7,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000355011.7,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000457265.1,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000457265.1,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000476711.5,cd05497,"the first bromodomain in Brdt has been shown to be essential for male germ cell differentiation. Bromodomains are 110 amino...; Bromodomain, Brdt_like subfamily, repeat I. Human Brdt is a testis-specific member of the BET subfamily of bromodomain proteins",107.0,,1.0,0.0,False,False
-MX_ENSG00000137948_1_11,BRDT,human,dropped_domain,ENST00000399546.7,ENST00000476711.5,IPR001487,Bromodomain,111.0,,2.0,0.0,False,False
+MX_ENSG00000137948_1_11,BRDT,human,no_domains_in_region,ENST00000399546.7,XM_006710855.5,,,,,,,False,False
+MX_ENSG00000137948_1_11,BRDT,human,no_domains_in_region,ENST00000399546.7,XM_006710856.5,,,,,,,False,False
+MX_ENSG00000137948_1_11,BRDT,human,no_domains_in_region,ENST00000399546.7,XM_011542035.4,,,,,,,False,False
+MX_ENSG00000137948_1_11,BRDT,human,no_domains_in_region,ENST00000399546.7,XM_047428955.1,,,,,,,True,False
+MX_ENSG00000137948_1_11,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000448194.6,,,,,,,False,False
+MX_ENSG00000137948_1_11,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000470955.6,,,,,,,False,False
+MX_ENSG00000137948_1_11,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000440509.5,,,,,,,False,False
+MX_ENSG00000137948_1_11,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000427104.5,,,,,,,False,False
+MX_ENSG00000137948_1_11,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000355011.7,,,,,,,False,False
+MX_ENSG00000137948_1_11,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000457265.1,,,,,,,False,False
+MX_ENSG00000137948_1_11,BRDT,human,no_domains_in_region,ENST00000399546.7,ENST00000476711.5,,,,,,,False,False
 RI_ENSG00000134216_1_7,CHIA,human,no_canonical_features,ENST00000369740.6,,,,,,,,,
 SE_ENSG00000213625_1_11,LEPROT,human,no_unique_features,ENST00000371065.9,NM_001198683.2,,,,,,,,
 SE_ENSG00000213625_1_11,LEPROT,human,no_unique_features,ENST00000371065.9,ENST00000475108.5,,,,,,,,
@@ -1021,9 +961,7 @@ MX_ENSG00000187010_1_16,RHD,human,dropped_domain,ENST00000328664.9,ENST000004238
 MX_ENSG00000187010_1_16,RHD,human,dropped_domain,ENST00000328664.9,ENST00000568195.5,PTHR11730,,385.0,,1.0,0.0,True,False
 MX_ENSG00000187010_1_16,RHD,human,added_domain,ENST00000328664.9,ENST00000568195.5,IPR024041,This ammonium transporter domain consists of a duplication of 2 structural repeats of five helices each plus one extra C-terminal helix. It has been described as a channel that spans the membrane 11 times [ ].,,381.0,0.0,1.0,True,False
 MX_ENSG00000187010_1_16,RHD,human,dropped_domain,ENST00000328664.9,ENST00000417538.6,PTHR11730,,385.0,,1.0,0.0,False,False
-MX_ENSG00000187010_1_16,RHD,human,added_domain,ENST00000328664.9,ENST00000417538.6,pfam00909,Ammonium Transporter Family,,294.0,0.0,1.0,False,False
 MX_ENSG00000187010_1_16,RHD,human,dropped_domain,ENST00000328664.9,ENST00000357542.8,PTHR11730,,385.0,,1.0,0.0,False,False
-MX_ENSG00000187010_1_16,RHD,human,added_domain,ENST00000328664.9,ENST00000357542.8,pfam00909,Ammonium Transporter Family,,325.0,0.0,1.0,False,False
 MX_ENSG00000187010_1_16,RHD,human,shorter,ENST00000328664.9,ENST00000648012.1,PTHR11730,,385.0,301.0,1.0,1.0,False,False
 RI_ENSG00000171872_1_3,KLF17,human,no_unique_features,ENST00000372299.4,XM_011540700.2,,,,,,,,
 RI_ENSG00000171872_1_3,KLF17,human,no_unique_features,ENST00000372299.4,XM_047445936.1,,,,,,,,
@@ -1088,9 +1026,7 @@ AF_ENSG00000149527_1_2,PLCH2,human,transcript_doesnt_have_features,ENST000003784
 AF_ENSG00000149527_1_2,PLCH2,human,transcript_doesnt_have_features,ENST00000378486.8,ENST00000609981.5,,,,,,,,
 AF_ENSG00000149527_1_2,PLCH2,human,no_unique_features,ENST00000378486.8,ENST00000419816.6,,,,,,,,
 AF_ENSG00000149527_1_2,PLCH2,human,transcript_doesnt_have_features,ENST00000378486.8,ENST00000278878.6,,,,,,,,
-AF_ENSG00000149527_1_2,PLCH2,human,added_domain,ENST00000378486.8,ENST00000449969.5,cd13364,Phospholipase C-eta (PLC-eta) pleckstrin homology (PH) domain,,107.0,0.0,1.0,True,False
-AF_ENSG00000149527_1_2,PLCH2,human,added_domain,ENST00000378486.8,ENST00000449969.5,pfam16457,,,111.0,0.0,1.0,True,False
-AF_ENSG00000149527_1_2,PLCH2,human,added_domain,ENST00000378486.8,ENST00000449969.5,smart00233,Pleckstrin homology domain,,110.0,0.0,1.0,True,False
+AF_ENSG00000149527_1_2,PLCH2,human,no_domains_in_region,ENST00000378486.8,ENST00000449969.5,,,,,,,True,False
 AL_ENSG00000271092_1_8,TLCD4-RWDD3,human,dropped_domain,ENST00000604534.5,ENST00000604203.1,IPR006634,"TLC is a protein domain with at least 5 transmembrane α-helices. Lag1p and Lac1p are essential for acyl-CoA-dependent ceramide synthesis [ ], TRAM is a subunit of the translocon and the CLN8 gene is mutated in Northern epilepsy syndrome. Proteins containing this domain may possess multiple functions such as lipid trafficking, metabolism, or sensing. Trh homologues possess additional homeobox domains [ ].",158.0,,1.0,0.0,True,False
 MX_ENSG00000134216_1_2,CHIA,human,no_unique_features,ENST00000369740.6,ENST00000430615.1,,,,,,,,
 MX_ENSG00000134216_1_2,CHIA,human,transcript_doesnt_have_features,ENST00000369740.6,ENST00000451398.6,,,,,,,,
@@ -1101,19 +1037,10 @@ MX_ENSG00000134216_1_2,CHIA,human,transcript_doesnt_have_features,ENST0000036974
 MX_ENSG00000134216_1_2,CHIA,human,transcript_doesnt_have_features,ENST00000369740.6,ENST00000477918.6,,,,,,,,
 MX_ENSG00000134216_1_2,CHIA,human,no_unique_features,ENST00000369740.6,ENST00000343320.10,,,,,,,,
 MX_ENSG00000134216_1_2,CHIA,human,transcript_doesnt_have_features,ENST00000369740.6,ENST00000489524.5,,,,,,,,
-MX_ENSG00000134216_1_2,CHIA,human,dropped_domain,ENST00000369740.6,NM_001258004.2,cd02872,"This conserved domain family includes a large number of catalytically inactive chitinase-like lectins (chitolectins) including YKL-39, YKL-40 (HCGP39), YM1, oviductin, and AMCase (acidic mammalian chitinase), as well as catalytically active...",364.0,,1.0,0.0,False,False
-MX_ENSG00000134216_1_2,CHIA,human,dropped_domain,ENST00000369740.6,NM_001258004.2,IPR001223,"Glycosyl hydrolases family 18; Glycoside hydrolase family 18, catalytic domain",342.0,,1.0,0.0,False,False
-MX_ENSG00000134216_1_2,CHIA,human,dropped_domain,ENST00000369740.6,NM_001258004.2,smart00636,,344.0,,1.0,0.0,False,False
-MX_ENSG00000134216_1_2,CHIA,human,dropped_domain,ENST00000369740.6,ENST00000353665.10,cd02872,"This conserved domain family includes a large number of catalytically inactive chitinase-like lectins (chitolectins) including YKL-39, YKL-40 (HCGP39), YM1, oviductin, and AMCase (acidic mammalian chitinase), as well as catalytically active...",364.0,,1.0,0.0,False,False
-MX_ENSG00000134216_1_2,CHIA,human,dropped_domain,ENST00000369740.6,ENST00000353665.10,IPR001223,"Glycosyl hydrolases family 18; Glycoside hydrolase family 18, catalytic domain",342.0,,1.0,0.0,False,False
-MX_ENSG00000134216_1_2,CHIA,human,dropped_domain,ENST00000369740.6,ENST00000353665.10,smart00636,,344.0,,1.0,0.0,False,False
-MX_ENSG00000134216_1_2,CHIA,human,added_domain,ENST00000369740.6,ENST00000353665.10,G3DSA:3.20.20.80,,,295.0,0.0,2.0,False,False
-MX_ENSG00000134216_1_2,CHIA,human,dropped_domain,ENST00000369740.6,XM_017001047.1,cd02872,"This conserved domain family includes a large number of catalytically inactive chitinase-like lectins (chitolectins) including YKL-39, YKL-40 (HCGP39), YM1, oviductin, and AMCase (acidic mammalian chitinase), as well as catalytically active...",364.0,,1.0,0.0,True,False
-MX_ENSG00000134216_1_2,CHIA,human,dropped_domain,ENST00000369740.6,XM_017001047.1,IPR001223,"Glycosyl hydrolases family 18; Glycoside hydrolase family 18, catalytic domain",342.0,,1.0,0.0,True,False
-MX_ENSG00000134216_1_2,CHIA,human,dropped_domain,ENST00000369740.6,XM_017001047.1,smart00636,,344.0,,1.0,0.0,True,False
-MX_ENSG00000134216_1_2,CHIA,human,dropped_domain,ENST00000369740.6,ENST00000352594.10,cd02872,"This conserved domain family includes a large number of catalytically inactive chitinase-like lectins (chitolectins) including YKL-39, YKL-40 (HCGP39), YM1, oviductin, and AMCase (acidic mammalian chitinase), as well as catalytically active...",364.0,,1.0,0.0,False,False
-MX_ENSG00000134216_1_2,CHIA,human,dropped_domain,ENST00000369740.6,ENST00000352594.10,IPR001223,"Glycosyl hydrolases family 18; Glycoside hydrolase family 18, catalytic domain",342.0,,1.0,0.0,False,False
-MX_ENSG00000134216_1_2,CHIA,human,dropped_domain,ENST00000369740.6,ENST00000352594.10,smart00636,,344.0,,1.0,0.0,False,False
+MX_ENSG00000134216_1_2,CHIA,human,no_domains_in_region,ENST00000369740.6,NM_001258004.2,,,,,,,False,False
+MX_ENSG00000134216_1_2,CHIA,human,added_domain,ENST00000369740.6,ENST00000353665.10,G3DSA:3.20.20.80,,,120.0,0.0,1.0,False,False
+MX_ENSG00000134216_1_2,CHIA,human,no_domains_in_region,ENST00000369740.6,XM_017001047.1,,,,,,,True,False
+MX_ENSG00000134216_1_2,CHIA,human,added_domain,ENST00000369740.6,ENST00000352594.10,IPR001223,"The glycosyl hydrolases family 18 (GH18) is widely distributed in all kingdoms and contains hydrolytic enzymes with chitinase or endo-N-acetyl-beta-D-glucosaminidase (ENGase) activity as well as chitinase-like lectins (chi-lectins/proteins (CLPs). Chitinases ( ) are hydrolytic enzymes that cleave the beta-1,4-bond releasing oligomeric, dimeric (chitobiose) or monomeric (N-actetylglucosamine, GlcNAc) products. ENGases ( ) hydrolyze the beta-1,4 linkage in the chitobiose core of N-linked glycans from glycoproteins leaving one GlcNAc residue on the substrate. CLPs do not display chitinase activity but some of them have been reported to have specific functions and carbohydrate binding property [ ]. This family also includes glycoproteins from mammals, such as oviduct-specific glycoproteins. This entry represents the catalytic domain of GH18s, which has a common (β/α)8 triosephosphate isomerase (TIM)-barrel structure that consists of a barrel-like framework made from eight internal parallel β-strands that are alternately connected by eight exterior α-helices. The active site motif DxxDxDxE is essential for the activity of the GH18 catalytic domain. [ , , ]. O-Glycosyl hydrolases ( ) are a widespread group of enzymes that hydrolyse the glycosidic bond between two or more carbohydrates, or between a carbohydrate and a non-carbohydrate moiety. A classification system for glycosyl hydrolases, based on sequence similarity, has led to the definition of 85 different families [ , ]. This classification is available on the CAZy (CArbohydrate-Active EnZymes) website.",,101.0,0.0,1.0,False,False
 A5_ENSG00000198160_1_12,MIER1,human,no_canonical_features,ENST00000401041.6,,,,,,,,,
 SE_ENSG00000283761_1_18,ENSG00000283761,human,no_canonical_features,ENST00000639037.1,,,,,,,,,
 A3_ENSG00000173728_1_13,SPMIP3,human,transcript_doesnt_have_features,ENST00000308105.5,XM_017000571.3,,,,,,,,
@@ -1125,7 +1052,7 @@ A3_ENSG00000173728_1_13,SPMIP3,human,transcript_doesnt_have_features,ENST0000030
 A3_ENSG00000173728_1_13,SPMIP3,human,transcript_doesnt_have_features,ENST00000308105.5,ENST00000486803.1,,,,,,,,
 A3_ENSG00000173728_1_13,SPMIP3,human,transcript_doesnt_have_features,ENST00000308105.5,ENST00000470211.1,,,,,,,,
 A3_ENSG00000173728_1_13,SPMIP3,human,no_domains_in_region,ENST00000308105.5,XM_011544129.4,,,,,,,True,False
-A3_ENSG00000173728_1_13,SPMIP3,human,added_domain,ENST00000308105.5,ENST00000366537.5,pfam17670,Family of unknown function (DUF5530),,108.0,0.0,2.0,False,False
+A3_ENSG00000173728_1_13,SPMIP3,human,no_domains_in_region,ENST00000308105.5,ENST00000366537.5,,,,,,,False,False
 MX_ENSG00000187010_1_17,RHD,human,no_unique_features,ENST00000328664.9,NM_001282867.1,,,,,,,,
 MX_ENSG00000187010_1_17,RHD,human,transcript_doesnt_have_features,ENST00000328664.9,ENST00000357542.8,,,,,,,,
 MX_ENSG00000187010_1_17,RHD,human,transcript_doesnt_have_features,ENST00000328664.9,ENST00000454452.6,,,,,,,,
@@ -1136,15 +1063,12 @@ MX_ENSG00000187010_1_17,RHD,human,dropped_domain,ENST00000328664.9,ENST000004238
 MX_ENSG00000187010_1_17,RHD,human,dropped_domain,ENST00000328664.9,ENST00000568195.5,PTHR11730,,385.0,,1.0,0.0,False,False
 MX_ENSG00000187010_1_17,RHD,human,added_domain,ENST00000328664.9,ENST00000568195.5,IPR024041,This ammonium transporter domain consists of a duplication of 2 structural repeats of five helices each plus one extra C-terminal helix. It has been described as a channel that spans the membrane 11 times [ ].,,381.0,0.0,1.0,False,False
 MX_ENSG00000187010_1_17,RHD,human,dropped_domain,ENST00000328664.9,ENST00000417538.6,PTHR11730,,385.0,,1.0,0.0,False,False
-MX_ENSG00000187010_1_17,RHD,human,added_domain,ENST00000328664.9,ENST00000417538.6,pfam00909,Ammonium Transporter Family,,294.0,0.0,1.0,False,False
 MX_ENSG00000187010_1_17,RHD,human,dropped_domain,ENST00000328664.9,XM_017002015.2,PTHR11730,,385.0,,1.0,0.0,False,False
 MX_ENSG00000187010_1_17,RHD,human,dropped_domain,ENST00000328664.9,ENST00000342055.9,PTHR11730,,385.0,,1.0,0.0,True,False
-MX_ENSG00000187010_1_17,RHD,human,added_domain,ENST00000328664.9,ENST00000342055.9,pfam00909,Ammonium Transporter Family,,328.0,0.0,1.0,True,False
 MX_ENSG00000187010_1_17,RHD,human,dropped_domain,ENST00000328664.9,ENST00000622561.4,PTHR11730,,385.0,,1.0,0.0,False,False
 A3_ENSG00000243364_1_15,EFNA4,human,transcript_doesnt_have_features,ENST00000368409.8,NM_001406810.1,,,,,,,,
 A3_ENSG00000243364_1_15,EFNA4,human,transcript_doesnt_have_features,ENST00000368409.8,ENST00000427683.2,,,,,,,,
-A3_ENSG00000243364_1_15,EFNA4,human,dropped_domain,ENST00000368409.8,ENST00000359751.8,cd10425,Ectodomain of Ephrin A,126.0,,1.0,0.0,True,False
-A3_ENSG00000243364_1_15,EFNA4,human,dropped_domain,ENST00000368409.8,ENST00000359751.8,pfam00812,,127.0,,1.0,0.0,True,False
+A3_ENSG00000243364_1_15,EFNA4,human,no_domains_in_region,ENST00000368409.8,ENST00000359751.8,,,,,,,True,False
 AL_ENSG00000154027_1_1,AK5,human,no_unique_features,ENST00000354567.7,XM_005270739.6,,,,,,,,
 AL_ENSG00000154027_1_1,AK5,human,no_unique_features,ENST00000354567.7,XM_017001012.2,,,,,,,,
 AL_ENSG00000154027_1_1,AK5,human,no_unique_features,ENST00000354567.7,XM_047417740.1,,,,,,,,
@@ -1162,7 +1086,7 @@ AL_ENSG00000154027_1_1,AK5,human,transcript_doesnt_have_features,ENST00000354567
 AL_ENSG00000154027_1_1,AK5,human,transcript_doesnt_have_features,ENST00000354567.7,ENST00000530826.1,,,,,,,,
 AL_ENSG00000154027_1_1,AK5,human,transcript_doesnt_have_features,ENST00000354567.7,ENST00000466393.1,,,,,,,,
 AL_ENSG00000154027_1_1,AK5,human,transcript_doesnt_have_features,ENST00000354567.7,ENST00000531672.1,,,,,,,,
-AL_ENSG00000154027_1_1,AK5,human,dropped_domain,ENST00000354567.7,ENST00000317704.8,pfam00406,Adenylate kinase,157.0,,1.0,0.0,True,False
+AL_ENSG00000154027_1_1,AK5,human,no_domains_in_region,ENST00000354567.7,ENST00000317704.8,,,,,,,True,False
 AF_ENSG00000189337_1_8,KAZN,human,no_unique_features,ENST00000376030.7,XM_011541074.4,,,,,,,,
 AF_ENSG00000189337_1_8,KAZN,human,no_unique_features,ENST00000376030.7,XM_005245795.6,,,,,,,,
 AF_ENSG00000189337_1_8,KAZN,human,no_unique_features,ENST00000376030.7,ENST00000636203.1,,,,,,,,
@@ -1216,9 +1140,7 @@ AF_ENSG00000149527_1_1,PLCH2,human,transcript_doesnt_have_features,ENST000003784
 AF_ENSG00000149527_1_1,PLCH2,human,transcript_doesnt_have_features,ENST00000378486.8,ENST00000609981.5,,,,,,,,
 AF_ENSG00000149527_1_1,PLCH2,human,no_unique_features,ENST00000378486.8,ENST00000419816.6,,,,,,,,
 AF_ENSG00000149527_1_1,PLCH2,human,transcript_doesnt_have_features,ENST00000378486.8,ENST00000278878.6,,,,,,,,
-AF_ENSG00000149527_1_1,PLCH2,human,added_domain,ENST00000378486.8,ENST00000449969.5,cd13364,Phospholipase C-eta (PLC-eta) pleckstrin homology (PH) domain,,107.0,0.0,1.0,True,False
-AF_ENSG00000149527_1_1,PLCH2,human,added_domain,ENST00000378486.8,ENST00000449969.5,pfam16457,,,111.0,0.0,1.0,True,False
-AF_ENSG00000149527_1_1,PLCH2,human,added_domain,ENST00000378486.8,ENST00000449969.5,smart00233,Pleckstrin homology domain,,110.0,0.0,1.0,True,False
+AF_ENSG00000149527_1_1,PLCH2,human,no_domains_in_region,ENST00000378486.8,ENST00000449969.5,,,,,,,True,False
 A3_ENSG00000198765_1_11,SYCP1,human,transcript_doesnt_have_features,ENST00000369522.8,XM_017002184.2,,,,,,,,
 A3_ENSG00000198765_1_11,SYCP1,human,no_unique_features,ENST00000369522.8,XM_005271156.2,,,,,,,,
 A3_ENSG00000198765_1_11,SYCP1,human,no_unique_features,ENST00000369522.8,XM_005271155.5,,,,,,,,
@@ -1232,9 +1154,9 @@ A3_ENSG00000198765_1_11,SYCP1,human,transcript_doesnt_have_features,ENST00000369
 A3_ENSG00000198765_1_11,SYCP1,human,transcript_doesnt_have_features,ENST00000369522.8,ENST00000482717.5,,,,,,,,
 A3_ENSG00000198765_1_11,SYCP1,human,transcript_doesnt_have_features,ENST00000369522.8,ENST00000493377.1,,,,,,,,
 A3_ENSG00000198765_1_11,SYCP1,human,transcript_doesnt_have_features,ENST00000369522.8,ENST00000477590.1,,,,,,,,
-A3_ENSG00000198765_1_11,SYCP1,human,dropped_domain,ENST00000369522.8,ENST00000618516.4,pfam05483,Synaptonemal complex protein 1 (SCP-1),765.0,,1.0,0.0,True,False
-A3_ENSG00000198765_1_11,SYCP1,human,dropped_domain,ENST00000369522.8,ENST00000613524.4,pfam05483,Synaptonemal complex protein 1 (SCP-1),765.0,,1.0,0.0,False,False
-A3_ENSG00000198765_1_11,SYCP1,human,dropped_domain,ENST00000369522.8,ENST00000455987.5,pfam05483,Synaptonemal complex protein 1 (SCP-1),765.0,,1.0,0.0,False,False
+A3_ENSG00000198765_1_11,SYCP1,human,no_domains_in_region,ENST00000369522.8,ENST00000618516.4,,,,,,,True,False
+A3_ENSG00000198765_1_11,SYCP1,human,no_domains_in_region,ENST00000369522.8,ENST00000613524.4,,,,,,,False,False
+A3_ENSG00000198765_1_11,SYCP1,human,no_domains_in_region,ENST00000369522.8,ENST00000455987.5,,,,,,,False,False
 AF_ENSG00000154027_1_19,AK5,human,no_unique_features,ENST00000354567.7,XM_005270739.6,,,,,,,,
 AF_ENSG00000154027_1_19,AK5,human,no_unique_features,ENST00000354567.7,XM_017001012.2,,,,,,,,
 AF_ENSG00000154027_1_19,AK5,human,no_unique_features,ENST00000354567.7,XM_047417740.1,,,,,,,,
@@ -1251,8 +1173,8 @@ AF_ENSG00000154027_1_19,AK5,human,no_unique_features,ENST00000354567.7,ENST00000
 AF_ENSG00000154027_1_19,AK5,human,transcript_doesnt_have_features,ENST00000354567.7,ENST00000530826.1,,,,,,,,
 AF_ENSG00000154027_1_19,AK5,human,transcript_doesnt_have_features,ENST00000354567.7,ENST00000466393.1,,,,,,,,
 AF_ENSG00000154027_1_19,AK5,human,transcript_doesnt_have_features,ENST00000354567.7,ENST00000531672.1,,,,,,,,
-AF_ENSG00000154027_1_19,AK5,human,dropped_domain,ENST00000354567.7,XM_006710572.4,cd22978,dimerization/docking (D/D) domain found in adenylate kinase isoenzyme 5 (AK5) and similar proteins,44.0,,1.0,0.0,True,True
-AF_ENSG00000154027_1_19,AK5,human,dropped_domain,ENST00000354567.7,ENST00000478407.1,cd22978,dimerization/docking (D/D) domain found in adenylate kinase isoenzyme 5 (AK5) and similar proteins,44.0,,1.0,0.0,False,False
+AF_ENSG00000154027_1_19,AK5,human,no_domains_in_region,ENST00000354567.7,XM_006710572.4,,,,,,,True,True
+AF_ENSG00000154027_1_19,AK5,human,no_domains_in_region,ENST00000354567.7,ENST00000478407.1,,,,,,,False,False
 A3_ENSG00000182183_1_8,SHISAL2A,human,no_canonical_features,ENST00000517870.2,,,,,,,,,
 A3_ENSG00000213625_1_7,LEPROT,human,no_unique_features,ENST00000371065.9,ENST00000613538.1,,,,,,,,
 A3_ENSG00000213625_1_7,LEPROT,human,transcript_doesnt_have_features,ENST00000371065.9,NM_001198683.2,,,,,,,,
@@ -1316,7 +1238,7 @@ A5_ENSG00000010932_1_5,FMO1,human,transcript_doesnt_have_features,ENST0000061767
 A5_ENSG00000010932_1_5,FMO1,human,transcript_doesnt_have_features,ENST00000617670.6,ENST00000459868.1,,,,,,,,
 A5_ENSG00000010932_1_5,FMO1,human,transcript_doesnt_have_features,ENST00000617670.6,ENST00000472893.1,,,,,,,,
 A5_ENSG00000010932_1_5,FMO1,human,transcript_doesnt_have_features,ENST00000617670.6,ENST00000469711.1,,,,,,,,
-A5_ENSG00000010932_1_5,FMO1,human,added_domain,ENST00000617670.6,ENST00000367750.7,pfam00743,Flavin-binding monooxygenase-like,,530.0,0.0,1.0,True,False
+A5_ENSG00000010932_1_5,FMO1,human,no_domains_in_region,ENST00000617670.6,ENST00000367750.7,,,,,,,True,False
 RI_ENSG00000163395_1_19,IGFN1,human,no_unique_features,ENST00000335211.9,XM_005245580.4,,,,,,,,
 RI_ENSG00000163395_1_19,IGFN1,human,no_unique_features,ENST00000335211.9,XM_017002787.2,,,,,,,,
 RI_ENSG00000163395_1_19,IGFN1,human,no_unique_features,ENST00000335211.9,XM_006711618.4,,,,,,,,
@@ -1353,15 +1275,7 @@ A3_ENSG00000048707_1_4,VPS13D,human,transcript_doesnt_have_features,ENST00000620
 A3_ENSG00000048707_1_4,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000476045.5,,,,,,,,
 A3_ENSG00000048707_1_4,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000481484.1,,,,,,,,
 A3_ENSG00000048707_1_4,VPS13D,human,transcript_doesnt_have_features,ENST00000620676.6,ENST00000645148.1,,,,,,,,
-A3_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000011700.10,cd14306,UBA domain found in vacuolar protein sorting-associated protein 13D (VP13D) and similar proteins,36.0,,1.0,0.0,True,False
-A3_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000011700.10,pfam22562,,38.0,,1.0,0.0,True,False
-A3_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000011700.10,pfam25033,,525.0,,1.0,0.0,True,False
-A3_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000011700.10,smart00165,,38.0,,1.0,0.0,True,False
 A3_ENSG00000048707_1_4,VPS13D,human,added_domain,ENST00000620676.6,ENST00000011700.10,IPR056747,"This entry represents the middle region of the VPS13 proteins. VPS13 proteins have been implicated in processes including vesicle fusion, autophagy, and actin regulation. They bind phospholipids and act as channels that mediate the transfer of lipids between membranes at organelle contact sites [ , , , ]. It has been proposed that members of this entry have the capacity to bind and likely transfer tens of glycerolipids at once. Yeast VPS13 acts at multiple cellular sites, namely the interface between mitochondria and the vacuole, on endosomes, on the nuclear-vacuole junction and the vacuole, depending on the carbon source and metabolic state. VPS13A, VPS13C and VPS13D from mammals localise at contacts at contacts between the ER and other organelles, i.e. VPS13A and VPS13D bridge the ER to mitochondria, VPS13C bridges the ER to late endosomes and lysosomes and VPS13B may localise to endosome-endosome contacts [ , , ]. Mutations in human VPS13 proteins cause different diseases such as Chorea-acanthocytosis, Cohen syndrome, Parkinson's disease, and spastic ataxia [ ].",,560.0,0.0,1.0,True,False
-A3_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000646917.1,cd14306,UBA domain found in vacuolar protein sorting-associated protein 13D (VP13D) and similar proteins,36.0,,1.0,0.0,False,False
-A3_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000646917.1,pfam22562,,38.0,,1.0,0.0,False,False
-A3_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000646917.1,pfam25033,,525.0,,1.0,0.0,False,False
-A3_ENSG00000048707_1_4,VPS13D,human,dropped_domain,ENST00000620676.6,ENST00000646917.1,smart00165,,38.0,,1.0,0.0,False,False
 A3_ENSG00000048707_1_4,VPS13D,human,added_domain,ENST00000620676.6,ENST00000646917.1,IPR056747,"This entry represents the middle region of the VPS13 proteins. VPS13 proteins have been implicated in processes including vesicle fusion, autophagy, and actin regulation. They bind phospholipids and act as channels that mediate the transfer of lipids between membranes at organelle contact sites [ , , , ]. It has been proposed that members of this entry have the capacity to bind and likely transfer tens of glycerolipids at once. Yeast VPS13 acts at multiple cellular sites, namely the interface between mitochondria and the vacuole, on endosomes, on the nuclear-vacuole junction and the vacuole, depending on the carbon source and metabolic state. VPS13A, VPS13C and VPS13D from mammals localise at contacts at contacts between the ER and other organelles, i.e. VPS13A and VPS13D bridge the ER to mitochondria, VPS13C bridges the ER to late endosomes and lysosomes and VPS13B may localise to endosome-endosome contacts [ , , ]. Mutations in human VPS13 proteins cause different diseases such as Chorea-acanthocytosis, Cohen syndrome, Parkinson's disease, and spastic ataxia [ ].",,561.0,0.0,1.0,False,False
 RI_ENSG00000058673_1_13,ZC3H11A,human,transcript_doesnt_have_features,ENST00000367210.3,ENST00000367214.5,,,,,,,,
 RI_ENSG00000058673_1_13,ZC3H11A,human,no_unique_features,ENST00000367210.3,NM_001376338.1,,,,,,,,
@@ -1498,8 +1412,7 @@ AL_ENSG00000179397_1_11,CATSPERE,human,transcript_doesnt_have_features,ENST00000
 AL_ENSG00000179397_1_11,CATSPERE,human,transcript_doesnt_have_features,ENST00000366534.9,ENST00000478554.5,,,,,,,,
 AL_ENSG00000179397_1_11,CATSPERE,human,transcript_doesnt_have_features,ENST00000366534.9,ENST00000464170.1,,,,,,,,
 AL_ENSG00000179397_1_11,CATSPERE,human,transcript_doesnt_have_features,ENST00000366534.9,ENST00000487449.1,,,,,,,,
-AL_ENSG00000179397_1_11,CATSPERE,human,dropped_domain,ENST00000366534.9,ENST00000485888.1,pfam15020,Cation channel sperm-associated protein subunit delta,204.0,,1.0,0.0,True,False
-AL_ENSG00000179397_1_11,CATSPERE,human,dropped_domain,ENST00000366534.9,ENST00000485888.1,pfam22850,,203.0,,1.0,0.0,True,False
+AL_ENSG00000179397_1_11,CATSPERE,human,no_domains_in_region,ENST00000366534.9,ENST00000485888.1,,,,,,,True,False
 A3_ENSG00000142611_1_1,PRDM16,human,no_unique_features,ENST00000270722.10,ENST00000378391.6,,,,,,,,
 A3_ENSG00000142611_1_1,PRDM16,human,transcript_doesnt_have_features,ENST00000270722.10,ENST00000607632.1,,,,,,,,
 A3_ENSG00000142611_1_1,PRDM16,human,transcript_doesnt_have_features,ENST00000270722.10,ENST00000606170.1,,,,,,,,
@@ -1536,12 +1449,9 @@ A3_ENSG00000154027_1_6,AK5,human,transcript_doesnt_have_features,ENST00000354567
 A3_ENSG00000154027_1_6,AK5,human,transcript_doesnt_have_features,ENST00000354567.7,ENST00000530826.1,,,,,,,,
 A3_ENSG00000154027_1_6,AK5,human,transcript_doesnt_have_features,ENST00000354567.7,ENST00000466393.1,,,,,,,,
 A3_ENSG00000154027_1_6,AK5,human,transcript_doesnt_have_features,ENST00000354567.7,ENST00000531672.1,,,,,,,,
-A3_ENSG00000154027_1_6,AK5,human,dropped_domain,ENST00000354567.7,XM_005270739.6,cd22978,dimerization/docking (D/D) domain found in adenylate kinase isoenzyme 5 (AK5) and similar proteins,44.0,,1.0,0.0,True,True
-A3_ENSG00000154027_1_6,AK5,human,dropped_domain,ENST00000354567.7,XM_005270739.6,pfam00406,Adenylate kinase,157.0,,1.0,0.0,True,True
-A3_ENSG00000154027_1_6,AK5,human,dropped_domain,ENST00000354567.7,XM_047417740.1,cd22978,dimerization/docking (D/D) domain found in adenylate kinase isoenzyme 5 (AK5) and similar proteins,44.0,,1.0,0.0,False,False
-A3_ENSG00000154027_1_6,AK5,human,dropped_domain,ENST00000354567.7,XM_047417740.1,pfam00406,Adenylate kinase,157.0,,1.0,0.0,False,False
-A3_ENSG00000154027_1_6,AK5,human,dropped_domain,ENST00000354567.7,ENST00000317704.8,cd22978,dimerization/docking (D/D) domain found in adenylate kinase isoenzyme 5 (AK5) and similar proteins,44.0,,1.0,0.0,False,False
-A3_ENSG00000154027_1_6,AK5,human,dropped_domain,ENST00000354567.7,ENST00000317704.8,pfam00406,Adenylate kinase,157.0,,1.0,0.0,False,False
+A3_ENSG00000154027_1_6,AK5,human,no_domains_in_region,ENST00000354567.7,XM_005270739.6,,,,,,,True,True
+A3_ENSG00000154027_1_6,AK5,human,no_domains_in_region,ENST00000354567.7,XM_047417740.1,,,,,,,False,False
+A3_ENSG00000154027_1_6,AK5,human,no_domains_in_region,ENST00000354567.7,ENST00000317704.8,,,,,,,False,False
 A3_ENSG00000162521_1_20,RBBP4,human,transcript_doesnt_have_features,ENST00000373493.10,ENST00000458695.6,,,,,,,,
 A3_ENSG00000162521_1_20,RBBP4,human,no_unique_features,ENST00000373493.10,ENST00000401893.7,,,,,,,,
 A3_ENSG00000162521_1_20,RBBP4,human,no_unique_features,ENST00000373493.10,ENST00000525506.1,,,,,,,,
@@ -1559,7 +1469,7 @@ A3_ENSG00000162521_1_20,RBBP4,human,transcript_doesnt_have_features,ENST00000373
 A3_ENSG00000162521_1_20,RBBP4,human,transcript_doesnt_have_features,ENST00000373493.10,ENST00000460669.5,,,,,,,,
 A3_ENSG00000162521_1_20,RBBP4,human,transcript_doesnt_have_features,ENST00000373493.10,ENST00000482190.1,,,,,,,,
 A3_ENSG00000162521_1_20,RBBP4,human,no_unique_features,ENST00000373493.10,ENST00000524393.5,,,,,,,,
-A3_ENSG00000162521_1_20,RBBP4,human,unchanged,ENST00000373493.10,ENST00000414241.7,pfam12265,Histone-binding protein RBBP4 or subunit C of CAF1 complex,70.0,70.0,1.0,1.0,True,False
+A3_ENSG00000162521_1_20,RBBP4,human,no_domains_in_region,ENST00000373493.10,ENST00000414241.7,,,,,,,True,False
 RI_ENSG00000137948_1_17,BRDT,human,no_unique_features,ENST00000399546.7,ENST00000370389.6,,,,,,,,
 RI_ENSG00000137948_1_17,BRDT,human,no_unique_features,ENST00000399546.7,ENST00000362005.7,,,,,,,,
 RI_ENSG00000137948_1_17,BRDT,human,no_unique_features,ENST00000399546.7,NM_001242806.2,,,,,,,,
@@ -1635,8 +1545,7 @@ AL_ENSG00000179397_1_10,CATSPERE,human,transcript_doesnt_have_features,ENST00000
 AL_ENSG00000179397_1_10,CATSPERE,human,transcript_doesnt_have_features,ENST00000366534.9,ENST00000478554.5,,,,,,,,
 AL_ENSG00000179397_1_10,CATSPERE,human,transcript_doesnt_have_features,ENST00000366534.9,ENST00000464170.1,,,,,,,,
 AL_ENSG00000179397_1_10,CATSPERE,human,transcript_doesnt_have_features,ENST00000366534.9,ENST00000487449.1,,,,,,,,
-AL_ENSG00000179397_1_10,CATSPERE,human,dropped_domain,ENST00000366534.9,ENST00000485888.1,pfam15020,Cation channel sperm-associated protein subunit delta,204.0,,1.0,0.0,True,False
-AL_ENSG00000179397_1_10,CATSPERE,human,dropped_domain,ENST00000366534.9,ENST00000485888.1,pfam22850,,203.0,,1.0,0.0,True,False
+AL_ENSG00000179397_1_10,CATSPERE,human,no_domains_in_region,ENST00000366534.9,ENST00000485888.1,,,,,,,True,False
 A3_ENSG00000143355_1_12,LHX9,human,no_unique_features,ENST00000367387.6,ENST00000367390.7,,,,,,,,
 A3_ENSG00000143355_1_12,LHX9,human,no_unique_features,ENST00000367387.6,XM_011509781.3,,,,,,,,
 A3_ENSG00000143355_1_12,LHX9,human,transcript_doesnt_have_features,ENST00000367387.6,ENST00000615520.1,,,,,,,,
@@ -1645,7 +1554,7 @@ A3_ENSG00000143355_1_12,LHX9,human,transcript_doesnt_have_features,ENST000003673
 A3_ENSG00000143355_1_12,LHX9,human,transcript_doesnt_have_features,ENST00000367387.6,ENST00000367388.4,,,,,,,,
 A3_ENSG00000143355_1_12,LHX9,human,added_domain,ENST00000367387.6,ENST00000561173.5,IPR001356,"This entry represents the homeodomain (HD), a protein domain of approximately 60 residues that usually binds DNA. It is encoded by the homeobox sequence [ , , ], which was first identified in a number of Drosophila homeotic and segmentation proteins, but is now known to be well-conserved in many other animals, including vertebrates [ , ], as well as plants [ ], fungi [ ] and some species of lower eukaryotes. Many members of this group are transcriptional regulators, some of which operate differential genetic programs along the anterior-posterior axis of animal bodies [ ]. This domain folds into a globular structure with three α-helices connected by two short loops that harbour a hydrophobic core. The second and third form a helix-turn-helix (HTH) motif, which make intimate contacts with the DNA: while the first helix of this motif helps to stabilise the structure, the second helix binds to DNA via a number of hydrogen bonds and hydrophobic interactions, which occur between specific side chains and the exposed bases and thymine methyl groups within the major groove of the DNA. One particularity of the HTH motif in some of these proteins arises from the stereo-chemical requirement for glycine in the turn which is needed to avoid steric interference of the β-carbon with the main chain: for cro and repressor proteins the glycine appears to be mandatory, while for many of the homeotic and other DNA-binding proteins the requirement is relaxed.",,53.0,0.0,1.0,True,False
 A3_ENSG00000143355_1_12,LHX9,human,no_domains_in_region,ENST00000367387.6,NM_001370213.1,,,,,,,False,True
-A3_ENSG00000143355_1_12,LHX9,human,added_domain,ENST00000367387.6,ENST00000367391.5,IPR001356,"Homeodomain; Homeobox domain; may bind to DNA as monomers or as homo- and/or heterodimers, in a sequence-specific manner; DNA binding domains involved in the transcriptional regulation of key eukaryotic developmental processes",,53.0,0.0,1.0,False,False
+A3_ENSG00000143355_1_12,LHX9,human,no_domains_in_region,ENST00000367387.6,ENST00000367391.5,,,,,,,False,False
 A5_ENSG00000092969_1_4,TGFB2,human,no_unique_features,ENST00000366930.9,ENST00000366929.4,,,,,,,,
 A5_ENSG00000092969_1_4,TGFB2,human,transcript_doesnt_have_features,ENST00000366930.9,ENST00000488793.1,,,,,,,,
-A5_ENSG00000092969_1_4,TGFB2,human,dropped_domain,ENST00000366930.9,ENST00000479322.1,IPR001111,"TGF-beta propeptide; TGF-beta, propeptide",206.0,,1.0,0.0,True,False
+A5_ENSG00000092969_1_4,TGFB2,human,no_domains_in_region,ENST00000366930.9,ENST00000479322.1,,,,,,,True,False

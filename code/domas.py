@@ -70,8 +70,8 @@ def parse_args():
                               f"CPU count, {_DEFAULT_NUM_WORKERS})")
     parser.add_argument("-no_representative_domains", action="store_true",
                          help="Use DomainEvent/DomainType only. By default domains come "
-                              "from the RepresentativeDomains table where available, "
-                              "falling back to DomainEvent/DomainType per protein.")
+                              "from the RepresentativeDomains table alone, and a protein "
+                              "with no entry there is treated as having no domains.")
     parser.add_argument("-pdf", action="store_true",
                          help="Generate a per-gene PDF (only honored with -format internal; "
                               "the ioe path never generates PDFs regardless of this flag). "

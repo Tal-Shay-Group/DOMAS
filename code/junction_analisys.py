@@ -492,9 +492,11 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
     domains of the canonical and compared transcript that fall within it.
 
     Two rounds, not an iteration to convergence: round 1 collects the domains
-    overlapping the boundary exons of the event span; round 2 widens the window
-    to the union of the event span and those domains' own genomic span - pooled
-    across both transcripts, so each is windowed identically - and re-collects.
+    overlapping the boundary exons of the event span - the exons of BOTH
+    transcripts pooled into one genomic span, so neither is windowed over a
+    stretch the other is not; round 2 widens that window to the union of the
+    event span and those domains' own genomic span - again pooled across both
+    transcripts, so each is windowed identically - and re-collects.
     Round 2 is skipped when round 1 found no domains in either transcript.
     Both rounds select from the already-reduced representative domain set (see
     filter_representative_domains()).
@@ -510,11 +512,28 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
     c_exons = transcript_exons[canonical_transcript_id]
 
     # Round 1: window spanning the boundary exons of the differing junctions.
+    # The two transcripts bound the event with exons of their own, which need not
+    # line up - one may splice where the other reads through. Taking each
+    # transcript's own pair would window them over different stretches of the
+    # gene and compare domain sets drawn from different regions, so the bounding
+    # exons of both are pooled into one genomic span and each transcript is
+    # windowed by that. The span is then re-snapped to whole exons per transcript,
+    # keeping round 1's defining property: it never cuts an exon in half.
     t_first_exon, t_last_exon = find_boundary_exons(t_exons, min_bp, max_bp)
     c_first_exon, c_last_exon = find_boundary_exons(c_exons, min_bp, max_bp)
 
-    t_min_aa, t_max_aa = get_aa_range(t_first_exon, t_last_exon)
-    c_min_aa, c_max_aa = get_aa_range(c_first_exon, c_last_exon)
+    # min/max over all four bounding exons, not over a first/last pair: strand is
+    # irrelevant here because find_boundary_exons() works in genomic coordinates
+    # (its "first" is the genomically-leftmost exon on either strand), but an
+    # event span lying wholly inside one transcript's intron makes that
+    # transcript's "first" exon fall to the RIGHT of its "last" one, and pairing
+    # them would invert the span.
+    bounding = (t_first_exon, t_last_exon, c_first_exon, c_last_exon)
+    common_first_bp = min(e['genomic_start_tx'] for e in bounding)
+    common_last_bp = max(e['genomic_end_tx'] for e in bounding)
+
+    t_min_aa, t_max_aa = get_aa_range(*find_boundary_exons(t_exons, common_first_bp, common_last_bp))
+    c_min_aa, c_max_aa = get_aa_range(*find_boundary_exons(c_exons, common_first_bp, common_last_bp))
 
     # The domain set is reduced by curated InterPro entry type, not by the
     # geometry of the hits.
@@ -1620,7 +1639,7 @@ class JunctionsAnalysis:
         use_representative_domains: if True, domains drawn in the PDFs come from
         the RepresentativeDomains table where available (matching the domain
         source used for analysis when the same flag is passed to
-        analyze_junctions()), falling back to DomainEvent/DomainType per protein.
+        analyze_junctions()); a protein with no entry there has no domains.
         """
         print_gene_set = {gene.upper() for gene in print_genes} if print_genes is not None else None
 
@@ -1725,11 +1744,10 @@ class JunctionsAnalysis:
                 compared to it - every other transcript of the gene is omitted
                 from the visualization entirely.
             use_representative_domains: If True, domains come from the
-                RepresentativeDomains table instead of DomainEvent/DomainType.
-                A protein with no RepresentativeDomains entry falls back to its
-                DomainEvent/DomainType domains. If False (default), the
-                algorithm is unchanged - domains come from DomainEvent/DomainType
-                only, exactly as before.
+                RepresentativeDomains table instead of DomainEvent/DomainType,
+                and only from there: a protein with no entry has no domains.
+                If False (default), the algorithm is unchanged - domains come
+                from DomainEvent/DomainType only, exactly as before.
             write_all_comparable: If True, every comparable transcript is compared
                 to the canonical one and the CSV keeps a row per transcript, with
                 the is_most_like_canonical / is_longest_cds columns naming the one

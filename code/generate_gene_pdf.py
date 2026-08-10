@@ -114,8 +114,8 @@ def prepare_gene_data_bulk(conn, gene_ensembl_ids, use_representative_domains=Fa
     use_representative_domains=False (default): unchanged - domains come from
     DomainEvent/DomainType exactly as before.
     use_representative_domains=True: a protein's domains come from the
-    RepresentativeDomains table when it has an entry there; proteins with no
-    RepresentativeDomains entry fall back to their DomainEvent/DomainType domains.
+    RepresentativeDomains table and nowhere else; a protein with no entry there
+    has no domains, so the drawing matches the set the analysis compared.
 
     Returns a dict keyed by lowercased gene ensembl id, where each value is a dict
     with 'gene_data' (a Series, as `df_gene.iloc[0]`) and 'transcripts' (a list
@@ -194,6 +194,12 @@ def prepare_gene_data_bulk(conn, gene_ensembl_ids, use_representative_domains=Fa
     exons_by_transcript = {k: v for k, v in df_exons_all.groupby('combined_id')} if len(df_exons_all) else {}
     proteins_by_transcript = {k: v for k, v in df_proteins_all.groupby('combined_id')} if len(df_proteins_all) else {}
     domains_by_protein = {k: v for k, v in df_domains_all.groupby('protein_ensembl_id')} if len(df_domains_all) else {}
+
+    if use_representative_domains:
+        # RepresentativeDomains and nothing else - a protein absent from that table
+        # is drawn with no domains rather than with its DomainEvent/DomainType ones,
+        # so the PDF shows the same domain set the analysis compared.
+        domains_by_protein = {}
 
     if use_representative_domains and protein_ids and 'protein_interpro_id' in df_proteins_all.columns:
         df_protein_interpro = df_proteins_all[['protein_ensembl_id', 'protein_interpro_id']].dropna(subset=['protein_interpro_id'])
@@ -274,9 +280,9 @@ class GeneVisualization:
             pass it to `prepare_gene_data_bulk()` instead to affect preloaded data).
         use_representative_domains : bool
             If True, a protein's domains are loaded from the RepresentativeDomains
-            table when it has an entry there, falling back to DomainEvent/DomainType
-            otherwise. If False (default), domains come from DomainEvent/DomainType
-            only, exactly as before.
+            table only; a protein with no entry there has no domains. If False
+            (default), domains come from DomainEvent/DomainType only, exactly as
+            before.
         """
         self.conn = conn
         self.gene_name = gene_name
@@ -383,9 +389,9 @@ class GeneVisualization:
         refseq id (a RefSeq-only transcript has no ensembl id).
 
         If self.use_representative_domains is True, domains come from the
-        RepresentativeDomains table when the protein has an entry there, falling back
-        to DomainEvent/DomainType otherwise. If False (default), domains come from
-        DomainEvent/DomainType only, exactly as before.
+        RepresentativeDomains table only; a protein with no entry there has no
+        domains. If False (default), domains come from DomainEvent/DomainType only,
+        exactly as before.
         """
         # Get protein ID
         protein_query = """
@@ -400,6 +406,9 @@ class GeneVisualization:
         protein_id = df_protein.iloc[0]['protein_ensembl_id']
 
         if self.use_representative_domains:
+            # RepresentativeDomains and nothing else: a protein with no entry there
+            # is drawn with no domains, matching what the analysis compared.
+            df_rep = pd.DataFrame()
             protein_interpro_id = df_protein.iloc[0].get('protein_interpro_id')
             if pd.notna(protein_interpro_id) and str(protein_interpro_id).strip():
                 rep_query = "SELECT * FROM RepresentativeDomains WHERE protein_interpro_id = ?"
@@ -408,8 +417,9 @@ class GeneVisualization:
                 except (sqlite3.OperationalError, pd.errors.DatabaseError):
                     df_rep = pd.DataFrame()
                 df_rep = _representative_domains_to_domain_columns(df_rep)
-                if len(df_rep):
-                    return _drop_undrawable_domains(df_rep.reset_index(drop=True))
+            if len(df_rep) == 0:
+                return pd.DataFrame()
+            return _drop_undrawable_domains(df_rep.reset_index(drop=True))
 
         # Get domain events
         domain_query = """
@@ -930,11 +940,10 @@ class GeneVisualization:
             id(t): self.domain_ladder_marks(t) for t in valid_transcripts
         }
         marks_active = any(v for v in ladder_marks_by_transcript.values())
-        # A transcript with no RepresentativeDomains entry falls back to
-        # DomainEvent/DomainType, which states no entry type, so the ladder cannot
-        # rank it and its domains carry no mark. Next to a ranked transcript that
-        # needs explaining, or it reads as an inconsistency rather than a different
-        # annotation source.
+        # Under DomainEvent/DomainType the rows state no entry type, so the ladder
+        # cannot rank them and their domains carry no mark. Next to a ranked
+        # transcript that needs explaining, or it reads as an inconsistency rather
+        # than a different annotation source.
         marks_partial = marks_active and any(
             ladder_marks_by_transcript[id(t)] is None and len(t['domains']) > 0
             for t in valid_transcripts)
@@ -1685,9 +1694,8 @@ def generate_gene_pdf(gene_name, conn, output_file=None,
         If True, include only transcripts whose protein has at least one domain.
     use_representative_domains : bool, optional
         If True, a protein's domains come from the RepresentativeDomains table
-        when it has an entry there, falling back to DomainEvent/DomainType
-        otherwise. If False (default), domains come from DomainEvent/DomainType
-        only, exactly as before.
+        only; a protein with no entry there has no domains. If False (default),
+        domains come from DomainEvent/DomainType only, exactly as before.
 
     Returns:
     --------
@@ -1728,8 +1736,8 @@ if __name__ == "__main__":
     parser.add_argument("--domains-only", action="store_true",
                        help="Include only transcripts whose protein has domains")
     parser.add_argument("--use-representative-domains", action="store_true",
-                       help="Load domains from the RepresentativeDomains table where "
-                            "available, falling back to DomainEvent/DomainType per protein")
+                       help="Load domains from the RepresentativeDomains table only; "
+                            "a protein with no entry there is treated as having no domains")
 
     args = parser.parse_args()
 
