@@ -75,8 +75,8 @@ The resulting CSV file provides:
   most like the canonical; a transcript may carry both, one, or neither. By default
   only the transcript those rules select is compared, so each cluster holds one
   comparison and the two columns are omitted.
-- **`rank` / `c_junction_in_cds` / `t_junction_in_cds`** — written only with
-  `-extra_columns`, and available for every input format. `rank` names the exons of
+- **`rank` / `canonical_junction_in_cds` / `alternative_junction_in_cds`** — written
+  only with `-extra_columns`, and available for every input format. `rank` names the exons of
   the canonical transcript that the event's junctions join — `E2_E4` where the event
   skips exon 3, `E11_E13Last` where it reaches the final exon, and `*` for a splice
   site that is no exon edge of the canonical, which is what an alternative-splice-site

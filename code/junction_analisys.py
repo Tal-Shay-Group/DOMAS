@@ -772,14 +772,14 @@ def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, tr
 
         yield {
             'event': classify_domain_change(c_count, t_count, c_length, t_length),
-            'transcript_id': transcript_id,
+            'alternative_transcript_id': transcript_id,
             'domain_id': choose_domain_display_name(names),
             'domain_name': _group_text(c_domains, c_idxs, t_domains, t_idxs, 'short_description'),
             'domain_description': _group_text(c_domains, c_idxs, t_domains, t_idxs, 'description'),
             'canonical_domain_length': c_length,
-            'transcript_domain_length': t_length,
+            'alternative_domain_length': t_length,
             'canonical_domains_number': c_count,
-            'transcript_domains_number': t_count,
+            'alternative_domains_number': t_count,
         }
 
 
@@ -873,7 +873,7 @@ def exon_pair_label(df_exons, feature):
     return f'{_side(start_position)}_{_side(end_position)}'
 
 
-# Values of the c_junction_in_cds / t_junction_in_cds columns - where a group's
+# Values of the canonical_junction_in_cds / alternative_junction_in_cds columns - where a group's
 # junctions sit relative to a transcript's coding sequence.
 CDS_IN = 'yes'            # every junction lies wholly inside the CDS
 CDS_PARTIAL = 'partial'   # a junction straddles a CDS boundary, or the group is mixed
@@ -933,7 +933,7 @@ class ClusterAnalysisResult:
         # which is what a junctions frame without the column yields.
         self.feature_types = None
         # Whether to work out the three optional columns - rank,
-        # c_junction_in_cds and t_junction_in_cds. Off by default: they are
+        # canonical_junction_in_cds and alternative_junction_in_cds. Off by default: they are
         # computed per group and per compared transcript, and the writer leaves
         # them out of the CSV entirely unless the run asked for them.
         self.extra_columns = False
@@ -952,14 +952,14 @@ class ClusterAnalysisResult:
         self.kept_domains = {}
         self.events = []
 
-    def add_event(self, event, transcript_id=None, domain_id=None, domain_name=None, domain_description=None,
-                  canonical_domain_length=None, transcript_domain_length=None,
-                  canonical_domains_number=None, transcript_domains_number=None, is_longest_cds=None,
+    def add_event(self, event, alternative_transcript_id=None, domain_id=None, domain_name=None, domain_description=None,
+                  canonical_domain_length=None, alternative_domain_length=None,
+                  canonical_domains_number=None, alternative_domains_number=None, is_longest_cds=None,
                   is_most_like_canonical=None, group=None, rank=None,
-                  canonical_junction_in_cds=None, transcript_junction_in_cds=None):
-        self.events.append((event, transcript_id, group, rank, domain_id, domain_name, domain_description, canonical_domain_length,
-                            transcript_domain_length, canonical_domains_number, transcript_domains_number,
-                            canonical_junction_in_cds, transcript_junction_in_cds,
+                  canonical_junction_in_cds=None, alternative_junction_in_cds=None):
+        self.events.append((event, alternative_transcript_id, group, rank, domain_id, domain_name, domain_description, canonical_domain_length,
+                            alternative_domain_length, canonical_domains_number, alternative_domains_number,
+                            canonical_junction_in_cds, alternative_junction_in_cds,
                             is_longest_cds, is_most_like_canonical))
 
     def analyze(self, df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup,
@@ -1122,7 +1122,7 @@ class ClusterAnalysisResult:
             coding_by_transcript = {tid: True for tid in combined_ids}
 
         # Where each transcript's coding sequence starts and ends, for the
-        # c_junction_in_cds / t_junction_in_cds columns. Read here because this is
+        # canonical_junction_in_cds / alternative_junction_in_cds columns. Read here because this is
         # where the frame's protein columns have already been resolved.
         self.cds_spans = _cds_spans_by_transcript(
             df_gene_transcripts, combined_ids, coding_by_transcript)
@@ -1246,7 +1246,7 @@ class ClusterAnalysisResult:
                 continue
             if not junction_idxs:
                 logger.debug(f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} does not have any junctions. ")
-                self.add_event('transcript_doesnt_have_features', transcript_id=transcript_id)
+                self.add_event('transcript_doesnt_have_features', alternative_transcript_id=transcript_id)
                 continue
 
             unique_junctions = junction_idxs - canonical_junctions
@@ -1255,7 +1255,7 @@ class ClusterAnalysisResult:
                     f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} does not have any unique junctions "
                     "compared to the canonical transcript. Skipping this transcript for comparison."
                 )
-                self.add_event('no_unique_features', transcript_id=transcript_id)
+                self.add_event('no_unique_features', alternative_transcript_id=transcript_id)
                 continue
 
             unique_by_transcript[transcript_id] = frozenset(unique_junctions)
@@ -1321,7 +1321,7 @@ class ClusterAnalysisResult:
                     self._features_text(features),
                     ' and '.join(str(number) for number in subsuming) or '?',
                 )
-                self.add_event('subsumed_by_larger_event', transcript_id=transcript_id)
+                self.add_event('subsumed_by_larger_event', alternative_transcript_id=transcript_id)
 
         return groups
 
@@ -1397,11 +1397,11 @@ class ClusterAnalysisResult:
                 self.cluster_name, self.specie, transcript_id, group_index,
                 self._features_text(features), ', '.join(sorted(compared)), rule,
             )
-            self.add_event('transcript_not_chosen', transcript_id=transcript_id,
+            self.add_event('transcript_not_chosen', alternative_transcript_id=transcript_id,
                            group=group_index, rank=rank_label,
                            canonical_junction_in_cds=self._junctions_in_cds(
                                self.canonical_transcript_id, features),
-                           transcript_junction_in_cds=self._junctions_in_cds(
+                           alternative_junction_in_cds=self._junctions_in_cds(
                                transcript_id, features))
 
     def _rank_label(self, features):
@@ -1491,23 +1491,23 @@ class ClusterAnalysisResult:
                                    is_most_like_canonical=is_most_like_canonical,
                                    group=group_index, rank=rank_label,
                                    canonical_junction_in_cds=canonical_in_cds,
-                                   transcript_junction_in_cds=transcript_in_cds)
+                                   alternative_junction_in_cds=transcript_in_cds)
             else:
-                self.add_event('no_domains_in_region', transcript_id=transcript_id,
+                self.add_event('no_domains_in_region', alternative_transcript_id=transcript_id,
                                 is_longest_cds=is_longest_cds,
                                 is_most_like_canonical=is_most_like_canonical,
                                 group=group_index, rank=rank_label,
                                 canonical_junction_in_cds=canonical_in_cds,
-                                transcript_junction_in_cds=transcript_in_cds)
+                                alternative_junction_in_cds=transcript_in_cds)
 
 
     def get_results_df(self):
         df = pd.DataFrame(
             self.events,
-            columns=['event', 'transcript_id', 'group', 'rank', 'domain_id', 'domain_name', 'domain_description',
-                        'c_domain_length', 't_domain_length',
-                        'c_domains_number', 't_domains_number',
-                        'c_junction_in_cds', 't_junction_in_cds',
+            columns=['event', 'alternative_transcript_id', 'group', 'rank', 'domain_id', 'domain_name', 'domain_description',
+                        'canonical_domain_length', 'alternative_domain_length',
+                        'canonical_domains_number', 'alternative_domains_number',
+                        'canonical_junction_in_cds', 'alternative_junction_in_cds',
                         'is_longest_cds', 'is_most_like_canonical']
         )
         # Nullable integer, not float: the rows that belong to no group (the
@@ -1587,10 +1587,10 @@ def selected_comparable_rows(df_cluster_results):
     keep = pd.Series(False, index=df_cluster_results.index)
     for group, rows in comparisons.groupby('group', dropna=False):
         for column in ('is_most_like_canonical', 'is_longest_cds'):
-            tagged = rows.loc[rows[column] == True, 'transcript_id'].dropna()  # noqa: E712
+            tagged = rows.loc[rows[column] == True, 'alternative_transcript_id'].dropna()  # noqa: E712
             if len(tagged):
                 keep |= is_comparison & (df_cluster_results['group'] == group) \
-                        & (df_cluster_results['transcript_id'] == tagged.iat[0])
+                        & (df_cluster_results['alternative_transcript_id'] == tagged.iat[0])
                 break
         else:
             keep |= is_comparison & (df_cluster_results['group'] == group)
@@ -1935,13 +1935,13 @@ class JunctionsAnalysis:
         # cluster and the reader needs to know which one the rule picked. With one
         # comparison row per cluster they would be True on every row of it.
         df_results_columns = ['event', 'group', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id',
-                              'transcript_id', 'domain_id', 'domain_name',
-                              'c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
+                              'alternative_transcript_id', 'domain_id', 'domain_name',
+                              'canonical_domain_length', 'alternative_domain_length', 'canonical_domains_number', 'alternative_domains_number']
         # The optional three, off unless the run asked for them: which exons the
         # group's junctions join, and whether they fall in each side's CDS.
         if extra_columns:
             df_results_columns.insert(2, 'rank')
-            df_results_columns += ['c_junction_in_cds', 't_junction_in_cds']
+            df_results_columns += ['canonical_junction_in_cds', 'alternative_junction_in_cds']
         if write_all_comparable:
             df_results_columns += ['is_longest_cds', 'is_most_like_canonical']
         # Last: a paragraph of InterPro prose per domain, which would otherwise push
@@ -2028,7 +2028,7 @@ class JunctionsAnalysis:
         df_cluster_results = cluster_result.get_results_df()
         if len(df_cluster_results) > 0:
             compared_mask = ~df_cluster_results['event'].isin(self._SKIPPED_TRANSCRIPT_EVENTS)
-            comparable_ids.update(df_cluster_results.loc[compared_mask, 'transcript_id'].dropna())
+            comparable_ids.update(df_cluster_results.loc[compared_mask, 'alternative_transcript_id'].dropna())
         return comparable_ids
 
     def _generate_pdfs(self, results, print_genes, restrict_to_comparable=False):
@@ -2160,7 +2160,7 @@ class JunctionsAnalysis:
             extra_columns: If True, the CSV carries three further columns, for
                 every input format: `rank`, naming the canonical transcript's
                 exons the group's junctions join (E2_E4, *_E5), and
-                c_junction_in_cds / t_junction_in_cds, saying whether those
+                canonical_junction_in_cds / alternative_junction_in_cds, saying whether those
                 junctions fall inside the canonical and the compared
                 transcript's coding sequence. Omitted by default.
 

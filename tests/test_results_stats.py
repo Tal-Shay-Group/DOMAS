@@ -93,7 +93,7 @@ def _rep_df(rows):
     return pd.DataFrame({
         'specie': ['H_sapiens'] * len(rows),
         'event': clusters,
-        'transcript_id': transcripts,
+        'alternative_transcript_id': transcripts,
         'event_type': ['shorter'] * len(rows),
         'is_most_like_canonical': most_like,
         'is_longest_cds': longest,
@@ -106,7 +106,7 @@ def test_select_representative_transcript_prefers_most_like_canonical():
         ('clu_1', 'ENST_B', False, True),
     ])
     kept = results_stats.select_representative_transcript(df)
-    assert kept['transcript_id'].unique().tolist() == ['ENST_A']
+    assert kept['alternative_transcript_id'].unique().tolist() == ['ENST_A']
 
 
 def test_select_representative_transcript_falls_back_to_longest_cds():
@@ -118,4 +118,4 @@ def test_select_representative_transcript_falls_back_to_longest_cds():
         ('clu_1', 'ENST_B', False, True),
     ])
     kept = results_stats.select_representative_transcript(df)
-    assert kept['transcript_id'].unique().tolist() == ['ENST_B']
+    assert kept['alternative_transcript_id'].unique().tolist() == ['ENST_B']

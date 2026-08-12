@@ -22,10 +22,11 @@ import pandas as pd
 # float32): a 20M-row file then costs a few hundred MB instead of several GB.
 CATEGORY_COLS = [
     'event', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id',
-    'transcript_id', 'domain_id', 'domain_name', 'is_longest_cds', 'is_most_like_canonical',
-    'rank', 'c_junction_in_cds', 't_junction_in_cds',
+    'alternative_transcript_id', 'domain_id', 'domain_name', 'is_longest_cds', 'is_most_like_canonical',
+    'rank', 'canonical_junction_in_cds', 'alternative_junction_in_cds',
 ]
-FLOAT_COLS = ['c_domain_length', 't_domain_length', 'c_domains_number', 't_domains_number']
+FLOAT_COLS = ['canonical_domain_length', 'alternative_domain_length',
+              'canonical_domains_number', 'alternative_domains_number']
 
 
 def _read_compact(path, chunk_rows=1_000_000):

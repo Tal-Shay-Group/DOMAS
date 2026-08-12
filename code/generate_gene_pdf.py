@@ -575,8 +575,8 @@ class GeneVisualization:
         unmarked. Falls back to the flag where no id is given.
         """
         rows_by_id = {}
-        if df_results is not None and 'transcript_id' in df_results.columns:
-            for transcript_id, rows in df_results.groupby('transcript_id'):
+        if df_results is not None and 'alternative_transcript_id' in df_results.columns:
+            for transcript_id, rows in df_results.groupby('alternative_transcript_id'):
                 rows_by_id[transcript_id] = rows
 
         def key(transcript):
@@ -893,11 +893,11 @@ class GeneVisualization:
         # columns are what a reader scans; the counts and lengths are at most a
         # few characters and were getting the same share as a transcript id.
         weights = {
-            'event': 3.4, 'transcript_id': 3.4, 'domain_id': 1.9, 'rank': 1.5,
+            'event': 3.4, 'alternative_transcript_id': 3.4, 'domain_id': 1.9, 'rank': 1.5,
             'group': 0.6,
-            'c_domain_length': 0.85, 't_domain_length': 0.85,
-            'c_domains_number': 0.85, 't_domains_number': 0.85,
-            'c_junction_in_cds': 1.0, 't_junction_in_cds': 1.0,
+            'canonical_domain_length': 0.85, 'alternative_domain_length': 0.85,
+            'canonical_domains_number': 0.85, 'alternative_domains_number': 0.85,
+            'canonical_junction_in_cds': 1.0, 'alternative_junction_in_cds': 1.0,
         }
         total = sum(weights.get(name, 1.0) for name in column_names)
 
@@ -1089,14 +1089,14 @@ class GeneVisualization:
         if df_results is not None and 'event' in df_results.columns:
             _mask = df_results['event'].isin(_CLUSTER_EVENTS)
             if _mask.any():
-                _ce = df_results[_mask][['event', 'transcript_id']].copy()
-                _ce['transcript_id'] = _ce.apply(
-                    lambda r: f"junction #{int(r['transcript_id'])}"
-                              if r['event'] == 'feature_not_mapped' and pd.notna(r['transcript_id'])
+                _ce = df_results[_mask][['event', 'alternative_transcript_id']].copy()
+                _ce['alternative_transcript_id'] = _ce.apply(
+                    lambda r: f"junction #{int(r['alternative_transcript_id'])}"
+                              if r['event'] == 'feature_not_mapped' and pd.notna(r['alternative_transcript_id'])
                               else '',
                     axis=1,
                 )
-                cluster_events_df = _ce.rename(columns={'transcript_id': 'details'})
+                cluster_events_df = _ce.rename(columns={'alternative_transcript_id': 'details'})
 
         with PdfPages(output_file) as pdf:
             for page_idx, page_transcripts in enumerate(pages):
@@ -1108,10 +1108,10 @@ class GeneVisualization:
                 for transcript in page_transcripts:
                     transcript_id = transcript['info']['transcript_ensembl_id']
                     transcript_refseq_id = transcript['info'].get('transcript_refseq_id')
-                    if df_results is not None and 'transcript_id' in df_results.columns:
+                    if df_results is not None and 'alternative_transcript_id' in df_results.columns:
                         ids_to_match = [i for i in [transcript_id, transcript_refseq_id]
                                         if i is not None and not pd.isna(i)]
-                        rows = df_results[df_results['transcript_id'].isin(ids_to_match)]
+                        rows = df_results[df_results['alternative_transcript_id'].isin(ids_to_match)]
                     else:
                         rows = None
                     transcript_results.append(rows)

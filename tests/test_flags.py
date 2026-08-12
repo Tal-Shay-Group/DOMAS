@@ -99,7 +99,7 @@ def _compared_transcript_ids(cluster_result):
     if len(df) == 0:
         return set()
     mask = ~df['event'].isin(_SKIPPED_EVENTS)
-    return set(df.loc[mask, 'transcript_id'].dropna())
+    return set(df.loc[mask, 'alternative_transcript_id'].dropna())
 
 
 def _assert_tie_break_tags_are_consistent(results):
@@ -114,7 +114,7 @@ def _assert_tie_break_tags_are_consistent(results):
             continue
         for group, rows in df.groupby('group', dropna=True):
             for col in ('is_longest_cds', 'is_most_like_canonical'):
-                tagged_transcripts = set(rows.loc[rows[col] == True, 'transcript_id'].dropna())
+                tagged_transcripts = set(rows.loc[rows[col] == True, 'alternative_transcript_id'].dropna())
                 assert len(tagged_transcripts) <= 1, (
                     f"Cluster {cluster_result.cluster_name} group {group} has "
                     f"{len(tagged_transcripts)} transcripts tagged {col}=True "
@@ -177,7 +177,7 @@ def test_write_all_comparable_off_keeps_one_transcript_and_drops_the_tags(con, t
 
     comparisons = df[~df['event_type'].isin(NON_COMPARISON_EVENTS)]
     assert len(comparisons) > 0, "Expected at least one compared transcript"
-    per_cluster = comparisons.groupby('event')['transcript_id'].nunique()
+    per_cluster = comparisons.groupby('event')['alternative_transcript_id'].nunique()
     assert (per_cluster == 1).all(), (
         f"Clusters with more than one compared transcript: "
         f"{per_cluster[per_cluster > 1].to_dict()}")
@@ -196,7 +196,7 @@ def test_write_all_comparable_off_keeps_one_transcript_and_drops_the_tags(con, t
     assert 'is_longest_cds' in df_all.columns
     assert 'is_most_like_canonical' in df_all.columns
     all_comparisons = df_all[~df_all['event_type'].isin(NON_COMPARISON_EVENTS)]
-    assert all_comparisons['transcript_id'].nunique() >= comparisons['transcript_id'].nunique()
+    assert all_comparisons['alternative_transcript_id'].nunique() >= comparisons['alternative_transcript_id'].nunique()
 
 
 @pytest.mark.parametrize('restrict_pdf_to_comparable', FLAG_COMBINATIONS)
@@ -765,10 +765,10 @@ def test_comparable_transcript_ids_excludes_skipped_events():
 
     cluster_result = ClusterAnalysisResult('cluster_1', 'ENSG00001', 'GENE1')
     cluster_result.canonical_transcript_id = 'ENST_CANON'
-    cluster_result.add_event('added_domain', transcript_id='ENST_COMPARED')
-    cluster_result.add_event('no_domains_in_region', transcript_id='ENST_COMPARED_2')
-    cluster_result.add_event('transcript_doesnt_have_features', transcript_id='ENST_NO_JUNCTIONS')
-    cluster_result.add_event('no_unique_features', transcript_id='ENST_NOT_UNIQUE')
+    cluster_result.add_event('added_domain', alternative_transcript_id='ENST_COMPARED')
+    cluster_result.add_event('no_domains_in_region', alternative_transcript_id='ENST_COMPARED_2')
+    cluster_result.add_event('transcript_doesnt_have_features', alternative_transcript_id='ENST_NO_JUNCTIONS')
+    cluster_result.add_event('no_unique_features', alternative_transcript_id='ENST_NOT_UNIQUE')
 
     comparable_ids = analysis._comparable_transcript_ids(cluster_result)
 

@@ -296,11 +296,11 @@ RESULTS_CSV_DTYPES = {
     "domain_id": "category",
     "domain_name": "category",
     "event": "category",
-    "transcript_id": "category",
-    "c_domain_length": "float32",
-    "t_domain_length": "float32",
-    "c_domains_number": "float32",
-    "t_domains_number": "float32",
+    "alternative_transcript_id": "category",
+    "canonical_domain_length": "float32",
+    "alternative_domain_length": "float32",
+    "canonical_domains_number": "float32",
+    "alternative_domains_number": "float32",
 }
 # is_longest_cds/is_most_like_canonical are left to pandas' default (object,
 # holding True/False/NaN) rather than forced to a dtype here - they're plain
@@ -516,13 +516,13 @@ def select_representative_transcript(df, on_ambiguous="raise"):
 
     most_like_pick = (
         analyzed_df[analyzed_df["is_most_like_canonical"] == True]
-        .groupby(group_cols, observed=True, dropna=False)["transcript_id"].first()
+        .groupby(group_cols, observed=True, dropna=False)["alternative_transcript_id"].first()
     )
     longest_pick = (
         analyzed_df[analyzed_df["is_longest_cds"] == True]
-        .groupby(group_cols, observed=True, dropna=False)["transcript_id"].first()
+        .groupby(group_cols, observed=True, dropna=False)["alternative_transcript_id"].first()
     )
-    nunique = analyzed_df.groupby(group_cols, observed=True, dropna=False)["transcript_id"].nunique()
+    nunique = analyzed_df.groupby(group_cols, observed=True, dropna=False)["alternative_transcript_id"].nunique()
 
     chosen = most_like_pick.combine_first(longest_pick)
 
@@ -540,13 +540,13 @@ def select_representative_transcript(df, on_ambiguous="raise"):
                 )
             _warn(f"select_representative_transcript: dropping {len(ambiguous)} ambiguous cluster(s) "
                   f"(no is_most_like_canonical/is_longest_cds tag, more than one transcript remains).")
-        sole_pick = analyzed_df.groupby(group_cols, observed=True, dropna=False)["transcript_id"].first()
+        sole_pick = analyzed_df.groupby(group_cols, observed=True, dropna=False)["alternative_transcript_id"].first()
         resolvable = unresolved.difference(ambiguous.index)
         chosen = chosen.combine_first(sole_pick.loc[resolvable])
 
     chosen_df = chosen.rename("_chosen_transcript_id").reset_index()
     merged = analyzed_df.merge(chosen_df, on=group_cols, how="left")
-    return merged[merged["transcript_id"] == merged["_chosen_transcript_id"]].drop(columns="_chosen_transcript_id")
+    return merged[merged["alternative_transcript_id"] == merged["_chosen_transcript_id"]].drop(columns="_chosen_transcript_id")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1365,21 +1365,21 @@ def _fetch_and_save_domain_descriptions(top_domains, label):
 def _length_change_data(df, event_type):
     """
     (abs_change, rel_change) Series - magnitude-only domain length change
-    for one event type ("shorter"/"longer"), c_domain_length > 0 rows only
+    for one event type ("shorter"/"longer"), canonical_domain_length > 0 rows only
     (needed to compute a relative %%). Both empty if there's no matching
     data. Shared by _length_change() (single-file report) and
     _pdf_length_change_combined() (multi-species overview page).
     """
     change_df = df[
         (df["event_type"] == event_type)
-        & df["c_domain_length"].notna()
-        & df["t_domain_length"].notna()
+        & df["canonical_domain_length"].notna()
+        & df["alternative_domain_length"].notna()
     ]
-    change_df = change_df[change_df["c_domain_length"] > 0]
+    change_df = change_df[change_df["canonical_domain_length"] > 0]
     if change_df.empty:
         return pd.Series(dtype=float), pd.Series(dtype=float)
-    abs_change = (change_df["c_domain_length"] - change_df["t_domain_length"]).abs()
-    rel_change = 100 * abs_change / change_df["c_domain_length"]
+    abs_change = (change_df["canonical_domain_length"] - change_df["alternative_domain_length"]).abs()
+    rel_change = 100 * abs_change / change_df["canonical_domain_length"]
     return abs_change, rel_change
 
 
@@ -1722,15 +1722,15 @@ def domain_count_change(df, label):
     """
     analyzed_df = df[
         df["event_type"].isin(ANALYZED_TYPES)
-        & df["c_domains_number"].notna()
-        & df["t_domains_number"].notna()
+        & df["canonical_domains_number"].notna()
+        & df["alternative_domains_number"].notna()
     ].copy()
 
     if analyzed_df.empty:
         print(f"\nNo domain count data found for {label}.")
         return
 
-    analyzed_df["count_change"] = analyzed_df["t_domains_number"] - analyzed_df["c_domains_number"]
+    analyzed_df["count_change"] = analyzed_df["alternative_domains_number"] - analyzed_df["canonical_domains_number"]
 
     def categorise(delta):
         if delta < 0:
@@ -1789,7 +1789,7 @@ def _severity_values(df):
       0%   = domain completely dropped
       100% = domain unchanged
       >100% = domain got longer
-    Shorter/longer/same rows require c_domain_length > 0. Split-domain rows
+    Shorter/longer/same rows require canonical_domain_length > 0. Split-domain rows
     are excluded (the concept of % retained is ambiguous there).
 
     Vectorised rather than a row-by-row loop: df.iterrows() would force
@@ -1800,8 +1800,8 @@ def _severity_values(df):
     et = df["event_type"]
     dropped_vals = np.zeros(int((et == "dropped_domain").sum()))
 
-    c = df.get("c_domain_length")
-    t = df.get("t_domain_length")
+    c = df.get("canonical_domain_length")
+    t = df.get("alternative_domain_length")
     if c is not None and t is not None:
         valid_mask = et.isin(["shorter", "longer", "unchanged"]) & c.notna() & t.notna() & (c > 0)
         other_vals = (100 * t[valid_mask] / c[valid_mask]).to_numpy(dtype=float)

@@ -501,8 +501,8 @@ def test_analyze_junction_compares_all_and_tags_longest_cds_deterministically():
     )
 
     df_results = cluster_result.get_results_df()
-    compared = sorted(df_results['transcript_id'].dropna().unique().tolist())
-    longest_cds_tagged = sorted(df_results.loc[df_results['is_longest_cds'] == True, 'transcript_id'].unique().tolist())
+    compared = sorted(df_results['alternative_transcript_id'].dropna().unique().tolist())
+    longest_cds_tagged = sorted(df_results.loc[df_results['is_longest_cds'] == True, 'alternative_transcript_id'].unique().tolist())
 
     # Both candidates are compared - nothing is skipped.
     assert compared == ['ENST_AAA', 'ENST_BBB']
@@ -547,7 +547,7 @@ def test_analyze_junction_leaves_most_like_canonical_unset_when_none_qualify():
 
     df_results = cluster_result.get_results_df()
     # The transcript is still compared - the gate tags, it doesn't filter.
-    assert df_results['transcript_id'].dropna().unique().tolist() == ['ENST_OFF']
+    assert df_results['alternative_transcript_id'].dropna().unique().tolist() == ['ENST_OFF']
     assert df_results['is_longest_cds'].iloc[0] == True
     assert not (df_results['is_most_like_canonical'] == True).any()
 
@@ -586,7 +586,7 @@ def test_analyze_junction_tags_sole_comparable_transcript_as_both():
     )
 
     df_results = cluster_result.get_results_df()
-    assert df_results['transcript_id'].dropna().unique().tolist() == ['ENST_ONLY']
+    assert df_results['alternative_transcript_id'].dropna().unique().tolist() == ['ENST_ONLY']
     assert df_results['is_longest_cds'].iloc[0] == True
     assert df_results['is_most_like_canonical'].iloc[0] == True
 
@@ -865,7 +865,7 @@ def test_analyze_treats_retained_intron_transcript_as_comparable():
     df_results = cluster_result.get_results_df()
     skipped = {'transcript_doesnt_have_features', 'no_unique_features',
                'no_canonical_features', 'feature_not_mapped', 'gene_not_in_db'}
-    comparable = set(df_results.loc[~df_results['event'].isin(skipped), 'transcript_id'].dropna())
+    comparable = set(df_results.loc[~df_results['event'].isin(skipped), 'alternative_transcript_id'].dropna())
     assert comparable == {'ENST_RETAINED'}, f"expected the retained transcript, got {comparable}"
 
 
@@ -964,7 +964,7 @@ def _run_selection(df_gene_transcripts, exons_by_id):
     )
     df = cluster_result.get_results_df()
     def tagged(col):
-        ids = set(df.loc[df[col] == True, 'transcript_id'].dropna())
+        ids = set(df.loc[df[col] == True, 'alternative_transcript_id'].dropna())
         return ids.pop() if ids else None
     return tagged('is_longest_cds'), tagged('is_most_like_canonical')
 
@@ -1665,7 +1665,7 @@ def test_no_comparable_transcripts_yields_no_groups():
 
 
 # ---------------------------------------------------------------------------
-# The optional -extra_columns trio: rank, c_junction_in_cds, t_junction_in_cds
+# The optional -extra_columns trio: rank, canonical_junction_in_cds, alternative_junction_in_cds
 #
 # rank names the canonical transcript's exons a junction joins, worked out from
 # the exon table rather than read from the input - so it is available whatever
@@ -1827,19 +1827,19 @@ def test_analyze_fills_the_three_columns_for_the_compared_row():
     """End to end through analyze(): the exon-skipping junction joins canonical's
     exons 1 and 3, and lies inside both transcripts' coding sequence."""
     df_results = _extra_columns_fixture(cds_end=900)
-    compared = df_results[df_results['transcript_id'] == 'ENST_SKIP'].iloc[0]
+    compared = df_results[df_results['alternative_transcript_id'] == 'ENST_SKIP'].iloc[0]
     assert compared['rank'] == 'E1_E3Last'
-    assert compared['c_junction_in_cds'] == CDS_IN
-    assert compared['t_junction_in_cds'] == CDS_IN
+    assert compared['canonical_junction_in_cds'] == CDS_IN
+    assert compared['alternative_junction_in_cds'] == CDS_IN
 
 
 def test_the_two_cds_columns_are_measured_against_their_own_transcript():
     """Same junction, different answers: it sits inside the canonical's CDS but
     past the end of the compared transcript's."""
     df_results = _extra_columns_fixture(cds_end=150)
-    compared = df_results[df_results['transcript_id'] == 'ENST_SKIP'].iloc[0]
-    assert compared['c_junction_in_cds'] == CDS_IN
-    assert compared['t_junction_in_cds'] == CDS_OUT
+    compared = df_results[df_results['alternative_transcript_id'] == 'ENST_SKIP'].iloc[0]
+    assert compared['canonical_junction_in_cds'] == CDS_IN
+    assert compared['alternative_junction_in_cds'] == CDS_OUT
 
 
 # ---------------------------------------------------------------------------
@@ -1886,7 +1886,7 @@ def test_the_transcript_the_rule_passed_over_is_recorded():
     compared = df_results[df_results['event'] == 'no_domains_in_region']
 
     assert len(not_chosen) == 1 and len(compared) == 1
-    assert not_chosen['transcript_id'].iloc[0] != compared['transcript_id'].iloc[0]
+    assert not_chosen['alternative_transcript_id'].iloc[0] != compared['alternative_transcript_id'].iloc[0]
     # Both belong to the one group, so the row says which event it sat in.
     assert not_chosen['group'].iloc[0] == compared['group'].iloc[0] == 1
 
@@ -1959,7 +1959,7 @@ def test_cluster_where_no_transcript_differs_reports_no_unique_transcript():
     # One row for the cluster, carrying no transcript id.
     cluster_rows = df_results[df_results['event'] == 'no_unique_transcript']
     assert len(cluster_rows) == 1
-    assert pd.isna(cluster_rows['transcript_id'].iloc[0])
+    assert pd.isna(cluster_rows['alternative_transcript_id'].iloc[0])
     # The per-transcript reasons are still there.
     assert 'no_unique_features' in events
     assert 'transcript_doesnt_have_features' in events
