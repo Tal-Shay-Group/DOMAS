@@ -118,6 +118,9 @@ UNANALYZABLE_TYPES = [
     # In a group that was compared, but not the transcript the selection rule
     # picked to represent it - so it carries no comparison of its own.
     "transcript_not_chosen",
+    # The event-level counterpart of no_unique_features: not one transcript of the
+    # gene differs from the canonical within the event, so no group forms.
+    "no_unique_transcript",
 ]
 
 ANALYZED_TYPES = [
@@ -160,7 +163,7 @@ def _warn(message):
 # length mismatch (e.g. forgetting to add a color when a new event type is
 # added) would otherwise make zip() truncate and shift every later color by
 # one, shifting every later colour by one.
-_UNANALYZABLE_COLORS = ["#8C8C8C", "#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2", "#937860", "#CCB974", "#64B5CD", "#B07AA1", "#3E8E8E"]
+_UNANALYZABLE_COLORS = ["#8C8C8C", "#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2", "#937860", "#CCB974", "#64B5CD", "#B07AA1", "#3E8E8E", "#6B8E23"]
 _ANALYZED_COLORS = ["#C00000", "#2E8B57", "#FF8C00", "#FFC000", "#70AD47", "#7030A0", "#4472C4", "#A6761D", "#E7298A"]
 assert len(_UNANALYZABLE_COLORS) == len(UNANALYZABLE_TYPES), \
     f"event_color(): {len(_UNANALYZABLE_COLORS)} unanalyzable colors for {len(UNANALYZABLE_TYPES)} UNANALYZABLE_TYPES"
@@ -215,6 +218,7 @@ SHORT_LABELS = {
     "domain swap": "swap",
     "transcript_doesnt_have_features": "lacks features",
     "transcript_not_chosen": "not chosen",
+    "no_unique_transcript": "no unique transcript",
 }
 
 

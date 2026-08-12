@@ -1026,6 +1026,18 @@ class ClusterAnalysisResult:
 
         unique_by_transcript = self._find_comparable_transcripts(
             transcript_junctions, canonical_junctions)
+        if not unique_by_transcript:
+            # An event-level outcome, alongside the per-transcript reasons
+            # _find_comparable_transcripts() has already recorded: every transcript
+            # of the gene either carries no feature of the event or carries only
+            # features the canonical one has too, so there is nothing to compare
+            # the canonical against and the cluster yields no group at all.
+            self.add_event('no_unique_transcript')
+            logger.debug(
+                f"No transcript with a unique junction for cluster {self.cluster_name}, "
+                f"specie {self.specie}. Skipping analysis."
+            )
+            return
 
         # One comparison per distinct event in the cluster, not one per cluster.
         for group_index, group_features, group_transcript_ids in self._group_by_unique_features(unique_by_transcript):
@@ -1543,7 +1555,7 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
 # analyze_junctions(filter_non_comparable=True) drops from the output CSV.
 NON_COMPARISON_EVENTS = frozenset({
     'no_gene_specified', 'gene_not_in_db', 'no_canonical_transcript', 'only_one_transcript',
-    'no_canonical_features', 'feature_not_mapped',
+    'no_canonical_features', 'feature_not_mapped', 'no_unique_transcript',
     'transcript_doesnt_have_features', 'no_unique_features', 'subsumed_by_larger_event',
     # Carries its group's junctions and could have been compared, but the
     # selection rule picked another transcript of the same group.

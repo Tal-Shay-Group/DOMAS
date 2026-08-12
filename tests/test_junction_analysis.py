@@ -1914,3 +1914,63 @@ def test_empty_domain_frame_is_returned_untouched():
     from junction_analisys import filter_representative_domains
     empty = pd.DataFrame(columns=['domain_id', 'type', 'AA_start', 'AA_end'])
     assert len(filter_representative_domains(empty)) == 0
+
+
+# ---------------------------------------------------------------------------
+# no_unique_transcript: the event-level outcome when nothing differs
+# ---------------------------------------------------------------------------
+
+def test_cluster_where_no_transcript_differs_reports_no_unique_transcript():
+    """Every transcript either lacks the event's features or carries only the
+    canonical's, so no group forms. The per-transcript reasons are recorded as
+    before, and the cluster additionally gets one event-level row - the
+    counterpart of only_one_transcript / no_canonical_transcript."""
+    df_gene_transcripts = pd.DataFrame({
+        'transcript_ensembl_id': ['CANON', 'ENST_SAME', 'ENST_BARE'],
+        'transcript_refseq_id': [None, None, None],
+        'canonical': [1, 0, 0],
+        'cds_start': [100, 100, 100],
+        'cds_end': [900, 900, 900],
+    })
+
+    canonical_exons = _two_exon_df((1, 100, 200), (2, 300, 400))
+    # Same shape as canonical: it carries the junction, but nothing unique.
+    same_exons = _two_exon_df((1, 100, 200), (2, 300, 400))
+    # Nowhere near the event: carries no feature at all.
+    bare_exons = _two_exon_df((1, 5000, 5100), (2, 5300, 5400))
+    for df in (canonical_exons, same_exons, bare_exons):
+        df['abs_start_CDS'] = [1, 101]
+        df['abs_end_CDS'] = [100, 200]
+
+    exons_by_id = {'CANON': canonical_exons, 'ENST_SAME': same_exons, 'ENST_BARE': bare_exons}
+    empty_domains = pd.DataFrame(columns=['AA_start', 'AA_end'] + DOMAIN_NAME_COLUMNS)
+
+    cluster_result = ClusterAnalysisResult('cluster_1', 'ENSG_TEST', 'TESTGENE')
+    cluster_result.junctions = [(200, 300)]
+    cluster_result.analyze(
+        df_gene_transcripts, canonical_transcript_ids={'CANON'},
+        exon_lookup=lambda tid: exons_by_id[tid],
+        domain_lookup=lambda tid: empty_domains,
+    )
+
+    df_results = cluster_result.get_results_df()
+    events = list(df_results['event'])
+    assert 'no_unique_transcript' in events
+    # One row for the cluster, carrying no transcript id.
+    cluster_rows = df_results[df_results['event'] == 'no_unique_transcript']
+    assert len(cluster_rows) == 1
+    assert pd.isna(cluster_rows['transcript_id'].iloc[0])
+    # The per-transcript reasons are still there.
+    assert 'no_unique_features' in events
+    assert 'transcript_doesnt_have_features' in events
+
+
+def test_no_unique_transcript_is_not_reported_when_a_group_forms():
+    """A cluster with a comparable transcript must not carry the event-level row."""
+    df_results = _two_candidate_group()
+    assert 'no_unique_transcript' not in list(df_results['event'])
+
+
+def test_no_unique_transcript_counts_as_a_non_comparison():
+    from junction_analisys import NON_COMPARISON_EVENTS
+    assert 'no_unique_transcript' in NON_COMPARISON_EVENTS
