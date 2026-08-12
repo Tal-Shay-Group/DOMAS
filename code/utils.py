@@ -614,11 +614,21 @@ def find_matching_junction_indices(df_transcript_exons, junctions, strand='+', f
     other exon's genomic_start_tx is within 1bp of the junction's intron-right
     boundary.
 
-    On the positive strand the intron-left boundary is start_position and the
-    intron-right boundary is end_position.  On the negative strand the
+    The pair is read as the junction's two BOUNDARIES, not as an ordered
+    (start, end): which of them is the genomically lower one is worked out here,
+    and orientation comes from `strand` alone. An input is free to write them in
+    either order - the internal format writes a human/mouse ortholog pair in the
+    order its shared exon-pair label names the exons (E4_E3), so the mouse
+    coordinates run high-to-low wherever the two genes sit on opposite strands,
+    which is 4,832 of its 9,971 mouse junctions. Requiring start < end silently
+    failed to map every one of them, and with it the whole mouse side of 1,684
+    of 3,484 clusters.
+
+    On the positive strand the intron-left boundary is the lower coordinate and
+    the intron-right boundary the higher one. On the negative strand the
     transcript runs right-to-left in genomic coordinates, so the roles are
-    reversed: the intron-left boundary (in genomic terms) is end_position and
-    the intron-right boundary is start_position.
+    reversed: the intron-left boundary (in genomic terms) is the higher
+    coordinate and the intron-right boundary the lower.
 
     `feature_types` is an optional sequence parallel to `junctions`, giving each
     feature's type (see FEATURE_JUNCTION / FEATURE_RETAINED_INTRON). None - the
@@ -638,10 +648,14 @@ def find_matching_junction_indices(df_transcript_exons, junctions, strand='+', f
 
     matched = set()
     for idx, (start_position, end_position) in enumerate(junctions):
+        # Normalised once, for both feature types: the input's ordering carries
+        # no coordinate meaning (see above), so everything below works from the
+        # genomically lower and higher boundary.
+        low, high = min(start_position, end_position), max(start_position, end_position)
+
         if feature_types is not None and feature_types[idx] == FEATURE_RETAINED_INTRON:
             # Retained: one exon spans the whole intron. Exons are disjoint, so
             # at most one can, and `any` is enough.
-            low, high = min(start_position, end_position), max(start_position, end_position)
             if ((exon_starts <= low + 1) & (exon_ends >= high - 1)).any():
                 matched.add(idx)
             continue
@@ -650,13 +664,11 @@ def find_matching_junction_indices(df_transcript_exons, junctions, strand='+', f
             # DB always stores genomic_start_tx < genomic_end_tx, so:
             #   - the upstream exon's intron boundary is its genomic_start_tx (lower bound of the higher exon)
             #   - the downstream exon's intron boundary is its genomic_end_tx (upper bound of the lower exon)
-            # Junction end_position is near the upstream exon's genomic_start_tx.
-            # Junction start_position is near the downstream exon's genomic_end_tx.
-            intron_left, intron_right = end_position, start_position
+            intron_left, intron_right = high, low
             upstream_orders = exon_orders[np.abs(exon_starts - intron_left) <= 1]
             downstream_orders = exon_orders[np.abs(exon_ends - intron_right) <= 1]
         else:
-            intron_left, intron_right = start_position, end_position
+            intron_left, intron_right = low, high
             upstream_orders = exon_orders[np.abs(exon_ends - intron_left) <= 1]
             downstream_orders = exon_orders[np.abs(exon_starts - intron_right) <= 1]
         if len(upstream_orders) == 1 and len(downstream_orders) == 1:

@@ -1974,3 +1974,47 @@ def test_no_unique_transcript_is_not_reported_when_a_group_forms():
 def test_no_unique_transcript_counts_as_a_non_comparison():
     from junction_analisys import NON_COMPARISON_EVENTS
     assert 'no_unique_transcript' in NON_COMPARISON_EVENTS
+
+
+# ---------------------------------------------------------------------------
+# The junction's two coordinates are boundaries, not an ordered (start, end)
+#
+# The internal format writes a human/mouse ortholog pair in the order its shared
+# exon-pair label names the exons, so the mouse coordinates run high-to-low
+# wherever the two genes sit on opposite strands - 4,832 of its 9,971 mouse
+# junctions, and with them the whole mouse side of 1,684 of 3,484 clusters, none
+# of which mapped while the matcher required start < end.
+# ---------------------------------------------------------------------------
+
+def test_junction_matches_whichever_order_its_boundaries_are_given_in():
+    """The same junction, written both ways round, matches identically - on both
+    strands. Orientation is the `strand` argument's business, not the input's."""
+    plus = _two_exon_df((1, 100, 200), (2, 300, 400))
+    minus = _two_exon_df((1, 300, 400), (2, 100, 200))
+
+    for label, df_exons, strand in (('plus', plus, '+'), ('minus', minus, '-')):
+        forward = find_matching_junction_indices(df_exons, [(200, 300)], strand=strand)
+        reversed_ = find_matching_junction_indices(df_exons, [(300, 200)], strand=strand)
+        assert forward == {0}, f'{label}: {forward}'
+        assert reversed_ == forward, f'{label}: {reversed_} != {forward}'
+
+
+def test_reversed_boundaries_still_reject_a_non_adjacent_pair():
+    """Normalising the order must not weaken the predicate: exons that are not
+    adjacent in transcript order stay unmatched written either way round."""
+    df_exons = _three_exon_df((1, 100, 200), (2, 300, 400), (3, 500, 600))
+    # 200 -> 500 skips exon 2, so the two exons are two apart.
+    assert find_matching_junction_indices(df_exons, [(200, 500)], strand='+') == set()
+    assert find_matching_junction_indices(df_exons, [(500, 200)], strand='+') == set()
+
+
+def test_retained_intron_already_ignored_the_order():
+    """Containment was always computed from min/max, so a retained intron matched
+    either way round before this change and must keep doing so."""
+    from junction_analisys import FEATURE_RETAINED_INTRON
+    exons = _retained_exons()
+    low, high = min(INTRON), max(INTRON)
+    for pair in ((low, high), (high, low)):
+        got = find_matching_junction_indices(
+            exons, [pair], strand='+', feature_types=[FEATURE_RETAINED_INTRON])
+        assert got == {0}, f'{pair}: {got}'
