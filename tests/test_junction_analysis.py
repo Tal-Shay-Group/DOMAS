@@ -205,6 +205,10 @@ def test_find_bp_range_for_domains_returns_genomically_ordered_pair():
         'abs_start_CDS': [56, 637],
         'abs_end_CDS': [245, 810],
         'genomic_start_tx': [24575264, 24573560],
+        # abs_start_CDS sits at the genomic END of a minus-strand exon, so the
+        # mapping needs it: without it the offsets were read left-to-right and
+        # the pair came back 200-300 bp off its true position.
+        'genomic_end_tx': [24575453, 24573733],
     })
     # A domain spanning AA 35-255 -> CDS bp 105-765, which falls inside the
     # two exons above (genomically reversed relative to CDS order).
@@ -213,7 +217,9 @@ def test_find_bp_range_for_domains_returns_genomically_ordered_pair():
     min_bp, max_bp = find_bp_range_for_domains(df_exons, domains_in_region)
 
     assert min_bp <= max_bp
-    assert (min_bp, max_bp) == (24573688, 24575313)
+    # CDS 105 is 49 bases into the first exon, so 49 bases DOWN from its genomic
+    # end; CDS 765 is 128 into the second, so 128 down from that one's end.
+    assert (min_bp, max_bp) == (24573605, 24575404)
 
 
 def test_find_bp_range_for_domains_returns_none_when_no_real_domains():
@@ -2149,3 +2155,93 @@ def test_analysis_is_invariant_to_the_order_the_boundaries_are_written_in():
     pd.testing.assert_frame_equal(forward, reversed_)
     # and it is a real comparison, not two identically empty results
     assert 'no_domains_in_region' in list(forward['event'])
+
+
+def test_the_second_window_contains_the_first():
+    """The invariant the two-pass window is described by: round 2 widens round 1,
+    it never starts inside it. Without pooling round 1's own span the two could
+    overlap with neither containing the other - round 2 began at the junction and
+    round 1 at the bounding exon's edge, 111 bp further out for ZNF136."""
+    import utils as u
+    from junction_analisys import (find_boundary_exons, get_aa_range,
+                                   find_bp_range_for_domains, _domains_in_aa_range,
+                                   _min_skip_none, _max_skip_none)
+
+    exons = _three_exon_df((1, 1000, 1200), (2, 2000, 2100), (3, 3000, 3400))
+    exons['abs_start_CDS'] = [1, 202, 303]
+    exons['abs_end_CDS'] = [201, 302, 702]
+    junctions = [(1200, 2000)]
+
+    # round 1: snapped out to the bounding exons
+    lo, hi = min(junctions[0]), max(junctions[0])
+    first, last = find_boundary_exons(exons, lo, hi)
+    w_lo, w_hi = first['genomic_start_tx'], last['genomic_end_tx']
+    assert w_lo < lo and w_hi > hi, 'fixture: round 1 must snap outwards'
+
+    # a domain reaching past round 1 on the right only
+    domains = pd.DataFrame({'AA_start': [180], 'AA_end': [230],
+                            'domain_id': ['IPR000001'], 'type': ['Domain']})
+    d_lo, d_hi = find_bp_range_for_domains(exons, domains)
+
+    # round 2, as the code pools it
+    p2_lo = _min_skip_none([w_lo, lo, d_lo])
+    p2_hi = _max_skip_none([w_hi, hi, d_hi])
+    assert p2_lo <= w_lo and p2_hi >= w_hi, (
+        f'round 2 ({p2_lo}-{p2_hi}) must contain round 1 ({w_lo}-{w_hi})')
+
+
+# ---------------------------------------------------------------------------
+# CDS offsets run with the transcript, not with the genome
+# ---------------------------------------------------------------------------
+
+def _minus_exon():
+    """One exon of a minus-strand transcript: abs_start_CDS sits at genomic_end_tx."""
+    return pd.Series({'genomic_start_tx': 1000, 'genomic_end_tx': 1100,
+                      'abs_start_CDS': 200, 'abs_end_CDS': 300})
+
+
+def test_bp_to_cds_follows_the_transcript_on_the_minus_strand():
+    """The offset rises as the genomic coordinate FALLS. Read the plus-strand way
+    the mapping runs backwards and then saturates against the clamp, which is how
+    a wider window came to select fewer domains."""
+    from junction_analisys import _bp_to_cds
+    exon = _minus_exon()
+    assert _bp_to_cds(exon, 1100, minus=True) == 200      # the exon's genomic end
+    assert _bp_to_cds(exon, 1000, minus=True) == 300      # its genomic start
+    assert _bp_to_cds(exon, 1050, minus=True) == 250      # halfway
+    # the plus-strand reading of the same exon is the mirror image
+    assert _bp_to_cds(exon, 1000, minus=False) == 200
+    assert _bp_to_cds(exon, 1100, minus=False) == 300
+
+
+def test_cds_to_bp_is_the_inverse_on_both_strands():
+    from junction_analisys import _bp_to_cds, _cds_to_bp
+    exon = _minus_exon()
+    for minus in (False, True):
+        for bp in (1000, 1025, 1050, 1100):
+            cds = _bp_to_cds(exon, bp, minus)
+            assert _cds_to_bp(exon, cds, minus) == bp, (minus, bp, cds)
+
+
+def test_a_wider_window_never_narrows_the_amino_acid_interval():
+    """The property the strand bug broke: widening the genomic span can only widen
+    the interval it projects to. ZNF195's went from AA 14-487 to AA 14-85 when the
+    span grew by 2,296 bp."""
+    from junction_analisys import get_aa_range
+    exons = _three_exon_df((1, 3000, 3100), (2, 2000, 2100), (3, 1000, 1500))
+    exons['abs_start_CDS'] = [1, 102, 203]
+    exons['abs_end_CDS'] = [101, 202, 702]
+    first, last = exons.iloc[2], exons.iloc[0]      # genomically lowest / highest
+    narrow = get_aa_range(first, last, 1400, 3050, minus=True)
+    wide = get_aa_range(first, last, 1000, 3100, minus=True)
+    assert wide[0] <= narrow[0] and wide[1] >= narrow[1], f'{wide} does not contain {narrow}'
+
+
+def test_exon_orientation_is_read_off_the_frame_when_no_strand_is_given():
+    from junction_analisys import _exons_are_minus
+    plus = _three_exon_df((1, 100, 200), (2, 300, 400), (3, 500, 600))
+    minus = _three_exon_df((1, 500, 600), (2, 300, 400), (3, 100, 200))
+    assert not _exons_are_minus(plus)
+    assert _exons_are_minus(minus)
+    # a single exon cannot be told apart, and must not guess
+    assert not _exons_are_minus(plus.iloc[:1])

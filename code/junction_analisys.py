@@ -147,13 +147,39 @@ def find_boundary_exons(df_exons, min_bp, max_bp):
     return first_exon, last_exon
 
 
-def _bp_to_cds(exon, bp):
-    """Map a genomic bp position within `exon` to its CDS-relative bp offset, clamped to the exon's CDS span."""
-    cds = exon['abs_start_CDS'] + (bp - exon['genomic_start_tx'])
+def _exons_are_minus(df_exons):
+    """Whether a transcript's exons run right-to-left, read off the frame itself.
+
+    The fallback for a caller that has no gene strand to hand. A single-exon
+    transcript cannot be told apart this way and reads as plus - which is why the
+    gene's own strand is threaded through and preferred wherever it is known.
+    """
+    if df_exons is None or len(df_exons) < 2:
+        return False
+    ordered = (df_exons.sort_values('order_in_transcript')
+               if 'order_in_transcript' in df_exons.columns else df_exons)
+    return ordered['genomic_start_tx'].iloc[0] > ordered['genomic_start_tx'].iloc[-1]
+
+
+def _bp_to_cds(exon, bp, minus=False):
+    """Map a genomic bp position within `exon` to its CDS-relative bp offset, clamped
+    to the exon's CDS span.
+
+    CDS offsets run with the transcript, not with the genome: on a minus-strand
+    exon abs_start_CDS sits at genomic_end_tx and the offset RISES as the genomic
+    coordinate falls. Reading it the plus-strand way there does not merely shift
+    the answer, it runs backwards and then saturates against the clamp - which is
+    how a WIDER pass-2 window came to select FEWER domains for ZNF195, and why
+    7.2% of minus-strand comparisons picked the wrong domain set.
+    """
+    if minus:
+        cds = exon['abs_start_CDS'] + (exon['genomic_end_tx'] - bp)
+    else:
+        cds = exon['abs_start_CDS'] + (bp - exon['genomic_start_tx'])
     return min(max(cds, exon['abs_start_CDS']), exon['abs_end_CDS'])
 
 
-def get_aa_range(first_exon, last_exon, min_bp=None, max_bp=None):
+def get_aa_range(first_exon, last_exon, min_bp=None, max_bp=None, minus=False):
     """
     Amino-acid range (inclusive) spanned by the first/last exons of a window.
 
@@ -179,20 +205,23 @@ def get_aa_range(first_exon, last_exon, min_bp=None, max_bp=None):
         start_cds = min(cds_bounds)
         end_cds = max(cds_bounds)
     else:
-        start_cds = first_exon['abs_start_CDS'] if min_bp is None else _bp_to_cds(first_exon, min_bp)
-        end_cds = last_exon['abs_end_CDS'] if max_bp is None else _bp_to_cds(last_exon, max_bp)
+        start_cds = first_exon['abs_start_CDS'] if min_bp is None else _bp_to_cds(first_exon, min_bp, minus)
+        end_cds = last_exon['abs_end_CDS'] if max_bp is None else _bp_to_cds(last_exon, max_bp, minus)
     min_aa = min(start_cds, end_cds) // 3
     max_aa = max(start_cds, end_cds) // 3
     return min_aa, max_aa
 
 
-def _cds_to_bp(exon, cds_bp):
-    """Map a CDS-relative bp position to its genomic position within `exon`'s CDS span."""
+def _cds_to_bp(exon, cds_bp, minus=False):
+    """Map a CDS-relative bp position to its genomic position within `exon`'s CDS
+    span. The inverse of _bp_to_cds(), with the same orientation rule."""
     cds_bp = min(max(cds_bp, exon['abs_start_CDS']), exon['abs_end_CDS'])
+    if minus:
+        return exon['genomic_end_tx'] - (cds_bp - exon['abs_start_CDS'])
     return exon['genomic_start_tx'] + (cds_bp - exon['abs_start_CDS'])
 
 
-def find_bp_range_for_domains(df_exons, domains_in_region):
+def find_bp_range_for_domains(df_exons, domains_in_region, minus=None):
     """
     Genomic (start, end) bp positions - start <= end - spanning the start of
     the nearest-starting domain and the end of the furthest-reaching domain in
@@ -227,8 +256,10 @@ def find_bp_range_for_domains(df_exons, domains_in_region):
     # On a minus strand the domain's lower CDS bound maps to a higher genomic
     # position, so the pair can come back reversed. Callers pool it into a
     # min/max across transcripts, so return it in genomic (low, high) order.
-    bp_a = _cds_to_bp(first_exon, min_domain_bp)
-    bp_b = _cds_to_bp(last_exon, max_domain_bp)
+    if minus is None:
+        minus = _exons_are_minus(df_exons)
+    bp_a = _cds_to_bp(first_exon, min_domain_bp, minus)
+    bp_b = _cds_to_bp(last_exon, max_domain_bp, minus)
     return min(bp_a, bp_b), max(bp_a, bp_b)
 
 
@@ -491,7 +522,7 @@ def _max_skip_none(values):
 
 
 def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_transcript_id, transcript_id,
-                                  canonical_junctions, transcript_junctions, junctions):
+                                  canonical_junctions, transcript_junctions, junctions, strand=None):
     """
     Determine the genomic window around the differing junctions and return the
     domains of the canonical and compared transcript that fall within it.
@@ -499,9 +530,16 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
     Two rounds, not an iteration to convergence: round 1 collects the domains
     overlapping the boundary exons of the event span - the exons of BOTH
     transcripts pooled into one genomic span, so neither is windowed over a
-    stretch the other is not; round 2 widens that window to the union of the
-    event span and those domains' own genomic span - again pooled across both
+    stretch the other is not; round 2 then REPLACES that window with the union of
+    the event span and those domains' own genomic span - again pooled across both
     transcripts, so each is windowed identically - and re-collects.
+
+    Round 2 always CONTAINS round 1: round 1's span is pooled in alongside the
+    domains it found. That containment is free - the flank round 1 snapped out to
+    was already searched by it, so any domain there contributes its own extent to
+    the pool regardless - and without it the two windows can overlap without
+    either containing the other, which takes a paragraph to explain every time
+    they are drawn together.
     Round 2 is skipped when round 1 found no domains in either transcript.
     Both rounds select from the already-reduced representative domain set (see
     filter_representative_domains()).
@@ -518,6 +556,14 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
 
     t_exons = transcript_exons[transcript_id]
     c_exons = transcript_exons[canonical_transcript_id]
+
+    # Orientation for every genomic <-> CDS mapping below. The gene's own strand
+    # where the caller knows it; otherwise read off each transcript's exons,
+    # which is all a direct caller has.
+    if strand is not None:
+        t_minus = c_minus = (strand == '-')
+    else:
+        t_minus, c_minus = _exons_are_minus(t_exons), _exons_are_minus(c_exons)
 
     # Round 1: window spanning the boundary exons of the differing junctions.
     # The two transcripts bound the event with exons of their own, which need not
@@ -540,8 +586,8 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
     common_first_bp = min(e['genomic_start_tx'] for e in bounding)
     common_last_bp = max(e['genomic_end_tx'] for e in bounding)
 
-    t_min_aa, t_max_aa = get_aa_range(*find_boundary_exons(t_exons, common_first_bp, common_last_bp))
-    c_min_aa, c_max_aa = get_aa_range(*find_boundary_exons(c_exons, common_first_bp, common_last_bp))
+    t_min_aa, t_max_aa = get_aa_range(*find_boundary_exons(t_exons, common_first_bp, common_last_bp), minus=t_minus)
+    c_min_aa, c_max_aa = get_aa_range(*find_boundary_exons(c_exons, common_first_bp, common_last_bp), minus=c_minus)
 
     # The domain set is reduced by curated InterPro entry type, not by the
     # geometry of the hits.
@@ -554,15 +600,19 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
     t_domains_round1 = _domains_in_aa_range(df_t_domains, t_min_aa, t_max_aa)
     c_domains_round1 = _domains_in_aa_range(df_c_domains, c_min_aa, c_max_aa)
 
-    # Round 2: widen the window to cover the domains found in round 1.
-    # Skip refinement if no domains found in round 1
+    # Round 2: round 1's window widened to cover the domains it found, so the
+    # second window always CONTAINS the first. Pooling round 1's own span in
+    # costs nothing - the flank it adds was already searched by round 1, so any
+    # domain there is in the pool already - and it buys an invariant that can be
+    # stated in one line instead of a caveat wherever the two are drawn.
+    # Skipped when round 1 found no domains in either transcript.
     if t_domains_round1.empty and c_domains_round1.empty:
         t_domains_round2, c_domains_round2 = t_domains_round1, c_domains_round1
     else:
-        t_min_bp, t_max_bp = find_bp_range_for_domains(t_exons, t_domains_round1)
-        c_min_bp, c_max_bp = find_bp_range_for_domains(c_exons, c_domains_round1)
-        common_min_bp = _min_skip_none([min_bp, t_min_bp, c_min_bp])
-        common_max_bp = _max_skip_none([max_bp, t_max_bp, c_max_bp])
+        t_min_bp, t_max_bp = find_bp_range_for_domains(t_exons, t_domains_round1, t_minus)
+        c_min_bp, c_max_bp = find_bp_range_for_domains(c_exons, c_domains_round1, c_minus)
+        common_min_bp = _min_skip_none([common_first_bp, min_bp, t_min_bp, c_min_bp])
+        common_max_bp = _max_skip_none([common_last_bp, max_bp, t_max_bp, c_max_bp])
 
         if common_min_bp is None or common_max_bp is None:
             t_domains_round2, c_domains_round2 = t_domains_round1, c_domains_round1
@@ -570,8 +620,8 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
             t_first_exon2, t_last_exon2 = find_boundary_exons(t_exons, common_min_bp, common_max_bp)
             c_first_exon2, c_last_exon2 = find_boundary_exons(c_exons, common_min_bp, common_max_bp)
 
-            t_min_aa2, t_max_aa2 = get_aa_range(t_first_exon2, t_last_exon2, common_min_bp, common_max_bp)
-            c_min_aa2, c_max_aa2 = get_aa_range(c_first_exon2, c_last_exon2, common_min_bp, common_max_bp)
+            t_min_aa2, t_max_aa2 = get_aa_range(t_first_exon2, t_last_exon2, common_min_bp, common_max_bp, t_minus)
+            c_min_aa2, c_max_aa2 = get_aa_range(c_first_exon2, c_last_exon2, common_min_bp, common_max_bp, c_minus)
 
             t_domains_round2 = _domains_in_aa_range(df_t_domains, t_min_aa2, t_max_aa2)
             c_domains_round2 = _domains_in_aa_range(df_c_domains, c_min_aa2, c_max_aa2)
@@ -728,7 +778,7 @@ def _group_text(c_domains, c_idxs, t_domains, t_idxs, column):
 
 
 def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, transcript_id,
-                     canonical_junctions, transcript_junctions, junctions):
+                     canonical_junctions, transcript_junctions, junctions, strand=None):
     """
     Compare the domains of `transcript_id` against `canonical_transcript_id`
     within the Phase 2 window, and classify each group of matched/unmatched
@@ -750,7 +800,7 @@ def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, tr
     """
     t_domains, c_domains = find_relevant_domain_windows(
         transcript_exons, domain_lookup, canonical_transcript_id, transcript_id,
-        canonical_junctions, transcript_junctions, junctions,
+        canonical_junctions, transcript_junctions, junctions, strand,
     )
 
     canonical_names = _domain_name_sets(c_domains)
@@ -1505,7 +1555,7 @@ class ClusterAnalysisResult:
             transcript_in_cds = self._junctions_in_cds(transcript_id, group_features)
             events = list(compare_domains(
                 domain_lookup, transcript_exons, self.canonical_transcript_id, transcript_id,
-                canonical_junctions, junction_idxs, self.junctions,
+                canonical_junctions, junction_idxs, self.junctions, self.strand,
             ))
             if events:
                 for event in events:
