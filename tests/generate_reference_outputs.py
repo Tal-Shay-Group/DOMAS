@@ -1,6 +1,6 @@
 """
 Run JunctionsAnalysis.analyze_junctions() for every combination of
-restrict_pdf_to_comparable / use_representative_domains, against both
+restrict_pdf_to_comparable, against both
 fixture files, and save the resulting CSV + PDFs into persistent,
 descriptively-named subdirectories under tests/reference_outputs/ for
 manual inspection.
@@ -30,15 +30,10 @@ HADAS_XLSX = os.path.join(TESTS_DIR, 'short_H_vs_M_HN6.xlsx')
 CATEGORY_EXAMPLES_CSV = os.path.join(TESTS_DIR, 'category_examples_junctions.csv')
 OUTPUT_ROOT = os.path.join(TESTS_DIR, 'reference_outputs')
 
-# (restrict_pdf_to_comparable, use_representative_domains) - mirrors
+# restrict_pdf_to_comparable - mirrors
 # tests/test_flags.py's FLAG_COMBINATIONS/_case_name exactly, so the case
 # names line up.
-FLAG_COMBINATIONS = [
-    (False, False),
-    (True, False),
-    (False, True),
-    (True, True),
-]
+FLAG_COMBINATIONS = [False, True]
 
 INPUT_FILES = [
     ('ioe_csv', IOE_CSV, False),
@@ -47,12 +42,12 @@ INPUT_FILES = [
 ]
 
 
-def _case_name(label, restrict_pdf_to_comparable, use_representative_domains):
-    return f"{label}__restrict_{restrict_pdf_to_comparable}__representative_{use_representative_domains}"
+def _case_name(label, restrict_pdf_to_comparable):
+    return f"{label}__restrict_{restrict_pdf_to_comparable}"
 
 
-def run_one(con, label, junctions_csv, hadas_format, restrict_pdf_to_comparable, use_representative_domains):
-    case_name = _case_name(label, restrict_pdf_to_comparable, use_representative_domains)
+def run_one(con, label, junctions_csv, hadas_format, restrict_pdf_to_comparable):
+    case_name = _case_name(label, restrict_pdf_to_comparable)
     case_dir = os.path.join(OUTPUT_ROOT, case_name)
     if os.path.exists(case_dir):
         shutil.rmtree(case_dir)
@@ -70,7 +65,6 @@ def run_one(con, label, junctions_csv, hadas_format, restrict_pdf_to_comparable,
             create_pdf=True,
             num_workers=1,
             restrict_pdf_to_comparable=restrict_pdf_to_comparable,
-            use_representative_domains=use_representative_domains,
             write_all_comparable=True,
         )
     finally:
@@ -97,8 +91,8 @@ def main():
     try:
         for label, junctions_csv, hadas_format in INPUT_FILES:
             print(f"\n=== {label} ({os.path.basename(junctions_csv)}) ===")
-            for restrict_pdf_to_comparable, use_representative_domains in FLAG_COMBINATIONS:
-                run_one(con, label, junctions_csv, hadas_format, restrict_pdf_to_comparable, use_representative_domains)
+            for restrict_pdf_to_comparable in FLAG_COMBINATIONS:
+                run_one(con, label, junctions_csv, hadas_format, restrict_pdf_to_comparable)
     finally:
         con.close()
 

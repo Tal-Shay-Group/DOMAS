@@ -18,6 +18,7 @@ from junction_analisys import (  # noqa: E402
     find_matching_junction_indices, get_aa_range, find_bp_range_for_domains,
     classify_domain_change, group_by_shared_names,
     select_most_like_canonical, DOMAIN_NAME_COLUMNS,
+    exon_pair_label, CDS_IN, CDS_PARTIAL, CDS_OUT, CDS_NONE,
 )
 
 # Setup logging to capture messages
@@ -1436,43 +1437,42 @@ def test_same_id_disjoint_positions_are_two_domains():
     assert _same_id_kept((10, 100), (300, 400)) == [(10, 100), (300, 400)]
 
 
-def test_frame_whose_only_typed_rows_are_sites_does_not_raise():
-    """Regression: while sites were dropped up front, a frame left with two or more
-    rows of NULL entry type had nothing for the ladder to rank, domain_entry_tiers()
-    returned None, and indexing the frame with `None == TIER_PRIMARY` raised
-    ValueError. _analyze_chunk() catches ValueError per cluster, so the whole
-    cluster - every transcript, including the rows recorded before the comparison -
-    vanished from the results. Two real leafcutter clusters were lost this way.
+def test_frame_of_member_db_and_site_rows_does_not_raise():
+    """Regression: a frame left with two or more rows of NULL entry type had nothing
+    for the ladder to rank, domain_entry_tiers() returned None, and indexing the
+    frame with `None == TIER_PRIMARY` raised ValueError. _analyze_chunk() catches
+    ValueError per cluster, so the whole cluster - every transcript, including the
+    rows recorded before the comparison - vanished from the results. Two real
+    leafcutter clusters were lost this way.
 
-    The site is dropped now, but the member-DB rows it sits among must still come
-    through rather than the call raising."""
+    Here one row does carry a type, so the filter runs; nothing in the frame is a
+    Domain or Repeat, so it must come back empty rather than raising."""
     from junction_analisys import filter_representative_domains
     df = pd.DataFrame([
         _typed_domain_row('G3DSA:1.10.238.10', None, 10, 80),
         _typed_domain_row('PTHR11216', None, 5, 200),
         _typed_domain_row('IPR018247', 'Conserved_site', 40, 52),
     ])
-    kept = filter_representative_domains(df)
-    assert set(kept['domain_id']) == {'G3DSA:1.10.238.10', 'PTHR11216'}
+    assert len(filter_representative_domains(df)) == 0
 
 
-def test_member_db_hit_is_the_fallback_where_interpro_has_no_domain():
-    """Tier 2 is what remains once the ignored types are gone: a protein whose
-    InterPro entries are all Family/site still reports its member-DB hits, and they
-    are the only reason it has any domains at all."""
+def test_member_db_hit_is_not_a_fallback_for_a_protein_without_domains():
+    """A protein whose InterPro entries are all Family/site has NO domains, even
+    where a member-DB signature covers part of it. Those signatures are not curated
+    structural units - InterPro types many of them as homologous superfamilies -
+    so nothing here is a domain to report a change in."""
     from junction_analisys import filter_representative_domains
     df = pd.DataFrame([
         _typed_domain_row('IPR000002', 'Family', 1, 500),
         _typed_domain_row('IPR000003', 'PTM', 45, 47),
         _typed_domain_row('PF00001', None, 30, 120),
     ])
-    kept = filter_representative_domains(df)
-    assert list(kept['domain_id']) == ['PF00001'], list(kept['domain_id'])
+    assert len(filter_representative_domains(df)) == 0
 
 
-def test_member_db_hit_still_yields_to_a_covering_domain():
-    """The tier-2 coverage rule is unchanged: a member-DB entry a Domain already
-    covers by a majority is redundant and goes."""
+def test_member_db_hits_go_whether_or_not_a_domain_covers_them():
+    """Not a coverage rule any more: the member-DB entry inside the Domain and the
+    one far away from it are both dropped, and only the InterPro Domain survives."""
     from junction_analisys import filter_representative_domains
     df = pd.DataFrame([
         _typed_domain_row('IPR000001', 'Domain', 10, 200),
@@ -1480,7 +1480,19 @@ def test_member_db_hit_still_yields_to_a_covering_domain():
         _typed_domain_row('PF00002', None, 400, 500),            # nothing covers this
     ])
     kept = filter_representative_domains(df)
-    assert set(kept['domain_id']) == {'IPR000001', 'PF00002'}, list(kept['domain_id'])
+    assert list(kept['domain_id']) == ['IPR000001'], list(kept['domain_id'])
+
+
+def test_repeat_entries_are_kept_beside_domain_entries():
+    """Repeat is the other curated structural type, and survives like Domain."""
+    from junction_analisys import filter_representative_domains
+    df = pd.DataFrame([
+        _typed_domain_row('IPR000001', 'Domain', 10, 200),
+        _typed_domain_row('IPR000004', 'Repeat', 300, 340),
+        _typed_domain_row('IPR000005', 'Homologous_superfamily', 1, 500),
+    ])
+    kept = filter_representative_domains(df)
+    assert list(kept['domain_id']) == ['IPR000001', 'IPR000004'], list(kept['domain_id'])
 
 
 # ---------------------------------------------------------------------------
@@ -1601,11 +1613,17 @@ def _cluster():
 
 
 def _grouped(unique_by_transcript):
+    """[(group index, transcript ids)] and the transcripts recorded as subsumed.
+
+    _group_by_unique_features() also returns each group's feature set, which the
+    caller needs for the rank label; the assertions here are about which
+    transcripts land in which group, so it is dropped.
+    """
     result = _cluster()
     groups = result._group_by_unique_features(
         {tid: frozenset(features) for tid, features in unique_by_transcript.items()})
     subsumed = sorted(tid for event, tid, *_ in result.events if event == 'subsumed_by_larger_event')
-    return groups, subsumed
+    return [(index, transcript_ids) for index, _features, transcript_ids in groups], subsumed
 
 
 def test_transcripts_adding_the_same_features_share_a_group():
@@ -1644,3 +1662,255 @@ def test_group_index_follows_the_features_not_dict_order():
 
 def test_no_comparable_transcripts_yields_no_groups():
     assert _grouped({}) == ([], [])
+
+
+# ---------------------------------------------------------------------------
+# The optional -extra_columns trio: rank, c_junction_in_cds, t_junction_in_cds
+#
+# rank names the canonical transcript's exons a junction joins, worked out from
+# the exon table rather than read from the input - so it is available whatever
+# the input format. The two CDS columns say whether the event's junctions fall
+# inside the coding sequence of the canonical and of the compared transcript.
+# ---------------------------------------------------------------------------
+
+def _labelled_exons(*exons):
+    """Exons as (order, start, end), for exon_pair_label()."""
+    orders, starts, ends = zip(*exons)
+    return pd.DataFrame({
+        'order_in_transcript': orders,
+        'genomic_start_tx': starts,
+        'genomic_end_tx': ends,
+    })
+
+
+_RANK_EXONS = _labelled_exons((1, 100, 200), (2, 300, 400), (3, 500, 600), (4, 700, 800))
+
+
+def test_exon_pair_label_names_both_exons_a_junction_joins():
+    assert exon_pair_label(_RANK_EXONS, (200, 300)) == 'E1_E2'
+
+
+def test_exon_pair_label_names_the_skipped_over_pair():
+    """The label is not restricted to adjacent exons - an exon-skipping junction
+    is exactly the case it has to name."""
+    assert exon_pair_label(_RANK_EXONS, (200, 500)) == 'E1_E3'
+
+
+def test_exon_pair_label_allows_the_same_1bp_tolerance_as_the_matcher():
+    assert exon_pair_label(_RANK_EXONS, (201, 299)) == 'E1_E2'
+
+
+def test_exon_pair_label_stars_a_boundary_that_is_no_exon_edge():
+    """An alternative splice site lands inside an exon or an intron, so it names
+    no exon of the reference - the side is written '*' rather than guessed at."""
+    assert exon_pair_label(_RANK_EXONS, (250, 300)) == '*_E2'
+    assert exon_pair_label(_RANK_EXONS, (200, 350)) == 'E1_*'
+    assert exon_pair_label(_RANK_EXONS, (250, 350)) == '*_*'
+
+
+def test_exon_pair_label_marks_the_last_exon():
+    """'E4Last', as the internal format's own rank column writes it: the junction
+    reaches the end of the transcript, not merely the exon numbered 4."""
+    assert exon_pair_label(_RANK_EXONS, (600, 700)) == 'E3_E4Last'
+
+
+def test_exon_pair_label_follows_the_order_the_feature_states():
+    """The internal format writes a minus-strand junction's higher coordinate
+    first and labels it in that order, so the label follows the feature's own
+    order rather than the genomic one."""
+    assert exon_pair_label(_RANK_EXONS, (300, 200)) == 'E2_E1'
+
+
+def test_exon_pair_label_without_exons_is_none():
+    assert exon_pair_label(_RANK_EXONS.iloc[0:0], (200, 300)) is None
+    assert exon_pair_label(None, (200, 300)) is None
+
+
+def _cds_cluster(spans, junctions, extra_columns=True):
+    from junction_analisys import ClusterAnalysisResult
+    result = ClusterAnalysisResult('clu_1', 'ENSG0', 'GENE')
+    result.canonical_transcript_id = 'CANON'
+    result.extra_columns = extra_columns
+    result.cds_spans = spans
+    result.junctions = junctions
+    result.canonical_exons = _RANK_EXONS
+    return result
+
+
+def test_junction_inside_the_cds_is_reported_as_such():
+    result = _cds_cluster({'T1': (100, 900)}, [(200, 300)])
+    assert result._junctions_in_cds('T1', {0}) == CDS_IN
+
+
+def test_junction_wholly_outside_the_cds_is_reported_as_such():
+    """Both splice sites downstream of the stop codon: the event is in the 3'UTR
+    and cannot touch the protein."""
+    result = _cds_cluster({'T1': (100, 250)}, [(300, 400)])
+    assert result._junctions_in_cds('T1', {0}) == CDS_OUT
+
+
+def test_junction_straddling_a_cds_boundary_is_partial():
+    """The stop codon falls between the two splice sites."""
+    result = _cds_cluster({'T1': (100, 350)}, [(300, 400)])
+    assert result._junctions_in_cds('T1', {0}) == CDS_PARTIAL
+
+
+def test_a_group_mixing_inside_and_outside_junctions_is_partial():
+    result = _cds_cluster({'T1': (100, 900)}, [(200, 300), (1000, 1100)])
+    assert result._junctions_in_cds('T1', {0}) == CDS_IN
+    assert result._junctions_in_cds('T1', {1}) == CDS_OUT
+    assert result._junctions_in_cds('T1', {0, 1}) == CDS_PARTIAL
+
+
+def test_transcript_without_a_protein_has_no_cds_to_fall_in():
+    """_cds_spans_by_transcript() leaves a non-coding transcript out entirely -
+    DoChaP fills its cds_start/cds_end with the transcript's own bounds, which
+    would otherwise read as coding end to end."""
+    result = _cds_cluster({'T1': (100, 900)}, [(200, 300)])
+    assert result._junctions_in_cds('NONCODING', {0}) == CDS_NONE
+
+
+def test_cds_columns_stay_empty_without_the_extra_columns_flag():
+    result = _cds_cluster({'T1': (100, 900)}, [(200, 300)], extra_columns=False)
+    assert result._junctions_in_cds('T1', {0}) is None
+    assert result._rank_label({0}) is None
+
+
+def test_rank_label_joins_the_groups_junctions_and_drops_repeats():
+    result = _cds_cluster({}, [(200, 300), (200, 500), (200, 300)])
+    result.canonical_exons = _RANK_EXONS
+    assert result._rank_label({0}) == 'E1_E2'
+    assert result._rank_label({0, 1}) == 'E1_E2; E1_E3'
+    # The same exon pair reached twice is named once.
+    assert result._rank_label({0, 2}) == 'E1_E2'
+
+
+def _extra_columns_fixture(cds_end):
+    """A cluster whose sole comparable transcript skips canonical's middle exon,
+    with the compared transcript's CDS ending at `cds_end`.
+
+    Two junctions, as a real cluster has: the canonical carries the first, and
+    only the skipping transcript carries the second - so that second one alone
+    defines the group, and the rank names it.
+    """
+    df_gene_transcripts = pd.DataFrame({
+        'transcript_ensembl_id': ['CANON', 'ENST_SKIP'],
+        'transcript_refseq_id': [None, None],
+        'protein_ensembl_id': ['ENSP_C', 'ENSP_S'],
+        'protein_refseq_id': [None, None],
+        'canonical': [1, 0],
+        'cds_start': [100, 100],
+        'cds_end': [900, cds_end],
+    })
+
+    canonical_exons = _three_exon_df((1, 100, 200), (2, 300, 400), (3, 500, 600))
+    skipping_exons = _two_exon_df((1, 100, 200), (2, 500, 600))
+    for df in (canonical_exons, skipping_exons):
+        df['abs_start_CDS'] = [1 + 100 * i for i in range(len(df))]
+        df['abs_end_CDS'] = [100 + 100 * i for i in range(len(df))]
+
+    exons_by_id = {'CANON': canonical_exons, 'ENST_SKIP': skipping_exons}
+    empty_domains = pd.DataFrame(columns=['AA_start', 'AA_end'] + DOMAIN_NAME_COLUMNS)
+
+    cluster_result = ClusterAnalysisResult('cluster_1', 'ENSG_TEST', 'TESTGENE')
+    cluster_result.junctions = [(200, 300), (200, 500)]
+    cluster_result.extra_columns = True
+    cluster_result.analyze(
+        df_gene_transcripts, canonical_transcript_ids={'CANON'},
+        exon_lookup=lambda tid: exons_by_id[tid],
+        domain_lookup=lambda tid: empty_domains,
+    )
+    return cluster_result.get_results_df()
+
+
+def test_analyze_fills_the_three_columns_for_the_compared_row():
+    """End to end through analyze(): the exon-skipping junction joins canonical's
+    exons 1 and 3, and lies inside both transcripts' coding sequence."""
+    df_results = _extra_columns_fixture(cds_end=900)
+    compared = df_results[df_results['transcript_id'] == 'ENST_SKIP'].iloc[0]
+    assert compared['rank'] == 'E1_E3Last'
+    assert compared['c_junction_in_cds'] == CDS_IN
+    assert compared['t_junction_in_cds'] == CDS_IN
+
+
+def test_the_two_cds_columns_are_measured_against_their_own_transcript():
+    """Same junction, different answers: it sits inside the canonical's CDS but
+    past the end of the compared transcript's."""
+    df_results = _extra_columns_fixture(cds_end=150)
+    compared = df_results[df_results['transcript_id'] == 'ENST_SKIP'].iloc[0]
+    assert compared['c_junction_in_cds'] == CDS_IN
+    assert compared['t_junction_in_cds'] == CDS_OUT
+
+
+# ---------------------------------------------------------------------------
+# transcript_not_chosen: the group's other transcripts leave a trace
+# ---------------------------------------------------------------------------
+
+def _two_candidate_group(write_all_comparable=False):
+    """A group of two transcripts with identical exon structure, so both carry the
+    same unique junction and the selection rule has to pick between them."""
+    df_gene_transcripts = pd.DataFrame({
+        'transcript_ensembl_id': ['CANON', 'ENST_AAA', 'ENST_BBB'],
+        'transcript_refseq_id': [None, None, None],
+        'canonical': [1, 0, 0],
+        'cds_start': [0, 0, 0],
+        'cds_end': [1000, 1000, 1000],
+    })
+
+    canonical_exons = _three_exon_df((1, 100, 200), (2, 300, 400), (3, 500, 600))
+    candidate_exons = _two_exon_df((1, 100, 200), (2, 500, 600))
+    for df in (canonical_exons, candidate_exons):
+        df['abs_start_CDS'] = [1 + 100 * i for i in range(len(df))]
+        df['abs_end_CDS'] = [100 + 100 * i for i in range(len(df))]
+
+    exons_by_id = {'CANON': canonical_exons,
+                   'ENST_AAA': candidate_exons, 'ENST_BBB': candidate_exons}
+    empty_domains = pd.DataFrame(columns=['AA_start', 'AA_end'] + DOMAIN_NAME_COLUMNS)
+
+    cluster_result = ClusterAnalysisResult('cluster_1', 'ENSG_TEST', 'TESTGENE')
+    cluster_result.junctions = [(200, 300), (200, 500)]
+    cluster_result.analyze(
+        df_gene_transcripts, canonical_transcript_ids={'CANON'},
+        exon_lookup=lambda tid: exons_by_id[tid],
+        domain_lookup=lambda tid: empty_domains,
+        write_all_comparable=write_all_comparable,
+    )
+    return cluster_result.get_results_df()
+
+
+def test_the_transcript_the_rule_passed_over_is_recorded():
+    """One of the two is compared; the other is not silently dropped - it is
+    written as transcript_not_chosen, keeping its group."""
+    df_results = _two_candidate_group()
+    not_chosen = df_results[df_results['event'] == 'transcript_not_chosen']
+    compared = df_results[df_results['event'] == 'no_domains_in_region']
+
+    assert len(not_chosen) == 1 and len(compared) == 1
+    assert not_chosen['transcript_id'].iloc[0] != compared['transcript_id'].iloc[0]
+    # Both belong to the one group, so the row says which event it sat in.
+    assert not_chosen['group'].iloc[0] == compared['group'].iloc[0] == 1
+
+
+def test_no_transcript_is_passed_over_under_write_all_comparable():
+    """Every transcript of the group is compared there, so the event never applies."""
+    df_results = _two_candidate_group(write_all_comparable=True)
+    assert (df_results['event'] == 'transcript_not_chosen').sum() == 0
+    assert (df_results['event'] == 'no_domains_in_region').sum() == 2
+
+
+def test_transcript_not_chosen_counts_as_a_non_comparison():
+    """So -omit_non_comparable drops it and selected_comparable_rows() never
+    mistakes it for a comparison of its own."""
+    from junction_analisys import NON_COMPARISON_EVENTS
+    assert 'transcript_not_chosen' in NON_COMPARISON_EVENTS
+
+
+def test_empty_domain_frame_is_returned_untouched():
+    """Regression: an empty frame carrying the right columns has nothing to rank,
+    so domain_entry_tiers() returns None and `None == TIER_PRIMARY` collapses to a
+    bare False - not a valid index. It used to be caught by the `type.isna().all()`
+    guard, vacuously true on an empty frame, which the Domain/Repeat-only rule
+    removed. Every protein with no RepresentativeDomains entry reaches this."""
+    from junction_analisys import filter_representative_domains
+    empty = pd.DataFrame(columns=['domain_id', 'type', 'AA_start', 'AA_end'])
+    assert len(filter_representative_domains(empty)) == 0

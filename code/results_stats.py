@@ -115,6 +115,9 @@ UNANALYZABLE_TYPES = [
     # cluster, so the larger event speaks for the region and this transcript is
     # never compared - nothing to analyze.
     "subsumed_by_larger_event",
+    # In a group that was compared, but not the transcript the selection rule
+    # picked to represent it - so it carries no comparison of its own.
+    "transcript_not_chosen",
 ]
 
 ANALYZED_TYPES = [
@@ -157,7 +160,7 @@ def _warn(message):
 # length mismatch (e.g. forgetting to add a color when a new event type is
 # added) would otherwise make zip() truncate and shift every later color by
 # one, shifting every later colour by one.
-_UNANALYZABLE_COLORS = ["#8C8C8C", "#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2", "#937860", "#CCB974", "#64B5CD", "#B07AA1"]
+_UNANALYZABLE_COLORS = ["#8C8C8C", "#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2", "#937860", "#CCB974", "#64B5CD", "#B07AA1", "#3E8E8E"]
 _ANALYZED_COLORS = ["#C00000", "#2E8B57", "#FF8C00", "#FFC000", "#70AD47", "#7030A0", "#4472C4", "#A6761D", "#E7298A"]
 assert len(_UNANALYZABLE_COLORS) == len(UNANALYZABLE_TYPES), \
     f"event_color(): {len(_UNANALYZABLE_COLORS)} unanalyzable colors for {len(UNANALYZABLE_TYPES)} UNANALYZABLE_TYPES"
@@ -211,6 +214,7 @@ SHORT_LABELS = {
     "increased_domain_number": "more domains",
     "domain swap": "swap",
     "transcript_doesnt_have_features": "lacks features",
+    "transcript_not_chosen": "not chosen",
 }
 
 
@@ -285,6 +289,7 @@ RESULTS_CSV_DTYPES = {
     "gene_symbol": "category",
     "specie": "category",
     "event_type": "category",
+    "domain_id": "category",
     "domain_name": "category",
     "event": "category",
     "transcript_id": "category",
@@ -822,7 +827,21 @@ def _mixed_combo_sets(df):
         representative_df.groupby(group_cols, observed=True, dropna=False)["event_type"]
         .apply(lambda s: frozenset(s)).reindex(analyzable_keys).dropna()
     )
-    return un_sets, an_sets
+    # Forced to object dtype: `event_type` is a category, and groupby().apply()
+    # over an EMPTY selection hands the categorical dtype straight back rather
+    # than a Series of frozensets. Both callers then filter with `.apply(len) > 1`,
+    # and `>` on an unordered categorical raises TypeError instead of yielding an
+    # empty mask. A run where every cluster is unanalyzable - ordinary for a small
+    # input under the Domain/Repeat-only rule - produces exactly that empty frame.
+    return _as_object_series(un_sets), _as_object_series(an_sets)
+
+
+def _as_object_series(series):
+    """`series` with a plain object dtype, so a set-valued Series that came back
+    empty (and therefore still categorical) compares like the populated case."""
+    if isinstance(series.dtype, pd.CategoricalDtype):
+        return series.astype(object)
+    return series
 
 
 def mixed_combinations(df, label, top_n=15):
@@ -1049,26 +1068,26 @@ def domain_frequency(df, label, top_n=20):
     """
     Show the top_n most frequent domains overall, then break each down by
     which event types they appear in. Returns the top_domains Series
-    (domain_name -> count), or None if there's no domain data - callers
+    (domain_id -> count), or None if there's no domain data - callers
     that want InterPro descriptions for these domains (see
     fetch_domain_descriptions) do that separately, rather than this
     function doing it inline, so that table can be positioned wherever
     makes sense in a report rather than always right after this chart.
     """
     # Only rows where a domain is recorded
-    domain_df = df[df["domain_name"].notna() & (df["domain_name"] != "")]
+    domain_df = df[df["domain_id"].notna() & (df["domain_id"] != "")]
 
     if domain_df.empty:
         print(f"\nNo domain data found for {label}.")
         return None
 
-    top_domains = domain_df["domain_name"].value_counts().head(top_n)
+    top_domains = domain_df["domain_id"].value_counts().head(top_n)
 
     print(f"\n{'='*70}")
     print(f"TOP {top_n} DOMAINS — {label}")
     print(f"{'='*70}")
     for domain, count in top_domains.items():
-        breakdown = domain_df[domain_df["domain_name"] == domain]["event_type"].value_counts()
+        breakdown = domain_df[domain_df["domain_id"] == domain]["event_type"].value_counts()
         breakdown_str = ", ".join(f"{et}: {c}" for et, c in breakdown.items())
         print(f"  {domain:<30s}  {count:3d}  [{breakdown_str}]")
 
@@ -1083,7 +1102,7 @@ def domain_frequency(df, label, top_n=20):
             species_ranks = {}
             for sp in species_present:
                 sp_rank_of = {
-                    d: i + 1 for i, d in enumerate(domain_df[domain_df["specie"] == sp]["domain_name"]
+                    d: i + 1 for i, d in enumerate(domain_df[domain_df["specie"] == sp]["domain_id"]
                                                     .value_counts().index)
                 }
                 species_ranks[sp] = [sp_rank_of.get(d) for d in top_domains.index]
@@ -1102,13 +1121,13 @@ def domain_frequency(df, label, top_n=20):
     y = np.arange(len(top_domains))
     lefts = np.zeros(len(top_domains))
     event_types_present = sorted(
-        domain_df[domain_df["domain_name"].isin(top_domains.index)]["event_type"].unique(),
+        domain_df[domain_df["domain_id"].isin(top_domains.index)]["event_type"].unique(),
         key=event_sort_key
     )
 
     for et in event_types_present:
         widths = [
-            (domain_df[(domain_df["domain_name"] == d) & (domain_df["event_type"] == et)].shape[0])
+            (domain_df[(domain_df["domain_id"] == d) & (domain_df["event_type"] == et)].shape[0])
             for d in top_domains.index
         ]
         ax.barh(y, widths, left=lefts, color=event_color(et), label=display_label(et), edgecolor="white")
@@ -1141,7 +1160,7 @@ def domain_frequency(df, label, top_n=20):
 
 
 def _species_domain_counts(domain_df, specie):
-    """domain_name -> occurrence count for one specie's rows, domains with 0 occurrences excluded.
+    """domain_id -> occurrence count for one specie's rows, domains with 0 occurrences excluded.
 
     value_counts() on a categorical column includes every category at count
     0 (even ones absent from this specie's rows entirely, since domain_name
@@ -1149,7 +1168,7 @@ def _species_domain_counts(domain_df, specie):
     membership below means "actually occurs for this specie", not "exists as
     a category somewhere in the file".
     """
-    counts = domain_df[domain_df["specie"] == specie]["domain_name"].value_counts()
+    counts = domain_df[domain_df["specie"] == specie]["domain_id"].value_counts()
     return counts[counts > 0]
 
 
@@ -1175,7 +1194,7 @@ def domain_species_rank_scatter(df, label, top_domains=None):
     given) - so the report also has a version lined up with the bar chart
     directly above it.
     """
-    domain_df = df[df["domain_name"].notna() & (df["domain_name"] != "")]
+    domain_df = df[df["domain_id"].notna() & (df["domain_id"] != "")]
     if domain_df.empty:
         return
     if "specie" not in domain_df.columns:
@@ -1282,9 +1301,9 @@ def domain_cluster_species_counts(df, top_domains, label):
     if len(species_present) < 2:
         return
 
-    domain_df = df[df["domain_name"].isin(top_domains.index)]
+    domain_df = df[df["domain_id"].isin(top_domains.index)]
     cluster_counts = {
-        sp: domain_df[domain_df["specie"] == sp].groupby("domain_name")["event"]
+        sp: domain_df[domain_df["specie"] == sp].groupby("domain_id")["event"]
             .nunique().reindex(top_domains.index, fill_value=0)
         for sp in species_present
     }

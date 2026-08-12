@@ -945,25 +945,21 @@ def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_pr
     return merged_df[REPRESENTATIVE_DOMAINS_COLUMNS]
 
 
-def get_domains_db(con, transcript_ids, use_representative_domains=False):
+def get_domains_db(con, transcript_ids):
     """
-    Domain source used by JunctionsAnalysis.analyze_junctions().
+    Domain source used by JunctionsAnalysis.analyze_junctions(): RepresentativeDomains,
+    and nowhere else.
 
-    use_representative_domains=False (default): unchanged - domains come from
-    DomainEvent/DomainType exactly as get_transcript_domains_db() always has, so the
-    existing algorithm runs without any change.
+    A protein with no entry there has no domains. It does NOT fall back to
+    DomainEvent/DomainType, which the analysis no longer reads at all: those tables
+    carry different coordinates and a different notion of what a domain is, and
+    state no InterPro entry type, so nothing in them can be ranked by the
+    Domain/Repeat rule the analysis applies. A protein that drops out is visible as
+    no_domains_in_region, not as a silent substitution.
 
-    use_representative_domains=True: domains come from RepresentativeDomains and
-    nowhere else. A protein with no entry there has no domains, rather than falling
-    back to DomainEvent/DomainType: the two sources carry different coordinates and
-    different notions of what a domain is, so mixing them within one run makes a
-    comparison's result depend on which source each side happened to be drawn from.
-    A protein that drops out is visible as no_domains_in_region, not as a silent
-    substitution.
+    get_transcript_domains_db() still exists for the DB-inspection scripts
+    (check_db.py, domain_contribution_analysis.py); it is not part of the analysis.
     """
     df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
-    if use_representative_domains:
-        return get_representative_domains_db(con, transcript_ids, df_transcript=df_transcript,
-                                             df_protein=df_protein)
-    return get_transcript_domains_db(con, transcript_ids, df_transcript=df_transcript,
-                                     df_protein=df_protein)
+    return get_representative_domains_db(con, transcript_ids, df_transcript=df_transcript,
+                                         df_protein=df_protein)

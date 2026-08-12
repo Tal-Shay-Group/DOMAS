@@ -105,17 +105,46 @@ def _drop_undrawable_domains(df_domains):
     return df_domains[keep].reset_index(drop=True)
 
 
+def _keep_primary_entries(df_domains):
+    """Keep only the InterPro Domain and Repeat entries - tier 1 of the ladder.
+
+    The same set filter_representative_domains() compares, so the drawing and the
+    events table never disagree about which domains exist. Applied here rather
+    than at draw time so the protein axis, the row layout and the figure height
+    are all sized to what is actually drawn.
+
+    A frame the ladder cannot rank - DomainEvent/DomainType rows, which state no
+    entry type - is returned untouched: there is no type to select on, and
+    filtering on an absent column would silently blank those transcripts.
+    """
+    if df_domains is None or len(df_domains) == 0:
+        return df_domains
+    # Imported here, not at module scope: junction_analisys imports this module.
+    from junction_analisys import domain_entry_tiers, TIER_PRIMARY
+    tiers = domain_entry_tiers(df_domains)
+    if tiers is None:
+        return df_domains
+    keep = (tiers == TIER_PRIMARY).to_numpy()
+    if keep.all():
+        return df_domains
+    return df_domains[keep].reset_index(drop=True)
 
 
-def prepare_gene_data_bulk(conn, gene_ensembl_ids, use_representative_domains=False):
+def _drawable_domains(df_domains):
+    """The domains a figure draws: those that can be placed on the protein axis
+    (_drop_undrawable_domains) and that the figure admits (_keep_primary_entries)."""
+    return _keep_primary_entries(_drop_undrawable_domains(df_domains))
+
+
+
+
+def prepare_gene_data_bulk(conn, gene_ensembl_ids):
     """
     Bulk-load gene/transcript/exon/protein/domain data for many genes at once.
 
-    use_representative_domains=False (default): unchanged - domains come from
-    DomainEvent/DomainType exactly as before.
-    use_representative_domains=True: a protein's domains come from the
-    RepresentativeDomains table and nowhere else; a protein with no entry there
-    has no domains, so the drawing matches the set the analysis compared.
+    Domains come from RepresentativeDomains and nowhere else; a protein with no
+    entry there has no domains, so the drawing matches the set the analysis
+    compared. DomainEvent/DomainType are not read - the analysis does not use them.
 
     Returns a dict keyed by lowercased gene ensembl id, where each value is a dict
     with 'gene_data' (a Series, as `df_gene.iloc[0]`) and 'transcripts' (a list
@@ -195,13 +224,11 @@ def prepare_gene_data_bulk(conn, gene_ensembl_ids, use_representative_domains=Fa
     proteins_by_transcript = {k: v for k, v in df_proteins_all.groupby('combined_id')} if len(df_proteins_all) else {}
     domains_by_protein = {k: v for k, v in df_domains_all.groupby('protein_ensembl_id')} if len(df_domains_all) else {}
 
-    if use_representative_domains:
-        # RepresentativeDomains and nothing else - a protein absent from that table
-        # is drawn with no domains rather than with its DomainEvent/DomainType ones,
-        # so the PDF shows the same domain set the analysis compared.
-        domains_by_protein = {}
+    # RepresentativeDomains and nothing else - a protein absent from that table is
+    # drawn with no domains, so the PDF shows the domain set the analysis compared.
+    domains_by_protein = {}
 
-    if use_representative_domains and protein_ids and 'protein_interpro_id' in df_proteins_all.columns:
+    if protein_ids and 'protein_interpro_id' in df_proteins_all.columns:
         df_protein_interpro = df_proteins_all[['protein_ensembl_id', 'protein_interpro_id']].dropna(subset=['protein_interpro_id'])
         df_protein_interpro = df_protein_interpro[df_protein_interpro.protein_interpro_id.str.strip() != '']
         interpro_ids = df_protein_interpro['protein_interpro_id'].unique().tolist()
@@ -240,7 +267,7 @@ def prepare_gene_data_bulk(conn, gene_ensembl_ids, use_representative_domains=Fa
             return pd.DataFrame()
         protein_id = df_protein.iloc[0]['protein_ensembl_id']
         domains = domains_by_protein.get(protein_id, pd.DataFrame(columns=domains_columns)).reset_index(drop=True)
-        return _drop_undrawable_domains(domains)
+        return _drawable_domains(domains)
 
     transcript_groups = {k: v for k, v in df_transcripts.groupby('gene_ensembl_id', sort=False)} if len(df_transcripts) else {}
 
@@ -262,7 +289,7 @@ def prepare_gene_data_bulk(conn, gene_ensembl_ids, use_representative_domains=Fa
 class GeneVisualization:
     """Class to create gene visualization similar to DoChap-web."""
     
-    def __init__(self, conn, gene_name, preloaded=None, use_representative_domains=False):
+    def __init__(self, conn, gene_name, preloaded=None):
         """
         Initialize gene visualization.
 
@@ -275,21 +302,13 @@ class GeneVisualization:
         preloaded : dict | None
             Optional pre-fetched data for this gene, as returned per-gene by
             `prepare_gene_data_bulk()`. When provided, `load_gene_data()` uses
-            it instead of querying the database, and use_representative_domains
-            has no effect here (it only affects the DB path in `_load_domains` -
-            pass it to `prepare_gene_data_bulk()` instead to affect preloaded data).
-        use_representative_domains : bool
-            If True, a protein's domains are loaded from the RepresentativeDomains
-            table only; a protein with no entry there has no domains. If False
-            (default), domains come from DomainEvent/DomainType only, exactly as
-            before.
+            it instead of querying the database.
         """
         self.conn = conn
         self.gene_name = gene_name
         self.gene_data = None
         self.transcripts = []
         self.colors = {}
-        self.use_representative_domains = use_representative_domains
         self.color_index = 0
         self._preloaded = preloaded
         self.species_hint = None
@@ -388,10 +407,10 @@ class GeneVisualization:
         """Load protein domains for a transcript, matched by either its ensembl or
         refseq id (a RefSeq-only transcript has no ensembl id).
 
-        If self.use_representative_domains is True, domains come from the
-        RepresentativeDomains table only; a protein with no entry there has no
-        domains. If False (default), domains come from DomainEvent/DomainType only,
-        exactly as before.
+        Domains come from RepresentativeDomains only; a protein with no entry
+        there has no domains. DomainEvent/DomainType are not read - the analysis
+        does not use them, so drawing from them would show a set no comparison
+        could refer to.
         """
         # Get protein ID
         protein_query = """
@@ -403,33 +422,18 @@ class GeneVisualization:
         if len(df_protein) == 0:
             return pd.DataFrame()
 
-        protein_id = df_protein.iloc[0]['protein_ensembl_id']
-
-        if self.use_representative_domains:
-            # RepresentativeDomains and nothing else: a protein with no entry there
-            # is drawn with no domains, matching what the analysis compared.
-            df_rep = pd.DataFrame()
-            protein_interpro_id = df_protein.iloc[0].get('protein_interpro_id')
-            if pd.notna(protein_interpro_id) and str(protein_interpro_id).strip():
-                rep_query = "SELECT * FROM RepresentativeDomains WHERE protein_interpro_id = ?"
-                try:
-                    df_rep = pd.read_sql_query(rep_query, self.conn, params=[protein_interpro_id])
-                except (sqlite3.OperationalError, pd.errors.DatabaseError):
-                    df_rep = pd.DataFrame()
-                df_rep = _representative_domains_to_domain_columns(df_rep)
-            if len(df_rep) == 0:
-                return pd.DataFrame()
-            return _drop_undrawable_domains(df_rep.reset_index(drop=True))
-
-        # Get domain events
-        domain_query = """
-            SELECT de.*, dt.*
-            FROM DomainEvent de
-            JOIN DomainType dt ON de.type_id = dt.type_id
-            WHERE de.protein_ensembl_id = ?
-            ORDER BY de.AA_start
-        """
-        return _drop_undrawable_domains(pd.read_sql_query(domain_query, self.conn, params=[protein_id]))
+        df_rep = pd.DataFrame()
+        protein_interpro_id = df_protein.iloc[0].get('protein_interpro_id')
+        if pd.notna(protein_interpro_id) and str(protein_interpro_id).strip():
+            rep_query = "SELECT * FROM RepresentativeDomains WHERE protein_interpro_id = ?"
+            try:
+                df_rep = pd.read_sql_query(rep_query, self.conn, params=[protein_interpro_id])
+            except (sqlite3.OperationalError, pd.errors.DatabaseError):
+                df_rep = pd.DataFrame()
+            df_rep = _representative_domains_to_domain_columns(df_rep)
+        if len(df_rep) == 0:
+            return pd.DataFrame()
+        return _drawable_domains(df_rep.reset_index(drop=True))
     
     def _assign_exon_colors(self):
         """Assign colors to unique exons across all transcripts based on genomic location."""
@@ -507,6 +511,23 @@ class GeneVisualization:
         protein_text = str(protein_id).strip()
         return bool(protein_text) and protein_text.lower() != 'nan'
 
+    def _transcript_has_protein(self, transcript):
+        """True when DoChaP annotates a protein for this transcript, by either id.
+
+        Not _transcript_produces_protein(), which reads the ensembl id alone: a
+        RefSeq-only transcript (XM_/XP_) has a protein under protein_refseq_id and
+        would otherwise read as non-coding. Same test as the analysis's
+        coding_by_transcript.
+        """
+        for column in ('protein_ensembl_id', 'protein_refseq_id'):
+            value = transcript['info'].get(column)
+            if value is None or pd.isna(value):
+                continue
+            text = str(value).strip()
+            if text and text.lower() not in ('nan', 'none'):
+                return True
+        return False
+
     def _transcript_has_domains(self, transcript):
         """Return True when transcript protein has at least one domain row."""
         return len(transcript['domains']) > 0
@@ -519,6 +540,71 @@ class GeneVisualization:
             (pd.notna(ensembl_id) and ensembl_id in transcript_ids)
             or (pd.notna(refseq_id) and refseq_id in transcript_ids)
         )
+
+    def _transcript_ids(self, transcript):
+        """A transcript's ensembl and refseq ids, the pair every match here is made
+        on - DOMAS keys a transcript by whichever of the two it has."""
+        return [i for i in (transcript['info'].get('transcript_ensembl_id'),
+                            transcript['info'].get('transcript_refseq_id'))
+                if i is not None and pd.notna(i)]
+
+    def _analysis_for(self, transcript, by_transcript):
+        """The analysis's entry for this transcript, or None where it has none -
+        a transcript the analysis never evaluated, or a standalone PDF with no
+        analysis at all. Keyed by either id, as the analysis keys transcripts."""
+        if not by_transcript:
+            return None
+        for transcript_id in self._transcript_ids(transcript):
+            if transcript_id in by_transcript:
+                return by_transcript[transcript_id]
+        return None
+
+    def _transcript_reading_order(self, df_results, canonical_transcript_id=None):
+        """Sort key putting the figure in the order the analysis reasons about it:
+        the canonical transcript first, then the event groups in order, and within
+        a group the transcript the selection rule picked - most-like-canonical
+        ahead of longest-CDS - ahead of the ones it passed over. Transcripts
+        belonging to no group (no unique feature, or not carrying the event at all)
+        come last.
+
+        `canonical_transcript_id` is the transcript DOMAS compared against, which
+        is not always the one the DB flags: a gene can carry two canonical
+        transcripts - one flagged by RefSeq and one by Ensembl - and _resolve_
+        canonical() picks between them. Sorting on the DB flag alone drew the
+        other one first and left the actual reference in the middle of the figure,
+        unmarked. Falls back to the flag where no id is given.
+        """
+        rows_by_id = {}
+        if df_results is not None and 'transcript_id' in df_results.columns:
+            for transcript_id, rows in df_results.groupby('transcript_id'):
+                rows_by_id[transcript_id] = rows
+
+        def key(transcript):
+            ids = self._transcript_ids(transcript)
+            if canonical_transcript_id is not None:
+                is_canonical = canonical_transcript_id in ids
+            else:
+                is_canonical = bool(transcript['info'].get('canonical'))
+            if is_canonical:
+                return (0, 0, 0, '')
+
+            group, rank = None, 2
+            for transcript_id in ids:
+                rows = rows_by_id.get(transcript_id)
+                if rows is None or len(rows) == 0:
+                    continue
+                if 'group' in rows.columns and rows['group'].notna().any():
+                    value = rows['group'].dropna().min()
+                    group = value if group is None else min(group, value)
+                if rows.get('is_most_like_canonical') is not None and rows['is_most_like_canonical'].any():
+                    rank = min(rank, 0)
+                elif rows.get('is_longest_cds') is not None and rows['is_longest_cds'].any():
+                    rank = min(rank, 1)
+            # No group: drawn after every group, in the same relative order as before.
+            return (1, float(group) if group is not None else float('inf'), rank,
+                    ids[0] if ids else '')
+
+        return key
 
     def _compute_domain_label_positions(self, label_items, axis_max, base_y, lane_step=0.08, lanes=4):
         """Assign below-domain label positions across lanes to reduce overlap."""
@@ -691,8 +777,11 @@ class GeneVisualization:
             transcript['exons'], pairs, strand=strand, feature_types=feature_types)
         return [junction_items[keep_positions[i]] for i in sorted(matched)]
 
-    def _get_matching_junctions(self, transcript, df_junction):
-        """Return only transcript-relevant junctions for display."""
+    def _junction_items(self, df_junction):
+        """The cluster's features as drawable items, before any per-transcript
+        selection. Split out of _get_matching_junctions() so a caller holding the
+        analysis's own answer can select from the same items instead of matching
+        them again."""
         normalized = self._normalize_junction_df(df_junction)
         if normalized is None or len(normalized) == 0:
             return []
@@ -716,7 +805,14 @@ class GeneVisualization:
                                  else utils.FEATURE_JUNCTION),
             })
 
-        return self._filter_junctions_for_transcript(transcript, items)
+        return items
+
+    def _get_matching_junctions(self, transcript, df_junction):
+        """The features this transcript carries, matched here. Used where no
+        analysis result is available - a standalone PDF, or a transcript the
+        analysis never evaluated."""
+        return self._filter_junctions_for_transcript(
+            transcript, self._junction_items(df_junction))
 
     def _draw_junction_table(self, ax, df_junction):
         """Draw a compact first-page table for provided junction metadata."""
@@ -792,7 +888,21 @@ class GeneVisualization:
         table.auto_set_font_size(False)
         table.set_fontsize(5.5)
 
+        # Relative widths, normalised over the columns actually present (the
+        # optional ones come and go with the run's flags). The identifying
+        # columns are what a reader scans; the counts and lengths are at most a
+        # few characters and were getting the same share as a transcript id.
+        weights = {
+            'event': 3.4, 'transcript_id': 3.4, 'domain_id': 1.9, 'rank': 1.5,
+            'group': 0.6,
+            'c_domain_length': 0.85, 't_domain_length': 0.85,
+            'c_domains_number': 0.85, 't_domains_number': 0.85,
+            'c_junction_in_cds': 1.0, 't_junction_in_cds': 1.0,
+        }
+        total = sum(weights.get(name, 1.0) for name in column_names)
+
         for (row, col), cell in table.get_celld().items():
+            cell.set_width(weights.get(column_names[col], 1.0) / total)
             cell.set_linewidth(0.6)
             cell.set_edgecolor('#888888')
             if row == 0:
@@ -841,7 +951,9 @@ class GeneVisualization:
     def create_pdf(self, output_file='gene_visualization.pdf', transcripts_per_page=4,
                    protein_only=False, domains_only=False, df_junction=None,
                    df_results=None, show_canonical_non_relevant_junctions=True,
-                   transcript_ids=None, no_comparison_note=None):
+                   transcript_ids=None, no_comparison_note=None,
+                   canonical_transcript_id=None, analysis_domains=None,
+                   analysis_features=None):
         """
         Create PDF visualization of the gene, one page per transcripts_per_page transcripts.
         Each page has its own axis scales at the top so they never overlap with transcript rows.
@@ -887,9 +999,11 @@ class GeneVisualization:
 
         junction_display_df = self._prepare_junction_display_df(df_junction)
 
-        # Skip empty/invalid transcript entries, canonical transcript first
+        # Skip empty/invalid transcript entries, then order them the way the
+        # analysis reasons about them (see _transcript_reading_order).
         valid_transcripts = [t for t in self.transcripts if len(t['exons']) > 0]
-        valid_transcripts.sort(key=lambda t: 0 if t['info'].get('canonical') else 1)
+        valid_transcripts.sort(
+            key=self._transcript_reading_order(df_results, canonical_transcript_id))
         if transcript_ids is not None:
             valid_transcripts = [t for t in valid_transcripts if self._transcript_matches_ids(t, transcript_ids)]
         if protein_only:
@@ -939,7 +1053,8 @@ class GeneVisualization:
         # demoted figures would leave an unmarked domain meaning either "kept" or
         # "unrankable", with no way to tell which.
         ladder_marks_by_transcript = {
-            id(t): self.domain_ladder_marks(t) for t in valid_transcripts
+            id(t): self.domain_ladder_marks(t, self._analysis_for(t, analysis_domains))
+            for t in valid_transcripts
         }
         marks_active = any(v for v in ladder_marks_by_transcript.values())
         # Under DomainEvent/DomainType the rows state no entry type, so the ladder
@@ -1100,6 +1215,7 @@ class GeneVisualization:
                         genomic_end,
                         df_junction=junction_display_df,
                         show_canonical_non_relevant_junctions=show_canonical_non_relevant_junctions,
+                        analysis_features=analysis_features,
                     )
 
                     ax_protein = fig.add_subplot(gs[grow:grow + 2, 1])
@@ -1121,6 +1237,13 @@ class GeneVisualization:
                         protein_name = 'N/A'
                     rows_for_transcript = transcript_results[i]
                     tie_break_tags = []
+                    # Named first, so the reference the whole figure is measured
+                    # against is identifiable rather than merely first.
+                    if canonical_transcript_id is not None and \
+                            canonical_transcript_id in self._transcript_ids(transcript):
+                        tie_break_tags.append('canonical')
+                    if not self._transcript_has_protein(transcript):
+                        tie_break_tags.append('no protein')
                     if rows_for_transcript is not None and len(rows_for_transcript) > 0:
                         if 'is_longest_cds' in rows_for_transcript.columns and rows_for_transcript['is_longest_cds'].any():
                             tie_break_tags.append('longest CDS')
@@ -1143,19 +1266,21 @@ class GeneVisualization:
 
                 if marks_active:
                     legend = (
-                        "Mark inside each domain — its tier on the InterPro entry-type ladder: "
-                        "1 = Domain/Repeat · 2 = Family/Homologous superfamily · "
-                        "3 = member-DB hit (G3DSA/PTHR/SSF/cd/PF) · S = site/PTM, ranked with tier 2. "
-                        "FILLED = kept, and compared. HOLLOW = removed before the comparison, so no "
-                        "row of the events table can refer to it — a 2, S or 3 when more than half of it "
-                        "is already covered by a higher tier, and an entry of ANY tier when it "
-                        "duplicates a longer kept entry of the same accession that overlaps it."
+                        "Only InterPro Domain and Repeat entries are drawn, and only those are "
+                        "compared — so every domain the events table names appears here. Neither "
+                        "drawn nor compared: InterPro Family and Homologous_superfamily entries, the "
+                        "residue features (active/binding/conserved site, PTM), and member-database "
+                        "signatures (G3DSA/PTHR/SSF/cd/PF), which are not curated structural units. "
+                        "FILLED = compared. HOLLOW = removed before the comparison, so no row of the "
+                        "events table can refer to it — an entry that duplicates a longer kept entry "
+                        "of the same accession overlapping it."
                     )
                     if marks_partial:
                         legend += (
                             " A transcript whose domains carry NO mark has no RepresentativeDomains "
                             "entry: its annotation comes from DomainEvent/DomainType, which states no "
-                            "entry type, so the ladder cannot rank it and every domain is compared as-is."
+                            "entry type, so the ladder can neither rank nor select on it - every one "
+                            "of its domains is drawn, and compared as-is."
                         )
                     fig.text(
                         0.02, 0.004, legend,
@@ -1221,7 +1346,8 @@ class GeneVisualization:
         ax.tick_params(axis='x', labelsize=6.5, rotation=40)
     
     def _draw_genomic_view(self, ax, transcript, genomic_start, genomic_end,
-                          df_junction=None, show_canonical_non_relevant_junctions=False):
+                          df_junction=None, show_canonical_non_relevant_junctions=False,
+                          analysis_features=None):
         """Draw genomic view with exons."""
         left = min(genomic_start, genomic_end)
         right = max(genomic_start, genomic_end)
@@ -1400,20 +1526,48 @@ class GeneVisualization:
                     item['linestyle'] = 'solid'
             self._draw_genomic_junctions(ax, all_junctions, exon_y, exon_height)
         else:
-            matched_junctions = self._get_matching_junctions(transcript, normalized)
+            analysis_matched = self._analysis_for(transcript, analysis_features)
+            if analysis_matched is not None:
+                # Which features a transcript carries is a decision the analysis
+                # already made, with the same predicate; re-running it here risked
+                # the drawing and the events table disagreeing. Selected by
+                # coordinate rather than by position: the analysis and the drawing
+                # build their feature lists separately, and one skips rows the
+                # other keeps.
+                wanted = {(int(start), int(end)) for start, end in analysis_matched}
+                matched_junctions = [item for item in self._junction_items(normalized)
+                                     if (item['start'], item['end']) in wanted]
+            else:
+                matched_junctions = self._get_matching_junctions(transcript, normalized)
             self._draw_genomic_junctions(ax, matched_junctions, exon_y, exon_height)
 
     
-    def domain_ladder_marks(self, transcript):
+    @staticmethod
+    def _domain_key(df, index):
+        """Identity of a domain row across two independent loads of the same DB
+        rows: the analysis and the drawing each read them separately, so the frame
+        index cannot be compared - the accession and its residue span can."""
+        return (str(df.at[index, 'domain_id']),
+                df.at[index, 'AA_start'], df.at[index, 'AA_end'])
+
+    def domain_ladder_marks(self, transcript, analysis_kept=None):
         """`{row key: (tier, was_kept)}` for `transcript`'s domains, or None when the
         frame carries no InterPro entry types to rank by.
 
-        compare_domains() runs filter_representative_domains() over the same frame
-        before comparing anything, so a domain the ladder demotes is drawn but can
-        never reach the events table - CACNG3's G3DSA:1.20.140.150, covered 1.00 by
-        IPR051072, is drawn on both transcripts and mentioned on neither. The tier
-        says why; `was_kept` is read back from the filter's own output rather than
-        recomputed, so the mark states what the analysis did.
+        `analysis_kept` is the frame the analysis kept for this transcript. Given
+        one, `was_kept` is read straight off it - the drawing states what the
+        comparison did rather than re-deciding it. Without one (a standalone PDF,
+        or a transcript the analysis never evaluated) the filter is run here, which
+        is the only way to answer at all.
+
+        The frame reaching here has already been reduced to tier 1 by
+        _keep_primary_entries(), so every mark reads '1'; what it still carries is
+        `was_kept`. compare_domains() runs filter_representative_domains() over the
+        same frame before comparing anything, and that filter drops a Domain/Repeat
+        entry duplicating a longer one of the same accession - such an entry is
+        drawn hollow, and no row of the events table refers to it. `was_kept` is
+        read back from the filter's own output rather than recomputed, so the mark
+        states what the analysis did.
         """
         domains = transcript.get('domains')
         if domains is None or len(domains) == 0:
@@ -1423,6 +1577,10 @@ class GeneVisualization:
         tiers = domain_entry_tiers(domains)
         if tiers is None:
             return None
+        if analysis_kept is not None and len(analysis_kept) >= 0 and 'domain_id' in getattr(analysis_kept, 'columns', []):
+            kept_keys = {self._domain_key(analysis_kept, i) for i in analysis_kept.index}
+            return {key: (tiers[key], self._domain_key(domains, key) in kept_keys)
+                    for key in domains.index}
         kept = set(filter_representative_domains(domains).index)
         return {key: (tiers[key], key in kept) for key in domains.index}
 
@@ -1467,12 +1625,22 @@ class GeneVisualization:
         # Draw protein backbone rectangle and color it by contributing coding exons.
         coding_segments = self._get_coding_exon_segments(transcript)
 
+        # A transcript with no annotated protein is drawn grey and labelled. It
+        # still HAS a bar: DoChaP fills cds_start/cds_end and the exons' CDS
+        # offsets for a non-coding transcript as though it were coding, so the
+        # geometry exists and can even be longer than a real neighbouring protein
+        # - mouse RGS19's ENSMUST00000143510.8 draws 277 aa against the 195 aa of
+        # the transcript actually selected. Colouring it as a protein invites the
+        # reader to compare lengths that are not comparable; the analysis does not
+        # (protein-coding candidates come first in the selection).
+        has_protein = self._transcript_has_protein(transcript)
+
         protein_bg = Rectangle(
             (0, protein_y - protein_height / 2),
             protein_length_aa,
             protein_height,
-            facecolor='white',
-            edgecolor='black',
+            facecolor='#F2F2F2' if not has_protein else 'white',
+            edgecolor='#AAAAAA' if not has_protein else 'black',
             linewidth=1.2,
             zorder=1,
             rasterized=True,
@@ -1488,13 +1656,18 @@ class GeneVisualization:
                 (seg_start, protein_y - protein_height / 2),
                 seg_end - seg_start,
                 protein_height,
-                facecolor=segment['color'],
+                facecolor='#DDDDDD' if not has_protein else segment['color'],
                 edgecolor='none',
                 alpha=1.0,
                 zorder=2,
                 rasterized=True,
             )
             ax.add_patch(seg_rect)
+
+        if not has_protein:
+            ax.text(protein_length_aa / 2, protein_y, 'no annotated protein',
+                    ha='center', va='center', fontsize=6, style='italic',
+                    color='#777777', zorder=3)
 
         if len(transcript['domains']) == 0:
             ax.text(0.5, 0.62, 'No domains', transform=ax.transAxes,
@@ -1677,8 +1850,7 @@ class GeneVisualization:
 
 
 def generate_gene_pdf(gene_name, conn, output_file=None,
-                      protein_only=False, domains_only=False,
-                      use_representative_domains=False):
+                      protein_only=False, domains_only=False):
     """
     Generate a PDF visualization for a gene similar to DoChap-web.
 
@@ -1694,10 +1866,6 @@ def generate_gene_pdf(gene_name, conn, output_file=None,
         If True, include only transcripts that produce protein.
     domains_only : bool, optional
         If True, include only transcripts whose protein has at least one domain.
-    use_representative_domains : bool, optional
-        If True, a protein's domains come from the RepresentativeDomains table
-        only; a protein with no entry there has no domains. If False (default),
-        domains come from DomainEvent/DomainType only, exactly as before.
 
     Returns:
     --------
@@ -1714,7 +1882,7 @@ def generate_gene_pdf(gene_name, conn, output_file=None,
         output_file = f"{gene_name}_visualization.pdf"
 
     # Create visualization using provided DB connection
-    viz = GeneVisualization(conn, gene_name, use_representative_domains=use_representative_domains)
+    viz = GeneVisualization(conn, gene_name)
     viz.create_pdf(
         output_file,
         protein_only=protein_only,
@@ -1737,9 +1905,6 @@ if __name__ == "__main__":
                        help="Include only transcripts that produce protein")
     parser.add_argument("--domains-only", action="store_true",
                        help="Include only transcripts whose protein has domains")
-    parser.add_argument("--use-representative-domains", action="store_true",
-                       help="Load domains from the RepresentativeDomains table only; "
-                            "a protein with no entry there is treated as having no domains")
 
     args = parser.parse_args()
 
@@ -1751,7 +1916,6 @@ if __name__ == "__main__":
             args.output,
             protein_only=args.protein_only,
             domains_only=args.domains_only,
-            use_representative_domains=args.use_representative_domains,
         )
     finally:
         conn.close()

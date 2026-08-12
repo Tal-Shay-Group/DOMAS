@@ -471,8 +471,8 @@ def cross_source_domain_table(label_dfs, top_n=20):
     for label, df in label_dfs.items():
         rep = rs.select_representative_transcript(df, on_ambiguous="drop")
         rep = rep[rep["event_type"].isin(rs.ANALYZED_TYPES)]
-        rep = rep[rep["domain_name"].notna()]
-        counts[disp(label)] = rep["domain_name"].value_counts()
+        rep = rep[rep["domain_id"].notna()]
+        counts[disp(label)] = rep["domain_id"].value_counts()
         totals[disp(label)] = int(len(rep))
 
     all_domains = set()

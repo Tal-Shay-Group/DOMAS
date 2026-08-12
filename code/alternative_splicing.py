@@ -239,15 +239,15 @@ def leafcutter_read_input_files(con, significance_file, effect_sizes_file, speci
 
 
 def analyze_leafcutter_input(con, significance_file, effect_sizes_file, output_csv,
-                             specie='human', num_workers=5, use_representative_domains=False, max_clusters=0,
-                             filter_non_comparable=False, write_all_comparable=False):
+                             specie='human', num_workers=5, max_clusters=0,
+                             filter_non_comparable=False, write_all_comparable=False, extra_columns=False):
     """Read a pair of leafcutter_ds output files and run the domain analysis, the
     same way analyze_ioe_file()/analyze_hadas_input() do for their formats."""
     df_junctions = leafcutter_read_input_files(con, significance_file, effect_sizes_file, specie=specie)
     analyze_junctions(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False,
-                       num_workers=num_workers, use_representative_domains=use_representative_domains,
+                       num_workers=num_workers,
                        max_clusters=max_clusters, filter_non_comparable=filter_non_comparable,
-                       write_all_comparable=write_all_comparable)
+                       write_all_comparable=write_all_comparable, extra_columns=extra_columns)
 
 
 # --- internal2: LeafCutter results as a supplementary-table Excel -------------
@@ -356,15 +356,15 @@ def internal2_read_input_file(con, input_path, specie='human'):
 
 
 def analyze_internal2_input(con, input_file, output_csv, specie='human', num_workers=5,
-                            use_representative_domains=False, max_clusters=0,
-                            filter_non_comparable=False, write_all_comparable=False):
+                            max_clusters=0,
+                            filter_non_comparable=False, write_all_comparable=False, extra_columns=False):
     """Read an internal2 Excel file and run the domain analysis, the same way
     analyze_leafcutter_input() does for the leafcutter_ds files it exports."""
     df_junctions = internal2_read_input_file(con, input_file, specie=specie)
     analyze_junctions(con, df_junctions=df_junctions, specie=specie, output_path=output_csv, create_pdf=False,
-                      num_workers=num_workers, use_representative_domains=use_representative_domains,
+                      num_workers=num_workers,
                       max_clusters=max_clusters, filter_non_comparable=filter_non_comparable,
-                      write_all_comparable=write_all_comparable)
+                      write_all_comparable=write_all_comparable, extra_columns=extra_columns)
 
 
 
@@ -388,8 +388,9 @@ def _limit_clusters(df_junctions, max_clusters):
 def analyze_junctions(con, df_junctions=None, junctions_csv=None, hadas_format=False, specie=None,
                         output_path='as_events_junctions_analysis.csv',
                         n=0, create_pdf=True, print_genes=None, num_workers=5,
-                        use_representative_domains=False, max_clusters=0,
-                        filter_non_comparable=False, write_all_comparable=False):
+                        max_clusters=0,
+                        filter_non_comparable=False, write_all_comparable=False, extra_columns=False,
+                        restrict_pdf_to_comparable=False):
     """Read junctions (from a DataFrame, a plain CSV, or a hadas-format Excel file - exactly
     one of df_junctions/junctions_csv must be given) and run JunctionsAnalysis.analyze_junctions().
 
@@ -406,45 +407,45 @@ def analyze_junctions(con, df_junctions=None, junctions_csv=None, hadas_format=F
     analyzer = JunctionsAnalysis(con, logger_instance=logger)
     return analyzer.analyze_junctions(df_junctions=df_junctions, output_path=output_path, specie=specie,
                                       filter_transcript_count=n, create_pdf=create_pdf, print_genes=print_genes, num_workers=num_workers,
-                                      use_representative_domains=use_representative_domains,
-                                      filter_non_comparable=filter_non_comparable,
-                                      write_all_comparable=write_all_comparable)
+                                                                            filter_non_comparable=filter_non_comparable,
+                                      write_all_comparable=write_all_comparable, extra_columns=extra_columns,
+                                      restrict_pdf_to_comparable=restrict_pdf_to_comparable)
 
-def analyze_ioe_file(con, ioe_file, output_csv, specie=None, num_workers=5, use_representative_domains=False, max_clusters=0,
-                     filter_non_comparable=False, write_all_comparable=False):
+def analyze_ioe_file(con, ioe_file, output_csv, specie=None, num_workers=5, max_clusters=0,
+                     filter_non_comparable=False, write_all_comparable=False, extra_columns=False):
     df_junctions = utils.ioe2junctions(ioe_file)
     gene_symbols_dict = utils.get_gene_symbols(con, df_junctions.gene_ensembl_id.unique().tolist())
     # add gene symbols to df_junctions
     df_junctions['gene_symbol'] = df_junctions['gene_ensembl_id'].map(gene_symbols_dict)
     analyze_junctions(con, df_junctions=df_junctions, specie=specie, output_path=output_csv, create_pdf=False, num_workers=num_workers,
-                        use_representative_domains=use_representative_domains, max_clusters=max_clusters,
+                        max_clusters=max_clusters,
                         filter_non_comparable=filter_non_comparable,
-                        write_all_comparable=write_all_comparable)
+                        write_all_comparable=write_all_comparable, extra_columns=extra_columns)
 
 
-def analyze_rmats_input(con, rmats_dir, output_csv, specie=None, num_workers=5, use_representative_domains=False, max_clusters=0,
-                        filter_non_comparable=False, write_all_comparable=False):
+def analyze_rmats_input(con, rmats_dir, output_csv, specie=None, num_workers=5, max_clusters=0,
+                        filter_non_comparable=False, write_all_comparable=False, extra_columns=False):
     """Read an rMATS-turbo output directory (the SE/A5SS/A3SS/MXE [Event].MATS.JC.txt files)
     and run the domain analysis. rMATS embeds the Ensembl GeneID and gene symbol
     in each event, so - unlike the leafcutter path - no symbol->ensembl lookup is
     needed. All events are analyzed (no significance filtering)."""
     df_junctions = utils.rmats2junctions(rmats_dir)
     analyze_junctions(con, df_junctions=df_junctions, specie=specie, output_path=output_csv, create_pdf=False,
-                       num_workers=num_workers, use_representative_domains=use_representative_domains,
+                       num_workers=num_workers,
                        max_clusters=max_clusters, filter_non_comparable=filter_non_comparable,
-                       write_all_comparable=write_all_comparable)
+                       write_all_comparable=write_all_comparable, extra_columns=extra_columns)
 
 
-def analyze_voila_input(con, voila_tsv, output_csv, specie=None, num_workers=5, use_representative_domains=False, max_clusters=0,
-                        filter_non_comparable=False, write_all_comparable=False):
+def analyze_voila_input(con, voila_tsv, output_csv, specie=None, num_workers=5, max_clusters=0,
+                        filter_non_comparable=False, write_all_comparable=False, extra_columns=False):
     """Read a MAJIQ voila TSV (`voila tsv` output) and run the domain analysis.
     voila embeds the Ensembl Gene ID and gene name in each LSV, so no
     symbol->ensembl lookup is needed. All LSVs are analyzed (no filtering)."""
     df_junctions = utils.voila2junctions(voila_tsv)
     analyze_junctions(con, df_junctions=df_junctions, specie=specie, output_path=output_csv, create_pdf=False,
-                       num_workers=num_workers, use_representative_domains=use_representative_domains,
+                       num_workers=num_workers,
                        max_clusters=max_clusters, filter_non_comparable=filter_non_comparable,
-                       write_all_comparable=write_all_comparable)
+                       write_all_comparable=write_all_comparable, extra_columns=extra_columns)
 
 
 def keep_min_transcript_clusters(df, examples_per_event=2):
@@ -473,7 +474,7 @@ def keep_min_transcript_clusters(df, examples_per_event=2):
     return filtered_df
 
 def analyze_ioe_files(con, input_path, pattern, output_csv, specie=None, examples_per_event=0, num_workers=5,
-                       use_representative_domains=False, max_clusters=0, filter_non_comparable=False, write_all_comparable=False):
+                       max_clusters=0, filter_non_comparable=False, write_all_comparable=False, extra_columns=False):
     dfs = []
     for file in os.listdir(input_path):
         if re.match(pattern, file):
@@ -498,23 +499,25 @@ def analyze_ioe_files(con, input_path, pattern, output_csv, specie=None, example
         df_examples = keep_min_transcript_clusters(df_all_junctions, examples_per_event=examples_per_event)
         df_examples.to_csv('ioe_example_junctions.csv', index=False)
         analyze_junctions(con, df_junctions=df_examples, specie=specie, output_path=output_csv, create_pdf=False, num_workers=num_workers,
-                            use_representative_domains=use_representative_domains, max_clusters=max_clusters,
+                            max_clusters=max_clusters,
                             filter_non_comparable=filter_non_comparable,
-                            write_all_comparable=write_all_comparable)
+                            write_all_comparable=write_all_comparable, extra_columns=extra_columns)
     else:
         df_all_junctions.to_csv('ioe_all_junctions.csv', index=False)
         analyze_junctions(con, df_junctions=df_all_junctions, specie=specie, output_path=output_csv, create_pdf=False, num_workers=num_workers,
-                            use_representative_domains=use_representative_domains, max_clusters=max_clusters,
+                            max_clusters=max_clusters,
                             filter_non_comparable=filter_non_comparable,
-                            write_all_comparable=write_all_comparable)
+                            write_all_comparable=write_all_comparable, extra_columns=extra_columns)
 
 def analyze_hadas_input(con, input_file, output_csv, print_genes=None, num_workers=5,
-                         use_representative_domains=False, create_pdf=True, max_clusters=0,
-                         filter_non_comparable=False, write_all_comparable=False):
+                         create_pdf=True, max_clusters=0,
+                         filter_non_comparable=False, write_all_comparable=False, extra_columns=False,
+                         restrict_pdf_to_comparable=False):
     df_junctions = hadas_read_input_file(con, input_file)
     analyze_junctions(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=create_pdf, print_genes=print_genes,
-                        num_workers=num_workers, use_representative_domains=use_representative_domains, max_clusters=max_clusters,
+                        num_workers=num_workers, max_clusters=max_clusters,
                         filter_non_comparable=filter_non_comparable,
-                        write_all_comparable=write_all_comparable)
+                        write_all_comparable=write_all_comparable, extra_columns=extra_columns,
+                        restrict_pdf_to_comparable=restrict_pdf_to_comparable)
     
 

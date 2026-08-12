@@ -70,14 +70,9 @@ _SKIPPED_EVENTS = {
     'no_canonical_transcript', 'only_one_transcript', 'no_canonical_features', 'feature_not_mapped',
 }
 
-# (restrict_pdf_to_comparable, use_representative_domains). The tie-break rules
+# restrict_pdf_to_comparable. The tie-break rules
 # (is_longest_cds/is_most_like_canonical) are tag columns now, not a separate axis.
-FLAG_COMBINATIONS = [
-    (False, False),
-    (True, False),
-    (False, True),
-    (True, True),
-]
+FLAG_COMBINATIONS = [False, True]
 
 INPUT_FILES = [
     ('ioe_csv', IOE_CSV, False),
@@ -134,7 +129,7 @@ def _load_junctions(con, junctions_csv, hadas_format):
     return hadas_read_input_file(con, junctions_csv) if hadas_format else read_junctions_csv(junctions_csv)
 
 
-def _run_analysis(con, tmp_path, junctions_csv, hadas_format, restrict_pdf_to_comparable, use_representative_domains):
+def _run_analysis(con, tmp_path, junctions_csv, hadas_format, restrict_pdf_to_comparable):
     """Run analyze_junctions with cwd set to tmp_path (PDFs are written relative to cwd)."""
     analysis = JunctionsAnalysis(con)
     df_junctions = _load_junctions(con, junctions_csv, hadas_format)
@@ -148,7 +143,6 @@ def _run_analysis(con, tmp_path, junctions_csv, hadas_format, restrict_pdf_to_co
             create_pdf=True,
             num_workers=1,
             restrict_pdf_to_comparable=restrict_pdf_to_comparable,
-            use_representative_domains=use_representative_domains,
         
             write_all_comparable=True,
         )
@@ -175,7 +169,6 @@ def test_write_all_comparable_off_keeps_one_transcript_and_drops_the_tags(con, t
         output_path=output_path,
         create_pdf=False,
         num_workers=1,
-        use_representative_domains=True,
     )
 
     df = pd.read_csv(output_path)
@@ -197,7 +190,6 @@ def test_write_all_comparable_off_keeps_one_transcript_and_drops_the_tags(con, t
         output_path=all_path,
         create_pdf=False,
         num_workers=1,
-        use_representative_domains=True,
         write_all_comparable=True,
     )
     df_all = pd.read_csv(all_path)
@@ -207,13 +199,12 @@ def test_write_all_comparable_off_keeps_one_transcript_and_drops_the_tags(con, t
     assert all_comparisons['transcript_id'].nunique() >= comparisons['transcript_id'].nunique()
 
 
-@pytest.mark.parametrize('restrict_pdf_to_comparable,use_representative_domains', FLAG_COMBINATIONS)
-def test_ioe_csv_all_flag_combinations(con, tmp_path, restrict_pdf_to_comparable, use_representative_domains):
+@pytest.mark.parametrize('restrict_pdf_to_comparable', FLAG_COMBINATIONS)
+def test_ioe_csv_all_flag_combinations(con, tmp_path, restrict_pdf_to_comparable):
     """analyze_junctions runs end-to-end on ioe_example_junctions.csv for every combination of the flags."""
     results, output_path = _run_analysis(
         con, tmp_path, IOE_CSV, hadas_format=False,
         restrict_pdf_to_comparable=restrict_pdf_to_comparable,
-        use_representative_domains=use_representative_domains,
     )
 
     assert len(results) > 0, "Expected at least one cluster to be analyzed"
@@ -225,13 +216,12 @@ def test_ioe_csv_all_flag_combinations(con, tmp_path, restrict_pdf_to_comparable
     _assert_tie_break_tags_are_consistent(results)
 
 
-@pytest.mark.parametrize('restrict_pdf_to_comparable,use_representative_domains', FLAG_COMBINATIONS)
-def test_hadas_xlsx_all_flag_combinations(con, tmp_path, restrict_pdf_to_comparable, use_representative_domains):
+@pytest.mark.parametrize('restrict_pdf_to_comparable', FLAG_COMBINATIONS)
+def test_hadas_xlsx_all_flag_combinations(con, tmp_path, restrict_pdf_to_comparable):
     """analyze_junctions runs end-to-end on short_H_vs_M_HN6.xlsx for every combination of the flags."""
     results, output_path = _run_analysis(
         con, tmp_path, HADAS_XLSX, hadas_format=True,
         restrict_pdf_to_comparable=restrict_pdf_to_comparable,
-        use_representative_domains=use_representative_domains,
     )
 
     assert len(results) > 0, "Expected at least one cluster to be analyzed"
@@ -247,11 +237,11 @@ def test_hadas_xlsx_all_flag_combinations(con, tmp_path, restrict_pdf_to_compara
 # Automatic comparison against the committed golden reference outputs
 # ---------------------------------------------------------------------------
 
-def _case_name(label, restrict_pdf_to_comparable, use_representative_domains):
-    return f"{label}__restrict_{restrict_pdf_to_comparable}__representative_{use_representative_domains}"
+def _case_name(label, restrict_pdf_to_comparable):
+    return f"{label}__restrict_{restrict_pdf_to_comparable}"
 
 
-def _run_case_to_dir(con, case_dir, junctions_csv, hadas_format, restrict_pdf_to_comparable, use_representative_domains):
+def _run_case_to_dir(con, case_dir, junctions_csv, hadas_format, restrict_pdf_to_comparable):
     """Run analyze_junctions, writing results.csv + PDFs into a freshly-created case_dir."""
     if os.path.exists(case_dir):
         shutil.rmtree(case_dir)
@@ -269,7 +259,6 @@ def _run_case_to_dir(con, case_dir, junctions_csv, hadas_format, restrict_pdf_to
             create_pdf=True,
             num_workers=1,
             restrict_pdf_to_comparable=restrict_pdf_to_comparable,
-            use_representative_domains=use_representative_domains,
         
             write_all_comparable=True,
         )
@@ -318,9 +307,9 @@ def _compare_pdf_text_to_reference(output_dir, reference_dir):
 
 
 @pytest.mark.parametrize('label,junctions_csv,hadas_format', INPUT_FILES)
-@pytest.mark.parametrize('restrict_pdf_to_comparable,use_representative_domains', FLAG_COMBINATIONS)
+@pytest.mark.parametrize('restrict_pdf_to_comparable', FLAG_COMBINATIONS)
 def test_compare_against_reference_outputs(con, keep_test_output, label, junctions_csv, hadas_format,
-                                            restrict_pdf_to_comparable, use_representative_domains):
+                                            restrict_pdf_to_comparable):
     """Run analyze_junctions for this flag combination, writing its CSV/PDF output to
     tests/generated_outputs/<case_name>/, then compare the resulting results.csv
     against the golden reference under tests/reference_outputs/<case_name>/.
@@ -329,13 +318,13 @@ def test_compare_against_reference_outputs(con, keep_test_output, label, junctio
     default. Pass --keep-test-output on the pytest command line to keep it
     (e.g. to inspect the PDFs by hand).
     """
-    case_name = _case_name(label, restrict_pdf_to_comparable, use_representative_domains)
+    case_name = _case_name(label, restrict_pdf_to_comparable)
     output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
     reference_dir = os.path.join(REFERENCE_OUTPUTS_DIR, case_name)
     reference_csv = os.path.join(reference_dir, 'results.csv')
 
     generated_csv = _run_case_to_dir(
-        con, output_dir, junctions_csv, hadas_format, restrict_pdf_to_comparable, use_representative_domains,
+        con, output_dir, junctions_csv, hadas_format, restrict_pdf_to_comparable,
     )
 
     pdf_files = glob.glob(os.path.join(output_dir, '*_junction_comparison.pdf'))
@@ -390,7 +379,6 @@ def _run_leafcutter_case_to_dir(con, case_dir, subset):
         output_path=output_path,
         create_pdf=False,
         num_workers=1,
-        use_representative_domains=True,
     
         write_all_comparable=True,
     )
@@ -445,7 +433,7 @@ def test_full_scale_ioe_compare_against_reference(con, tmp_path, ioe_input_dir,
     alternative_splicing.analyze_ioe_files(
         con, input_path=ioe_input_dir, pattern=r"(output_prefix_|events_).*_strict\.ioe",
         output_csv=generated_csv, specie=ioe_specie, examples_per_event=0,
-        num_workers=4, use_representative_domains=True,
+        num_workers=4,
         max_clusters=ioe_max_clusters, filter_non_comparable=True,
     )
 
@@ -458,7 +446,7 @@ def test_leafcutter_subset_compare_against_reference(con, keep_test_output):
     genes in the rMATS subset (so it covers the same genes as the rMATS test,
     which span all five event types), representative domains. Bootstraps its
     reference on first run."""
-    case_name = 'leafcutter_subset__representative_True'
+    case_name = 'leafcutter_subset'
     output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
     reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
 
@@ -475,7 +463,7 @@ def test_leafcutter_subset_compare_against_reference(con, keep_test_output):
 def test_leafcutter_full_compare_against_reference(con, keep_test_output):
     """Full leafcutter golden test over all ~17k clusters (~15 min). Opt in with
     --run-slow; skipped by default. Bootstraps its reference on first run."""
-    case_name = 'leafcutter_full__representative_True'
+    case_name = 'leafcutter_full'
     output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
     reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
 
@@ -537,7 +525,6 @@ def _run_rmats_case_to_dir(con, case_dir, subset, filter_non_comparable=False):
         output_path=output_path,
         create_pdf=False,
         num_workers=1,
-        use_representative_domains=True,
         filter_non_comparable=filter_non_comparable,
     
         write_all_comparable=True,
@@ -549,7 +536,7 @@ def test_rmats_subset_compare_against_reference(con, keep_test_output):
     """Default (fast) rMATS golden test: a deterministic subset of
     `RMATS_SUBSET_CLUSTERS` clusters spread across the five event types,
     representative domains. Bootstraps its reference on first run."""
-    case_name = 'rmats_subset__representative_True'
+    case_name = 'rmats_subset'
     output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
     reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
 
@@ -576,7 +563,7 @@ def test_rmats_subset_filter_non_comparable_compare_against_reference(con, keep_
     only transcripts that were actually compared to canonical. Verifies no
     non-comparison event survives, then compares to a committed golden reference
     (bootstrapped on first run)."""
-    case_name = 'rmats_subset_filtered__representative_True'
+    case_name = 'rmats_subset_filtered'
     output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
     reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
 
@@ -632,7 +619,6 @@ def _run_majiq_case_to_dir(con, case_dir, subset):
         output_path=output_path,
         create_pdf=False,
         num_workers=1,
-        use_representative_domains=True,
     
         write_all_comparable=True,
     )
@@ -643,7 +629,7 @@ def test_majiq_subset_compare_against_reference(con, keep_test_output):
     """Default (fast) MAJIQ golden test: the LSVs for the genes in the rMATS
     subset (same genes as the leafcutter/rMATS subset tests), representative
     domains. Bootstraps its reference on first run."""
-    case_name = 'majiq_subset__representative_True'
+    case_name = 'majiq_subset'
     output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
     reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
 
@@ -669,7 +655,7 @@ def _run_ioe_case_to_dir(con, case_dir):
     alternative_splicing.analyze_ioe_files(
         con, input_path=IOE_DIR, pattern=r"output_prefix_.*_strict\.ioe",
         output_csv=output_path, specie='human', examples_per_event=0,
-        num_workers=1, use_representative_domains=True,
+        num_workers=1,
         write_all_comparable=True,
     )
     return output_path
@@ -682,7 +668,7 @@ def test_ioe_directory_compare_against_reference(con, keep_test_output):
     per-type coordinate handling - the constructed SE skipping junction and the
     RI junction/retained-intron pair among them - which the single-file fixtures
     do not. Bootstraps its reference on first run."""
-    case_name = 'ioe_directory__representative_True'
+    case_name = 'ioe_directory'
     output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
     reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
 

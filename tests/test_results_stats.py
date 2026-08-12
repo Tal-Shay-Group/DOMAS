@@ -38,7 +38,7 @@ def con(db_path):
 
 def test_hadas_analysis_and_stats_report_flow(con, tmp_path):
     """
-    Full flow: analyze_hadas_input(use_representative_domains=True,
+    Full flow: analyze_hadas_input(
     create_pdf=False, num_workers=2) against a real Hadas fixture, then feed
     the resulting results.csv straight into _run_pdf_report() under a custom
     label - exactly how a one-off named dataset (e.g. "hadas2") gets
@@ -54,7 +54,6 @@ def test_hadas_analysis_and_stats_report_flow(con, tmp_path):
     results_csv = str(tmp_path / 'results.csv')
     analyze_hadas_input(
         con, HADAS_XLSX, results_csv,
-        use_representative_domains=True,
         create_pdf=False,
         num_workers=2,
         # this flow exercises select_representative_transcript(), which needs the

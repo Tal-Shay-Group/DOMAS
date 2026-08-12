@@ -68,10 +68,6 @@ def parse_args():
     parser.add_argument("-num_workers", type=int, default=_DEFAULT_NUM_WORKERS,
                          help=f"Number of parallel worker processes (default: this machine's "
                               f"CPU count, {_DEFAULT_NUM_WORKERS})")
-    parser.add_argument("-no_representative_domains", action="store_true",
-                         help="Use DomainEvent/DomainType only. By default domains come "
-                              "from the RepresentativeDomains table alone, and a protein "
-                              "with no entry there is treated as having no domains.")
     parser.add_argument("-pdf", action="store_true",
                          help="Generate a per-gene PDF (only honored with -format internal; "
                               "the ioe path never generates PDFs regardless of this flag). "
@@ -97,6 +93,23 @@ def parse_args():
                               "to the canonical one. By default they are written, so the "
                               "output CSV accounts for every cluster in the input - including "
                               "the ones no comparison was possible for.")
+    parser.add_argument("-show_only_compared", action="store_true",
+                         help="Draw only the canonical transcript and the transcripts whose "
+                              "domains were actually compared to it (only honored with -pdf). "
+                              "Leaves out the ones the analysis never compared: a transcript "
+                              "carrying no feature of the event, none unique to it, one subsumed "
+                              "by a larger event, and one its own group passed over in favour of "
+                              "another (transcript_not_chosen). By default every transcript of "
+                              "the gene is drawn.")
+    parser.add_argument("-extra_columns", action="store_true",
+                         help="Add three columns to the output CSV: `rank`, naming the "
+                              "canonical transcript's exons that the event's junctions join "
+                              "(E2_E4, or *_E5 where a junction's splice site is not an exon "
+                              "edge of it), and c_junction_in_cds / t_junction_in_cds, saying "
+                              "whether those junctions fall inside the coding sequence of the "
+                              "canonical and of the compared transcript (yes / partial / no, "
+                              "or no_cds for a transcript with no annotated protein). Works "
+                              "for every input format. Off by default.")
     parser.add_argument("-write_all_comparable", action="store_true",
                          help="Compare every comparable transcript to the canonical one and "
                               "keep a row for each, adding the is_most_like_canonical and "
@@ -174,9 +187,16 @@ def main():
     # logging.getLogger(__name__), so this is the only place a destination is
     # chosen and the run leaves nothing on the console.
     log_file = os.path.join(output_dir, 'domas.log')
+    # Emptied once here, then opened for APPENDING - not with filemode='w'. The
+    # worker processes open the same file themselves (see _init_worker), and a
+    # 'w' handle in the parent keeps its own offset from 0, so every parent
+    # record overwrites bytes the workers have already appended: the run's first
+    # per-cluster records come back torn in half, or vanish. Appending puts every
+    # write at the current end of file, in either process.
+    open(log_file, 'w').close()
     logging.basicConfig(
         filename=log_file,
-        filemode='w',
+        filemode='a',
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
         force=True,
@@ -199,56 +219,57 @@ def main():
         if args.format == "leafcutter":
             alternative_splicing.analyze_leafcutter_input(
                 con, significance_file=args.lc_sig, effect_sizes_file=args.lc_effect,
-                output_csv=args.output_csv, specie=args.species, num_workers=args.num_workers,
-                use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
+                output_csv=args.output_csv, specie=args.species, num_workers=args.num_workers, max_clusters=args.max_clusters,
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
+                extra_columns=args.extra_columns,
             )
         elif args.format == "rmats":
             alternative_splicing.analyze_rmats_input(
-                con, rmats_dir=args.input, output_csv=args.output_csv, specie=args.species, num_workers=args.num_workers,
-                use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
+                con, rmats_dir=args.input, output_csv=args.output_csv, specie=args.species, num_workers=args.num_workers, max_clusters=args.max_clusters,
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
+                extra_columns=args.extra_columns,
             )
         elif args.format == "majiq":
             alternative_splicing.analyze_voila_input(
-                con, voila_tsv=args.input, output_csv=args.output_csv, specie=args.species, num_workers=args.num_workers,
-                use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
+                con, voila_tsv=args.input, output_csv=args.output_csv, specie=args.species, num_workers=args.num_workers, max_clusters=args.max_clusters,
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
+                extra_columns=args.extra_columns,
             )
         elif args.format == "internal2":
             alternative_splicing.analyze_internal2_input(
                 con, input_file=args.input, output_csv=args.output_csv, specie=args.species,
-                num_workers=args.num_workers,
-                use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
+                num_workers=args.num_workers, max_clusters=args.max_clusters,
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
+                extra_columns=args.extra_columns,
             )
         elif args.format == "internal":
             print_genes = [g.strip() for g in args.gene_ids.split(',')] if args.gene_ids else None
             alternative_splicing.analyze_hadas_input(
                 con, input_file=args.input, output_csv=args.output_csv,
-                print_genes=print_genes, num_workers=args.num_workers,
-                use_representative_domains=not args.no_representative_domains, create_pdf=args.pdf,
+                print_genes=print_genes, num_workers=args.num_workers, create_pdf=args.pdf,
                 max_clusters=args.max_clusters, filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
+                extra_columns=args.extra_columns,
+                restrict_pdf_to_comparable=args.show_only_compared,
             )
         elif os.path.isdir(args.input):
             alternative_splicing.analyze_ioe_files(
                 con, input_path=args.input, pattern=args.ioe_pattern, output_csv=args.output_csv, specie=args.species,
-                examples_per_event=args.examples_per_event, num_workers=args.num_workers,
-                use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
+                examples_per_event=args.examples_per_event, num_workers=args.num_workers, max_clusters=args.max_clusters,
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
+                extra_columns=args.extra_columns,
             )
         else:
             alternative_splicing.analyze_ioe_file(
-                con, ioe_file=args.input, output_csv=args.output_csv, specie=args.species, num_workers=args.num_workers,
-                use_representative_domains=not args.no_representative_domains, max_clusters=args.max_clusters,
+                con, ioe_file=args.input, output_csv=args.output_csv, specie=args.species, num_workers=args.num_workers, max_clusters=args.max_clusters,
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
+                extra_columns=args.extra_columns,
             )
     finally:
         con.close()
