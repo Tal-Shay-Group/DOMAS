@@ -205,10 +205,12 @@ def test_find_bp_range_for_domains_returns_genomically_ordered_pair():
         'abs_start_CDS': [56, 637],
         'abs_end_CDS': [245, 810],
         'genomic_start_tx': [24575264, 24573560],
-        # abs_start_CDS sits at the genomic END of a minus-strand exon, so the
+        # abs_start_CDS sits at the LAST BASE of a minus-strand exon, so the
         # mapping needs it: without it the offsets were read left-to-right and
-        # the pair came back 200-300 bp off its true position.
-        'genomic_end_tx': [24575453, 24573733],
+        # the pair came back 200-300 bp off its true position. The span is
+        # half-open, so each exon's last base is genomic_end_tx - 1 and the two
+        # spans are exactly as long as the CDS runs they carry (190 and 174).
+        'genomic_end_tx': [24575454, 24573734],
     })
     # A domain spanning AA 35-255 -> CDS bp 105-765, which falls inside the
     # two exons above (genomically reversed relative to CDS order).
@@ -217,8 +219,8 @@ def test_find_bp_range_for_domains_returns_genomically_ordered_pair():
     min_bp, max_bp = find_bp_range_for_domains(df_exons, domains_in_region)
 
     assert min_bp <= max_bp
-    # CDS 105 is 49 bases into the first exon, so 49 bases DOWN from its genomic
-    # end; CDS 765 is 128 into the second, so 128 down from that one's end.
+    # CDS 105 is 49 bases into the first exon, so 49 bases DOWN from its last
+    # base; CDS 765 is 128 into the second, so 128 down from that one's last base.
     assert (min_bp, max_bp) == (24573605, 24575404)
 
 
@@ -2195,9 +2197,12 @@ def test_the_second_window_contains_the_first():
 # ---------------------------------------------------------------------------
 
 def _minus_exon():
-    """One exon of a minus-strand transcript: abs_start_CDS sits at genomic_end_tx."""
+    """One exon of a minus-strand transcript: abs_start_CDS sits at the exon's LAST
+    base. The genomic span is half-open, so 1000-1100 is 100 bases (1000..1099)
+    and the CDS run is the same 100 long - see DoChaP-db recordTypes.exons2abs(),
+    which measures an exon's coding contribution as clipped_end - clipped_start."""
     return pd.Series({'genomic_start_tx': 1000, 'genomic_end_tx': 1100,
-                      'abs_start_CDS': 200, 'abs_end_CDS': 300})
+                      'abs_start_CDS': 200, 'abs_end_CDS': 299})
 
 
 def test_bp_to_cds_follows_the_transcript_on_the_minus_strand():
@@ -2206,19 +2211,31 @@ def test_bp_to_cds_follows_the_transcript_on_the_minus_strand():
     a wider window came to select fewer domains."""
     from junction_analisys import _bp_to_cds
     exon = _minus_exon()
-    assert _bp_to_cds(exon, 1100, minus=True) == 200      # the exon's genomic end
-    assert _bp_to_cds(exon, 1000, minus=True) == 300      # its genomic start
-    assert _bp_to_cds(exon, 1050, minus=True) == 250      # halfway
+    assert _bp_to_cds(exon, 1099, minus=True) == 200      # the exon's last base
+    assert _bp_to_cds(exon, 1000, minus=True) == 299      # its first base
+    assert _bp_to_cds(exon, 1050, minus=True) == 249      # halfway
     # the plus-strand reading of the same exon is the mirror image
     assert _bp_to_cds(exon, 1000, minus=False) == 200
-    assert _bp_to_cds(exon, 1100, minus=False) == 300
+    assert _bp_to_cds(exon, 1099, minus=False) == 299
+
+
+def test_bp_to_cds_counts_every_base_of_a_fully_coding_exon():
+    """Each of the exon's bases gets its own CDS offset, on either strand - and the
+    two branches agree on how many there are. Reading the minus branch from
+    genomic_end_tx instead of its last base put every base one position too far
+    along the CDS, leaving abs_start_CDS reachable only through the clamp."""
+    from junction_analisys import _bp_to_cds
+    exon = _minus_exon()
+    forward = [_bp_to_cds(exon, bp, minus=False) for bp in range(1000, 1100)]
+    backward = [_bp_to_cds(exon, bp, minus=True) for bp in range(1099, 999, -1)]
+    assert forward == backward == list(range(200, 300))
 
 
 def test_cds_to_bp_is_the_inverse_on_both_strands():
     from junction_analisys import _bp_to_cds, _cds_to_bp
     exon = _minus_exon()
     for minus in (False, True):
-        for bp in (1000, 1025, 1050, 1100):
+        for bp in (1000, 1025, 1050, 1099):
             cds = _bp_to_cds(exon, bp, minus)
             assert _cds_to_bp(exon, cds, minus) == bp, (minus, bp, cds)
 

@@ -166,14 +166,20 @@ def _bp_to_cds(exon, bp, minus=False):
     to the exon's CDS span.
 
     CDS offsets run with the transcript, not with the genome: on a minus-strand
-    exon abs_start_CDS sits at genomic_end_tx and the offset RISES as the genomic
-    coordinate falls. Reading it the plus-strand way there does not merely shift
-    the answer, it runs backwards and then saturates against the clamp - which is
-    how a WIDER pass-2 window came to select FEWER domains for ZNF195, and why
-    7.2% of minus-strand comparisons picked the wrong domain set.
+    exon abs_start_CDS sits at the END of the exon and the offset RISES as the
+    genomic coordinate falls. Reading it the plus-strand way there does not merely
+    shift the answer, it runs backwards and then saturates against the clamp -
+    which is how a WIDER pass-2 window came to select FEWER domains for ZNF195,
+    and why 7.2% of minus-strand comparisons picked the wrong domain set.
+
+    The exon's genomic span is HALF-OPEN, [genomic_start_tx, genomic_end_tx), so
+    its last base is genomic_end_tx - 1 - see DoChaP-db recordTypes.exons2abs(),
+    which measures each exon's coding contribution as clipped_end - clipped_start
+    with no +1. The minus branch therefore counts down from genomic_end_tx - 1,
+    not from genomic_end_tx: the transcript-order FIRST coding base of the exon.
     """
     if minus:
-        cds = exon['abs_start_CDS'] + (exon['genomic_end_tx'] - bp)
+        cds = exon['abs_start_CDS'] + (exon['genomic_end_tx'] - 1 - bp)
     else:
         cds = exon['abs_start_CDS'] + (bp - exon['genomic_start_tx'])
     return min(max(cds, exon['abs_start_CDS']), exon['abs_end_CDS'])
@@ -214,10 +220,12 @@ def get_aa_range(first_exon, last_exon, min_bp=None, max_bp=None, minus=False):
 
 def _cds_to_bp(exon, cds_bp, minus=False):
     """Map a CDS-relative bp position to its genomic position within `exon`'s CDS
-    span. The inverse of _bp_to_cds(), with the same orientation rule."""
+    span. The inverse of _bp_to_cds(), with the same orientation rule and the same
+    half-open reading of the exon: the minus branch counts down from the exon's
+    last base, genomic_end_tx - 1."""
     cds_bp = min(max(cds_bp, exon['abs_start_CDS']), exon['abs_end_CDS'])
     if minus:
-        return exon['genomic_end_tx'] - (cds_bp - exon['abs_start_CDS'])
+        return exon['genomic_end_tx'] - 1 - (cds_bp - exon['abs_start_CDS'])
     return exon['genomic_start_tx'] + (cds_bp - exon['abs_start_CDS'])
 
 
