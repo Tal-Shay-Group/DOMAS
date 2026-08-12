@@ -1,4 +1,4 @@
-event,group,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_id,domain_name,c_domain_length,t_domain_length,c_domains_number,t_domains_number,is_longest_cds,is_most_like_canonical,domain_description
+event,group,gene_symbol,specie,event_type,canonical_transcript_id,alternative_transcript_id,domain_id,domain_name,canonical_domain_length,alternative_domain_length,canonical_domains_number,alternative_domains_number,is_longest_cds,is_most_like_canonical,domain_description
 chr13:clu_10163,,MYCBP2,human,feature_not_mapped,ENST00000544440.7,,,,,,,,,,
 chr13:clu_10163,,MYCBP2,human,feature_not_mapped,ENST00000544440.7,,,,,,,,,,
 chr13:clu_10163,,MYCBP2,human,no_unique_features,ENST00000544440.7,ENST00000695078.1,,,,,,,,,

@@ -1,4 +1,4 @@
-event,group,gene_symbol,specie,event_type,canonical_transcript_id,transcript_id,domain_id,domain_name,c_domain_length,t_domain_length,c_domains_number,t_domains_number,is_longest_cds,is_most_like_canonical,domain_description
+event,group,gene_symbol,specie,event_type,canonical_transcript_id,alternative_transcript_id,domain_id,domain_name,canonical_domain_length,alternative_domain_length,canonical_domains_number,alternative_domains_number,is_longest_cds,is_most_like_canonical,domain_description
 A5_ENSG00000110375_11_37301,1,UPK2,human,no_domains_in_region,ENST00000264031.3,ENST00000534788.1,,,,,,,True,False,
 AF_ENSG00000100583_14_422208,1,SAMD15,human,no_domains_in_region,ENST00000216471.5,ENST00000533095.2,,,,,,,True,False,
 A5_ENSG00000089558_17_56917,1,KCNH4,human,no_domains_in_region,ENST00000264661.4,ENST00000607371.5,,,,,,,True,False,
