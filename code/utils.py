@@ -74,6 +74,39 @@ def gene_id_clause(gene_ids):
 
 REQUIRED_JUNCTION_COLUMNS = ('gene_ensembl_id', 'start_position', 'end_position', 'cluster_name')
 
+
+def _order_junction_boundaries(df):
+    """Put every feature's two coordinates in genomic order, start <= end.
+
+    They are the feature's two BOUNDARIES, and an input is free to state them in
+    either order: the internal format writes a human/mouse ortholog pair in the
+    order their shared exon-pair label names the exons (E4_E3), so the mouse
+    coordinates run high-to-low wherever the two genes sit on opposite strands -
+    4,832 of its 9,971 mouse junctions.
+
+    Ordered here, at the one boundary every reader passes through, rather than in
+    each consumer. Three separate places had independently assumed start < end:
+    find_matching_junction_indices() mapped nothing, find_relevant_domain_windows()
+    built a truncated window from min-of-starts and max-of-ends, and
+    select_most_like_canonical() measured the event over the wrong range and so
+    could pick a different transcript to compare. The first was found by a wrong
+    result, the second by a domain that should have been in the window and was
+    not; a fourth would have been found the same slow way.
+    """
+    start = pd.to_numeric(df['start_position'], errors='coerce')
+    end = pd.to_numeric(df['end_position'], errors='coerce')
+    reversed_pair = (start > end).fillna(False)
+    if not reversed_pair.any():
+        return df
+
+    df = df.copy()
+    df.loc[reversed_pair, ['start_position', 'end_position']] = (
+        df.loc[reversed_pair, ['end_position', 'start_position']].to_numpy())
+    logger.info("Ordered the boundaries of %d of %d features written end-first.",
+                int(reversed_pair.sum()), len(df))
+    return df
+
+
 def _optional_junction_defaults():
     """Optional columns and the value to fill them with.
 
@@ -156,6 +189,8 @@ def normalize_junctions_frame(df, specie=None):
     missing = [c for c in REQUIRED_JUNCTION_COLUMNS if c not in df.columns]
     if missing:
         raise ValueError(f"Columns {missing} are required in df_junctions but not found.")
+
+    df = _order_junction_boundaries(df)
 
     for column, default in _optional_junction_defaults().items():
         if column not in df.columns:

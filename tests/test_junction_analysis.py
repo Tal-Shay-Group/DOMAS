@@ -13,6 +13,7 @@ TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 CODE_DIR = os.path.normpath(os.path.join(TESTS_DIR, '..', 'code'))
 sys.path.insert(0, CODE_DIR)
 
+import utils  # noqa: E402
 from junction_analisys import (  # noqa: E402
     _init_worker, _process_cluster_chunk, ClusterAnalysisResult, JunctionsAnalysis,
     find_matching_junction_indices, get_aa_range, find_bp_range_for_domains,
@@ -2018,3 +2019,133 @@ def test_retained_intron_already_ignored_the_order():
         got = find_matching_junction_indices(
             exons, [pair], strand='+', feature_types=[FEATURE_RETAINED_INTRON])
         assert got == {0}, f'{pair}: {got}'
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics for an input whose coordinates do not fit the gene
+# ---------------------------------------------------------------------------
+
+def _unmappable_cluster(junctions):
+    """A cluster whose features may or may not map, ready to analyse."""
+    df_gene_transcripts = pd.DataFrame({
+        'transcript_ensembl_id': ['CANON', 'ENST_OTHER'],
+        'transcript_refseq_id': [None, None],
+        'canonical': [1, 0],
+        'cds_start': [100, 100],
+        'cds_end': [900, 900],
+    })
+    exons = _two_exon_df((1, 100, 200), (2, 300, 400))
+    exons['abs_start_CDS'] = [1, 101]
+    exons['abs_end_CDS'] = [100, 200]
+    exons_by_id = {'CANON': exons, 'ENST_OTHER': exons}
+    empty_domains = pd.DataFrame(columns=['AA_start', 'AA_end'] + DOMAIN_NAME_COLUMNS)
+
+    result = ClusterAnalysisResult('cluster_1', 'ENSG_TEST', 'TESTGENE', specie='mouse')
+    result.junctions = junctions
+    result.analyze(
+        df_gene_transcripts, canonical_transcript_ids={'CANON'},
+        exon_lookup=lambda tid: exons_by_id[tid],
+        domain_lookup=lambda tid: empty_domains,
+    )
+    return result
+
+
+def test_a_cluster_whose_every_feature_is_unmapped_warns(caplog):
+    """The signature of coordinates that do not fit the gene - a wrong build,
+    orientation or gene. It used to pass in silence, which is how a matcher bug
+    discarded the mouse side of 1,684 clusters unnoticed."""
+    with caplog.at_level(logging.WARNING, logger='junction_analisys'):
+        _unmappable_cluster([(5000, 6000), (7000, 8000)])
+    assert any('none of its 2 features maps' in r.message for r in caplog.records), caplog.text
+
+
+def test_a_cluster_with_one_unmapped_feature_does_not_warn(caplog):
+    """A novel junction is exactly what a splicing tool reports; only ALL of them
+    failing is a property of the input worth interrupting for."""
+    with caplog.at_level(logging.WARNING, logger='junction_analisys'):
+        _unmappable_cluster([(200, 300), (7000, 8000)])
+    assert not any('features maps' in r.message for r in caplog.records), caplog.text
+
+
+def test_a_single_feature_cluster_does_not_warn(caplog):
+    """One feature that misses is not evidence of anything - the warning needs a
+    pattern, so it takes more than one feature."""
+    with caplog.at_level(logging.WARNING, logger='junction_analisys'):
+        _unmappable_cluster([(7000, 8000)])
+    assert not any('features maps' in r.message for r in caplog.records), caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Boundary order is normalised once, at the reader boundary
+#
+# Three separate consumers had independently assumed start < end. Asserting the
+# frame's contract, and the invariance that follows from it, covers all of them
+# and any consumer added later.
+# ---------------------------------------------------------------------------
+
+def _junction_frame(pairs):
+    return pd.DataFrame({
+        'gene_ensembl_id': ['ENSG00000000001'] * len(pairs),
+        'cluster_name': ['clu_1'] * len(pairs),
+        'start_position': [p[0] for p in pairs],
+        'end_position': [p[1] for p in pairs],
+    })
+
+
+def test_normalize_junctions_frame_orders_the_boundaries():
+    """A feature written end-first comes out start-first; one already in order is
+    left alone."""
+    out = utils.normalize_junctions_frame(_junction_frame([(300, 200), (400, 500)]))
+    assert list(out['start_position']) == [200, 400]
+    assert list(out['end_position']) == [300, 500]
+
+
+def test_normalize_junctions_frame_keeps_the_other_columns_aligned():
+    """The swap must move the pair only - a row's other values stay with it."""
+    df = _junction_frame([(300, 200), (400, 500)])
+    df['gene_symbol'] = ['FIRST', 'SECOND']
+    out = utils.normalize_junctions_frame(df)
+    assert list(out['gene_symbol']) == ['FIRST', 'SECOND']
+    assert list(out['start_position']) == [200, 400]
+
+
+def test_analysis_is_invariant_to_the_order_the_boundaries_are_written_in():
+    """The whole comparison, end to end: reversing every pair must change nothing.
+
+    This is the assertion that covers the matcher, the comparison window and the
+    most-like-canonical range together - each of which had assumed start < end,
+    and each of which was found separately by a wrong result.
+    """
+    df_gene_transcripts = pd.DataFrame({
+        'transcript_ensembl_id': ['CANON', 'ENST_SKIP'],
+        'transcript_refseq_id': [None, None],
+        'protein_ensembl_id': ['ENSP_C', 'ENSP_S'],
+        'protein_refseq_id': [None, None],
+        'canonical': [1, 0],
+        'cds_start': [100, 100],
+        'cds_end': [900, 900],
+    })
+    canonical_exons = _three_exon_df((1, 100, 200), (2, 300, 400), (3, 500, 600))
+    skipping_exons = _two_exon_df((1, 100, 200), (2, 500, 600))
+    for df in (canonical_exons, skipping_exons):
+        df['abs_start_CDS'] = [1 + 100 * i for i in range(len(df))]
+        df['abs_end_CDS'] = [100 + 100 * i for i in range(len(df))]
+    exons_by_id = {'CANON': canonical_exons, 'ENST_SKIP': skipping_exons}
+    empty_domains = pd.DataFrame(columns=['AA_start', 'AA_end'] + DOMAIN_NAME_COLUMNS)
+
+    def analyse(pairs):
+        result = ClusterAnalysisResult('clu_1', 'ENSG_TEST', 'TESTGENE')
+        frame = utils.normalize_junctions_frame(_junction_frame(pairs))
+        result.junctions = list(zip(frame['start_position'], frame['end_position']))
+        result.analyze(
+            df_gene_transcripts, canonical_transcript_ids={'CANON'},
+            exon_lookup=lambda tid: exons_by_id[tid],
+            domain_lookup=lambda tid: empty_domains,
+        )
+        return result.get_results_df()
+
+    forward = analyse([(200, 300), (200, 500)])
+    reversed_ = analyse([(300, 200), (500, 200)])
+    pd.testing.assert_frame_equal(forward, reversed_)
+    # and it is a real comparison, not two identically empty results
+    assert 'no_domains_in_region' in list(forward['event'])

@@ -90,8 +90,10 @@ def select_most_like_canonical(comparable_transcript_ids, canonical_transcript_i
     its own right. Callers wanting a single transcript per cluster fall back to that
     flag themselves (see results_stats.select_representative_transcript()).
     """
-    min_bp = min(start for start, end in junctions)
-    max_bp = max(end for start, end in junctions)
+    # min/max over BOTH coordinates of each pair: normalize_junctions_frame()
+    # orders them, but this is reachable with a hand-built list too.
+    min_bp = min(min(pair) for pair in junctions)
+    max_bp = max(max(pair) for pair in junctions)
 
     c_exons = transcript_exons[canonical_transcript_id]
     c_outside_set = _outside_range_exon_set(c_exons, min_bp, max_bp)
@@ -508,8 +510,11 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
     column added (AA_end - AA_start + 1).
     """
     junction_idxs = canonical_junctions | transcript_junctions
-    min_bp = min(junctions[idx][0] for idx in junction_idxs)
-    max_bp = max(junctions[idx][1] for idx in junction_idxs)
+    # min/max over BOTH coordinates, as above: taking min-of-starts and
+    # max-of-ends built a truncated - sometimes inverted - window from a pair
+    # written end-first.
+    min_bp = min(min(junctions[idx]) for idx in junction_idxs)
+    max_bp = max(max(junctions[idx]) for idx in junction_idxs)
 
     t_exons = transcript_exons[transcript_id]
     c_exons = transcript_exons[canonical_transcript_id]
@@ -1218,10 +1223,27 @@ class ClusterAnalysisResult:
             for transcript_id, exons in transcript_exons.items()
         }
 
+        unmapped = 0
         for idx, junction in enumerate(self.junctions):
             if not any(idx in junction_idxs for junction_idxs in transcript_junctions.values()):
                 logger.debug(f"Junction {junction} in cluster {self.cluster_name} does not map to any transcript. ")
                 self.add_event('feature_not_mapped', None)
+                unmapped += 1
+
+        # One feature of an event failing to map is ordinary - a novel junction is
+        # exactly what a splicing tool reports. EVERY feature failing is not: it
+        # says the coordinates do not fit this gene at all, which is a wrong
+        # build, a wrong orientation or a wrong gene rather than novel biology.
+        # Warned rather than logged at debug because that is a property of the
+        # input worth interrupting for: the whole cluster is about to be dropped.
+        if unmapped and unmapped == len(self.junctions) > 1:
+            logger.warning(
+                "Cluster %s, specie %s: none of its %d features maps to any of %s's "
+                "%d transcripts. Check the coordinates against the gene's build and "
+                "orientation.",
+                self.cluster_name, self.specie, unmapped,
+                self.gene_symbol or self.gene_ensembl_id, len(transcript_junctions),
+            )
 
         canonical_junctions = transcript_junctions.get(self.canonical_transcript_id, set())
         if not canonical_junctions:
@@ -2006,7 +2028,41 @@ class JunctionsAnalysis:
 
         self.logger.log(utils.PROGRESS,
                         f"Analysis complete: {processed_count}/{total} clusters")
+        self._log_unmapped_summary(all_results)
         return all_results
+
+    def _log_unmapped_summary(self, results):
+        """How much of the input never reached a transcript, per species.
+
+        A per-cluster warning scrolls past in a large run; this is one line, and
+        in a two-species comparison the asymmetry between the two is itself the
+        diagnosis - one species at 0% against the other at 48.5% is an input
+        problem, not biology. That asymmetry existed for 1,684 of 3,484 clusters
+        and nothing reported it (see find_matching_junction_indices).
+        """
+        per_specie = {}
+        for result in results:
+            features = len(result.junctions)
+            if not features:
+                continue
+            unmapped = sum(1 for event in result.events if event[0] == 'feature_not_mapped')
+            counts = per_specie.setdefault(result.specie, [0, 0, 0, 0])
+            counts[0] += unmapped
+            counts[1] += features
+            counts[2] += 1 if unmapped else 0
+            counts[3] += 1 if unmapped == features else 0
+        if not per_specie:
+            return
+
+        parts = []
+        for specie in sorted(per_specie, key=lambda s: (s is None, s)):
+            unmapped, features, touched, wholly = per_specie[specie]
+            parts.append(
+                f"{specie or 'unknown'} {unmapped:,} of {features:,} "
+                f"({100 * unmapped / features:.1f}%) in {touched:,} clusters, "
+                f"{wholly:,} with NO feature mapped"
+            )
+        self.logger.log(utils.PROGRESS, "Features unmapped: " + "; ".join(parts))
 
     # Events recorded for a transcript that was NOT actually compared to the
     # canonical transcript (it was skipped for lacking junctions or lacking a
