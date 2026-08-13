@@ -2243,7 +2243,11 @@ def test_cds_to_bp_is_the_inverse_on_both_strands():
 def test_a_wider_window_never_narrows_the_amino_acid_interval():
     """The property the strand bug broke: widening the genomic span can only widen
     the interval it projects to. ZNF195's went from AA 14-487 to AA 14-85 when the
-    span grew by 2,296 bp."""
+    span grew by 2,296 bp.
+
+    Held with the bounding exons FIXED, which is the weaker half of the property -
+    see the two tests below, which re-derive them per span as the pipeline does.
+    """
     from junction_analisys import get_aa_range
     exons = _three_exon_df((1, 3000, 3100), (2, 2000, 2100), (3, 1000, 1500))
     exons['abs_start_CDS'] = [1, 102, 203]
@@ -2252,6 +2256,79 @@ def test_a_wider_window_never_narrows_the_amino_acid_interval():
     narrow = get_aa_range(first, last, 1400, 3050, minus=True)
     wide = get_aa_range(first, last, 1000, 3100, minus=True)
     assert wide[0] <= narrow[0] and wide[1] >= narrow[1], f'{wide} does not contain {narrow}'
+
+
+def _utr_flanked_exons():
+    """A minus-strand transcript whose genomically-lowest exon is wholly UTR.
+
+    DoChaP writes abs_start_CDS == abs_end_CDS == 0 for a non-coding exon, and 0 is
+    also a real CDS offset, so a projection that reads the bounding exon's bounds
+    without asking whether it codes returns 0 for either end of the window.
+    """
+    exons = _three_exon_df((1, 3000, 3100), (2, 2000, 2100), (3, 1000, 1500))
+    exons['abs_start_CDS'] = [1, 102, 0]
+    exons['abs_end_CDS'] = [101, 202, 0]
+    return exons
+
+
+def test_a_wholly_utr_bounding_exon_does_not_empty_the_window():
+    """The regression that cost TWIST1 and SPIRE2 every domain in their windows.
+
+    Widening the span onto the UTR exon must not collapse the interval to a point:
+    the coding exons the span still covers are what it projects to.
+    """
+    from junction_analisys import aa_range_for_span
+    exons = _utr_flanked_exons()
+    narrow = aa_range_for_span(exons, 2000, 3100, minus=True)
+    wide = aa_range_for_span(exons, 1000, 3100, minus=True)
+    assert narrow is not None and narrow[1] > narrow[0]
+    assert wide is not None, 'the UTR exon emptied the window'
+    assert wide[0] <= narrow[0] and wide[1] >= narrow[1], f'{wide} does not contain {narrow}'
+
+
+def test_a_span_covering_no_coding_sequence_is_empty_not_amino_acid_zero():
+    """None, not (0, 0). A window over pure UTR has no amino acids in it at all,
+    which is a different statement from one covering the first codon - and reading
+    the second as the first is how a collapsed window passed for a real one."""
+    from junction_analisys import aa_range_for_span, _domains_in_span
+    exons = _utr_flanked_exons()
+    assert aa_range_for_span(exons, 1000, 1400, minus=True) is None
+    domains = pd.DataFrame({'AA_start': [0, 40], 'AA_end': [30, 90]})
+    assert _domains_in_span(domains, None).empty
+    assert len(_domains_in_span(domains, (0, 90))) == 2
+
+
+def test_widening_the_span_never_narrows_the_interval_over_real_exon_layouts():
+    """The pipeline re-derives the bounding exons for every span, so the property
+    has to hold as they change - which is where reading the bounding pair fails.
+
+    Swept over nested spans on both strands, including layouts with a UTR exon at
+    either end and an exon the span steps over entirely.
+    """
+    from junction_analisys import aa_range_for_span
+    layouts = [
+        _utr_flanked_exons(),
+        _three_exon_df((1, 3000, 3100), (2, 2000, 2100), (3, 1000, 1500)).assign(
+            abs_start_CDS=[1, 102, 203], abs_end_CDS=[101, 202, 702]),
+        _three_exon_df((1, 1000, 1500), (2, 2000, 2100), (3, 3000, 3100)).assign(
+            abs_start_CDS=[0, 1, 102], abs_end_CDS=[0, 101, 202]),
+    ]
+    bounds = [900, 1000, 1200, 1500, 1800, 2000, 2050, 2100, 2500, 3000, 3100, 3200]
+    for exons in layouts:
+        for minus in (False, True):
+            for i, lo in enumerate(bounds):
+                for hi in bounds[i:]:
+                    narrow = aa_range_for_span(exons, lo, hi, minus)
+                    if narrow is None:
+                        continue
+                    for lo2 in (b for b in bounds if b <= lo):
+                        for hi2 in (b for b in bounds if b >= hi):
+                            wide = aa_range_for_span(exons, lo2, hi2, minus)
+                            assert wide is not None, (
+                                f'{lo2}-{hi2} empty while {lo}-{hi} was {narrow}')
+                            assert wide[0] <= narrow[0] and wide[1] >= narrow[1], (
+                                f'minus={minus} {lo2}-{hi2} -> {wide} does not contain '
+                                f'{lo}-{hi} -> {narrow}')
 
 
 def test_exon_orientation_is_read_off_the_frame_when_no_strand_is_given():
