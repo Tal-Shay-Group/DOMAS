@@ -213,8 +213,10 @@ def get_aa_range(first_exon, last_exon, min_bp=None, max_bp=None, minus=False):
     else:
         start_cds = first_exon['abs_start_CDS'] if min_bp is None else _bp_to_cds(first_exon, min_bp, minus)
         end_cds = last_exon['abs_end_CDS'] if max_bp is None else _bp_to_cds(last_exon, max_bp, minus)
-    min_aa = min(start_cds, end_cds) // 3
-    max_aa = max(start_cds, end_cds) // 3
+    # The residue CONTAINING each base, not the count of whole codons before it -
+    # see aa_range_for_span(), which this shares a convention with.
+    min_aa = (min(start_cds, end_cds) + 2) // 3
+    max_aa = (max(start_cds, end_cds) + 2) // 3
     return min_aa, max_aa
 
 
@@ -291,7 +293,17 @@ def aa_range_for_span(df_exons, min_bp, max_bp, minus=False, cds_span=None):
 
     lowest = np.minimum(a, b)[contributes].min()
     highest = np.maximum(a, b)[contributes].max()
-    return lowest // 3, highest // 3
+    # DoChaP's CDS offsets are 1-based bases and InterPro's domain bounds 1-based
+    # RESIDUES, so a base has to be reported as the residue containing it:
+    # residue r covers bases 3r-2 .. 3r, hence (base + 2) // 3.
+    #
+    # base // 3 counts the whole codons BEFORE the base instead, which names a
+    # residue too low at the bottom of the window and too low at the top - so the
+    # window ran a residue generous at one end and a residue short at the other.
+    # CFI's IPR002172 ends at CDS base 771 and its window began at 773, two bases
+    # past it, and was reported unchanged; LGI2's IPR009039 starts at 655, the
+    # window's own last base, and was missed.
+    return (lowest + 2) // 3, (highest + 2) // 3
 
 
 def _snap_span_to_whole_exons(exon_frames, min_bp, max_bp):
@@ -361,11 +373,15 @@ def find_bp_range_for_domains(df_exons, domains_in_region, minus=None, cds_span=
     # compared transcript, and df_exons/domains_in_region are always tiny
     # per-transcript slices, so pandas' per-call overhead otherwise dominates.
     aa_start = domains_in_region['AA_start'].to_numpy()
-    valid = aa_start != 0
+    # InterPro numbers residues from 1, so 0 is not a position but a missing one.
+    valid = aa_start > 0
     if not valid.any():
         return None, None
     aa_end = domains_in_region['AA_end'].to_numpy()
-    min_domain_bp = aa_start[valid].min() * 3
+    # A residue's FIRST base is 3r-2 and its last is 3r. Taking 3r for both ends
+    # started the span two bases inside the domain's opening codon, so extending
+    # the window "to whole domains" could still stop a residue short of it.
+    min_domain_bp = aa_start[valid].min() * 3 - 2
     max_domain_bp = aa_end[valid].max() * 3
 
     starts = df_exons['abs_start_CDS'].to_numpy()

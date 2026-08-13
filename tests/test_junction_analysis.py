@@ -182,7 +182,8 @@ def test_get_aa_range_minus_strand_does_not_collapse_to_single_codon():
 
     # The full CDS span is bases 1-245 -> AA 0-81. The pre-fix bug returned
     # (18, 18) - a single codon at the exon boundary.
-    assert (min_aa, max_aa) == (0, 81)
+    # residue-containing rounding: CDS base b is residue (b + 2) // 3
+    assert (min_aa, max_aa) == (1, 82)
 
 
 def test_get_aa_range_with_explicit_bp_still_clamps_correctly():
@@ -219,9 +220,10 @@ def test_find_bp_range_for_domains_returns_genomically_ordered_pair():
     min_bp, max_bp = find_bp_range_for_domains(df_exons, domains_in_region)
 
     assert min_bp <= max_bp
-    # CDS 105 is 49 bases into the first exon, so 49 bases DOWN from its last
-    # base; CDS 765 is 128 into the second, so 128 down from that one's last base.
-    assert (min_bp, max_bp) == (24573605, 24575404)
+    # Residue 35 starts at CDS base 3*35-2 = 103, which is 47 bases into the first
+    # exon and so 47 bases DOWN from its last base; residue 255 ends at CDS 765,
+    # 128 into the second and 128 down from that one's last base.
+    assert (min_bp, max_bp) == (24573605, 24575406)
 
 
 def test_find_bp_range_for_domains_returns_none_when_no_real_domains():
@@ -2335,10 +2337,10 @@ def test_the_utr_half_of_a_partly_coding_exon_contributes_nothing():
 def test_offsets_of_a_partly_coding_exon_count_from_its_first_coding_base():
     from junction_analisys import aa_range_for_span
     exons, cds_span = _partly_coding_exons()
-    # exon 2's coding part alone: CDS 127-140 -> AA 42-46
-    assert aa_range_for_span(exons, 2040, 2053, minus=True, cds_span=cds_span) == (42, 46)
-    # exon 1, which codes throughout: CDS 1-126 -> AA 0-42
-    assert aa_range_for_span(exons, 3000, 3125, minus=True, cds_span=cds_span) == (0, 42)
+    # exon 2's coding part alone: CDS bases 127-140 -> residues 43-47
+    assert aa_range_for_span(exons, 2040, 2053, minus=True, cds_span=cds_span) == (43, 47)
+    # exon 1, which codes throughout: CDS bases 1-126 -> residues 1-42
+    assert aa_range_for_span(exons, 3000, 3125, minus=True, cds_span=cds_span) == (1, 42)
     # the UTR flank adds nothing to the exon's own contribution
     assert (aa_range_for_span(exons, 2000, 2053, minus=True, cds_span=cds_span)
             == aa_range_for_span(exons, 2040, 2053, minus=True, cds_span=cds_span))
@@ -2487,8 +2489,8 @@ def test_a_partly_coding_exon_contributes_only_its_coding_part(minus):
     from junction_analisys import aa_range_for_span
     exons, cds_span = _model_transcript(minus)
     first_coding_exon = (3000, 3099) if minus else (1000, 1099)
-    # 60 coding bases, CDS 1-60 -> AA 0-20 under the cds//3 convention
-    assert aa_range_for_span(exons, *first_coding_exon, minus, cds_span) == (0, 20)
+    # 60 coding bases, CDS 1-60 -> residues 1-20
+    assert aa_range_for_span(exons, *first_coding_exon, minus, cds_span) == (1, 20)
     # the whole exon and its coding part alone project identically
     coding_only = (3000, 3059) if minus else (1040, 1099)
     assert (aa_range_for_span(exons, *coding_only, minus, cds_span)
@@ -2515,7 +2517,7 @@ def test_pass_two_leaves_the_window_alone_when_the_domain_is_already_inside(minu
     exons, cds_span = _model_transcript(minus)
     window = (2000, 2099)                       # the middle exon, CDS 61-160
     aa = aa_range_for_span(exons, *window, minus, cds_span)
-    assert aa == (20, 53)
+    assert aa == (21, 54)                       # CDS bases 61-160
     inside = pd.DataFrame({'AA_start': [25], 'AA_end': [40]})
     lo, hi = find_bp_range_for_domains(exons, inside, minus, cds_span)
     assert window[0] <= lo and hi <= window[1], 'a contained domain must not widen the span'
@@ -2564,8 +2566,8 @@ def test_the_two_transcripts_are_windowed_over_one_shared_span():
     t_cds = (1040, 3039)
     lo, hi = _snap_span_to_whole_exons((c_exons, t_exons), 1050, 3050)
     assert (lo, hi) == (1000, 3100), 'the span must hold every touched exon whole'
-    assert aa_range_for_span(c_exons, lo, hi, False, c_cds) == (0, 66)
-    assert aa_range_for_span(t_exons, lo, hi, False, t_cds) == (0, 33)
+    assert aa_range_for_span(c_exons, lo, hi, False, c_cds) == (1, 67)    # CDS 1-200
+    assert aa_range_for_span(t_exons, lo, hi, False, t_cds) == (1, 34)    # CDS 1-100
 
 
 def test_a_transcript_with_no_annotated_protein_falls_back_to_the_exon_edges():
@@ -2575,3 +2577,83 @@ def test_a_transcript_with_no_annotated_protein_falls_back_to_the_exon_edges():
     from junction_analisys import aa_range_for_span
     exons, _ = _model_transcript(False)
     assert aa_range_for_span(exons, 1000, 1099, False, None) is not None
+
+
+# ---------------------------------------------------------------------------
+# Codon rounding: DoChaP's CDS offsets are 1-based BASES, InterPro's domain
+# bounds are 1-based RESIDUES, and residue r covers bases 3r-2 .. 3r. Every
+# conversion between the two has to say which of them it means.
+# ---------------------------------------------------------------------------
+
+def test_a_base_is_reported_as_the_residue_containing_it():
+    """base // 3 counts the whole codons BEFORE a base, which is a different
+    number from the residue the base belongs to for two bases out of every
+    three."""
+    from junction_analisys import aa_range_for_span
+    # one exon, 30 coding bases, CDS 1-30 = residues 1-10
+    exons = pd.DataFrame({'order_in_transcript': [1], 'genomic_start_tx': [1000],
+                          'genomic_end_tx': [1030], 'abs_start_CDS': [1], 'abs_end_CDS': [30]})
+    span = (1000, 1029)
+    assert aa_range_for_span(exons, *span, False, span) == (1, 10)
+    # the first codon alone is residue 1, not residue 0
+    assert aa_range_for_span(exons, 1000, 1002, False, span) == (1, 1)
+    # each base of the second codon reports residue 2
+    for bp in (1003, 1004, 1005):
+        assert aa_range_for_span(exons, bp, bp, False, span) == (2, 2), bp
+
+
+def test_a_domain_ending_just_before_the_window_is_not_in_it():
+    """CFI: IPR002172 ends at CDS base 771 and the window starts at 773, two bases
+    past it - no base of the domain is in the window. Reading the window's low
+    bound as 773 // 3 = 257 made it collide with the domain's last residue, 257,
+    and the domain was compared and reported unchanged."""
+    from junction_analisys import _domains_in_span, aa_range_for_span
+    exons = pd.DataFrame({'order_in_transcript': [1], 'genomic_start_tx': [1000],
+                          'genomic_end_tx': [2100], 'abs_start_CDS': [1], 'abs_end_CDS': [1100]})
+    cds = (1000, 2099)
+    window = aa_range_for_span(exons, 1772, 2043, False, cds)   # CDS bases 773-1044
+    assert window == (258, 348)
+    domain = pd.DataFrame({'AA_start': [213], 'AA_end': [257]})  # CDS 637-771
+    assert _domains_in_span(domain, window).empty
+
+
+def test_a_domain_starting_on_the_windows_last_base_is_in_it():
+    """LGI2: IPR009039 starts at CDS base 655, which IS the window's last base, so
+    the window covers a base of it. Reading the high bound as 655 // 3 = 218
+    stopped a residue short of the domain's first, 219, and it was missed."""
+    from junction_analisys import _domains_in_span, aa_range_for_span
+    exons = pd.DataFrame({'order_in_transcript': [1], 'genomic_start_tx': [1000],
+                          'genomic_end_tx': [2100], 'abs_start_CDS': [1], 'abs_end_CDS': [1100]})
+    cds = (1000, 2099)
+    window = aa_range_for_span(exons, 1341, 1654, False, cds)    # CDS bases 342-655
+    assert window == (114, 219)
+    domain = pd.DataFrame({'AA_start': [219], 'AA_end': [261]})  # CDS 655-783
+    assert len(_domains_in_span(domain, window)) == 1
+
+
+@pytest.mark.parametrize('minus', [False, True])
+def test_a_residue_survives_the_whole_round_trip(minus):
+    """residue -> CDS -> genomic -> CDS -> residue is the identity, for every
+    residue of the fixture. This is what pass 2 does to each domain it widens
+    for, so a drift here is a window that stops short of the domain it went out
+    to cover."""
+    from junction_analisys import aa_range_for_span, find_bp_range_for_domains
+    exons, cds_span = _model_transcript(minus)
+    for residue in range(1, 67):                 # 200 coding bases = 66 whole codons
+        one = pd.DataFrame({'AA_start': [residue], 'AA_end': [residue]})
+        lo, hi = find_bp_range_for_domains(exons, one, minus, cds_span)
+        assert aa_range_for_span(exons, lo, hi, minus, cds_span) == (residue, residue), residue
+
+
+@pytest.mark.parametrize('minus', [False, True])
+def test_no_window_ever_reports_residue_zero(minus):
+    """Residues are numbered from 1. A window that reached "amino acid 0" was
+    either a collapsed one or the rounding naming a residue that does not exist -
+    both of which have been mistaken for real results here."""
+    from junction_analisys import aa_range_for_span
+    exons, cds_span = _model_transcript(minus)
+    bounds = [400, 900, 1000, 1050, 1100, 2000, 2050, 2100, 3000, 3050, 3100, 3200]
+    for i, lo in enumerate(bounds):
+        for hi in bounds[i:]:
+            window = aa_range_for_span(exons, lo, hi, minus, cds_span)
+            assert window is None or window[0] >= 1, f'{lo}-{hi} -> {window}'
