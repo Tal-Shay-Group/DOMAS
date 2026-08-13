@@ -2404,3 +2404,174 @@ def test_exon_orientation_is_read_off_the_frame_when_no_strand_is_given():
     assert _exons_are_minus(minus)
     # a single exon cannot be told apart, and must not guess
     assert not _exons_are_minus(plus.iloc[:1])
+
+
+# ---------------------------------------------------------------------------
+# The two-pass window, end to end, over a fixture built so every expectation can
+# be checked by hand.
+#
+#   pass 1: the bounding box of the exons the junctions touch, pooled over BOTH
+#           transcripts and grown until every exon it touches is in it whole.
+#   pass 2: pass 1 extended to the bounding box of every domain overlapping it.
+#
+# The plus and minus fixtures are exact mirrors of each other, so the same
+# assertions hold on both with the coordinates reflected. Three exons of 100
+# bases: the first is 40 UTR + 60 coding, the second codes throughout, the third
+# is 40 coding + 60 UTR, giving CDS 1-200 either way. A fourth exon is wholly
+# untranslated.
+# ---------------------------------------------------------------------------
+
+def _model_transcript(minus):
+    """(exons, cds_span) - the fixture described above, on the given strand.
+
+    plus:  UTR|coding at 1000-1100, coding 2000-2100, coding|UTR at 3000-3100,
+           wholly-UTR exon at 4000-4100. First coding base 1040, last 3039.
+    minus: the mirror image - transcript order runs high to low, so the exon at
+           3000-3100 is the one carrying the 5' UTR. First coding base 1060,
+           last 3059.
+    """
+    if minus:
+        exons = pd.DataFrame({
+            'order_in_transcript': [1, 2, 3, 4],
+            'genomic_start_tx': [3000, 2000, 1000, 500],
+            'genomic_end_tx': [3100, 2100, 1100, 600],
+            'abs_start_CDS': [1, 61, 161, 0],
+            'abs_end_CDS': [60, 160, 200, 0],
+        })
+        return exons, (1060, 3059)
+    exons = pd.DataFrame({
+        'order_in_transcript': [1, 2, 3, 4],
+        'genomic_start_tx': [1000, 2000, 3000, 4000],
+        'genomic_end_tx': [1100, 2100, 3100, 4100],
+        'abs_start_CDS': [1, 61, 161, 0],
+        'abs_end_CDS': [60, 160, 200, 0],
+    })
+    return exons, (1040, 3039)
+
+
+@pytest.mark.parametrize('minus', [False, True])
+def test_every_coding_base_maps_to_its_own_offset_and_back(minus):
+    """The forward and inverse maps agree base by base, on either strand. They
+    have to: pass 2 goes CDS -> genomic -> CDS, and a disagreement between them
+    is exactly the width of the exon's UTR."""
+    from junction_analisys import _bp_to_cds, _cds_to_bp
+    exons, cds_span = _model_transcript(minus)
+    seen = []
+    for _, exon in exons.iterrows():
+        if exon.abs_start_CDS <= 0 and exon.abs_end_CDS <= 0:
+            continue
+        for cds in range(int(exon.abs_start_CDS), int(exon.abs_end_CDS) + 1):
+            bp = _cds_to_bp(exon, cds, minus, cds_span)
+            assert cds_span[0] <= bp <= cds_span[1], f'CDS {cds} mapped outside the CDS'
+            seen.append(bp)
+    # every coding base, once each, and no others
+    assert len(seen) == 200
+    assert len(set(seen)) == 200
+
+
+@pytest.mark.parametrize('minus', [False, True])
+def test_a_window_over_untranslated_sequence_only_is_empty(minus):
+    """Three flavours of "no coding here": the wholly-UTR exon, the UTR half of a
+    partly-coding exon, and an intron."""
+    from junction_analisys import aa_range_for_span
+    exons, cds_span = _model_transcript(minus)
+    utr_exon = (500, 600) if minus else (4000, 4100)
+    utr_half = (3060, 3099) if minus else (1000, 1039)
+    intron = (1500, 1600)
+    for lo, hi in (utr_exon, utr_half, intron):
+        assert aa_range_for_span(exons, lo, hi, minus, cds_span) is None, f'{lo}-{hi}'
+
+
+@pytest.mark.parametrize('minus', [False, True])
+def test_a_partly_coding_exon_contributes_only_its_coding_part(minus):
+    from junction_analisys import aa_range_for_span
+    exons, cds_span = _model_transcript(minus)
+    first_coding_exon = (3000, 3099) if minus else (1000, 1099)
+    # 60 coding bases, CDS 1-60 -> AA 0-20 under the cds//3 convention
+    assert aa_range_for_span(exons, *first_coding_exon, minus, cds_span) == (0, 20)
+    # the whole exon and its coding part alone project identically
+    coding_only = (3000, 3059) if minus else (1040, 1099)
+    assert (aa_range_for_span(exons, *coding_only, minus, cds_span)
+            == aa_range_for_span(exons, *first_coding_exon, minus, cds_span))
+
+
+@pytest.mark.parametrize('minus', [False, True])
+def test_the_domain_bounding_box_is_the_inverse_of_the_window_projection(minus):
+    """find_bp_range_for_domains() must land where aa_range_for_span() reads it
+    back. Round-tripping a domain's own extent has to return that extent."""
+    from junction_analisys import aa_range_for_span, find_bp_range_for_domains
+    exons, cds_span = _model_transcript(minus)
+    # a domain over AA 10-50, i.e. CDS 30-150, which straddles exons 1 and 2
+    domains = pd.DataFrame({'AA_start': [10], 'AA_end': [50]})
+    lo, hi = find_bp_range_for_domains(exons, domains, minus, cds_span)
+    assert lo <= hi
+    back = aa_range_for_span(exons, lo, hi, minus, cds_span)
+    assert back == (10, 50), f'round trip gave {back}'
+
+
+@pytest.mark.parametrize('minus', [False, True])
+def test_pass_two_leaves_the_window_alone_when_the_domain_is_already_inside(minus):
+    from junction_analisys import aa_range_for_span, find_bp_range_for_domains
+    exons, cds_span = _model_transcript(minus)
+    window = (2000, 2099)                       # the middle exon, CDS 61-160
+    aa = aa_range_for_span(exons, *window, minus, cds_span)
+    assert aa == (20, 53)
+    inside = pd.DataFrame({'AA_start': [25], 'AA_end': [40]})
+    lo, hi = find_bp_range_for_domains(exons, inside, minus, cds_span)
+    assert window[0] <= lo and hi <= window[1], 'a contained domain must not widen the span'
+
+
+@pytest.mark.parametrize('minus', [False, True])
+def test_pass_two_extends_to_cover_a_domain_that_overruns_pass_one(minus):
+    """The case pass 2 exists for: a domain caught by its edge in pass 1 pulls the
+    window out to its own extent, and the AA interval grows with it."""
+    from junction_analisys import aa_range_for_span, find_bp_range_for_domains
+    exons, cds_span = _model_transcript(minus)
+    window = (2000, 2099)
+    aa1 = aa_range_for_span(exons, *window, minus, cds_span)
+    # AA 15-25 reaches back into exon 1, below pass 1's AA 20
+    overrunning = pd.DataFrame({'AA_start': [15], 'AA_end': [25]})
+    lo, hi = find_bp_range_for_domains(exons, overrunning, minus, cds_span)
+    span2 = (min(window[0], lo), max(window[1], hi))
+    aa2 = aa_range_for_span(exons, *span2, minus, cds_span)
+    assert aa2[0] <= aa1[0] and aa2[1] >= aa1[1], 'pass 2 must contain pass 1'
+    assert aa2[0] == 15, f'pass 2 should reach the domain start, got {aa2}'
+
+
+@pytest.mark.parametrize('minus', [False, True])
+def test_a_domain_spanning_several_exons_keeps_its_full_extent(minus):
+    from junction_analisys import aa_range_for_span, find_bp_range_for_domains
+    exons, cds_span = _model_transcript(minus)
+    spanning = pd.DataFrame({'AA_start': [5], 'AA_end': [60]})    # exons 1 through 3
+    lo, hi = find_bp_range_for_domains(exons, spanning, minus, cds_span)
+    assert aa_range_for_span(exons, lo, hi, minus, cds_span) == (5, 60)
+
+
+def test_the_two_transcripts_are_windowed_over_one_shared_span():
+    """Pass 1 pools both transcripts' bounding exons, so neither is windowed over
+    a stretch the other is not - and each projects that one span into its own
+    coding coordinates, which is the only thing that differs between them."""
+    from junction_analisys import _snap_span_to_whole_exons, aa_range_for_span
+    c_exons, c_cds = _model_transcript(False)
+    # an alternative that splices out the middle exon: its exon 2 is elsewhere
+    t_exons = pd.DataFrame({
+        'order_in_transcript': [1, 2],
+        'genomic_start_tx': [1000, 3000],
+        'genomic_end_tx': [1100, 3100],
+        'abs_start_CDS': [1, 61],
+        'abs_end_CDS': [60, 100],
+    })
+    t_cds = (1040, 3039)
+    lo, hi = _snap_span_to_whole_exons((c_exons, t_exons), 1050, 3050)
+    assert (lo, hi) == (1000, 3100), 'the span must hold every touched exon whole'
+    assert aa_range_for_span(c_exons, lo, hi, False, c_cds) == (0, 66)
+    assert aa_range_for_span(t_exons, lo, hi, False, t_cds) == (0, 33)
+
+
+def test_a_transcript_with_no_annotated_protein_falls_back_to_the_exon_edges():
+    """cds_span is None for a transcript DoChaP records no protein for. The
+    projection then assumes each exon codes throughout - the old behaviour, which
+    is only wrong at the two ends of a coding sequence there isn't one of."""
+    from junction_analisys import aa_range_for_span
+    exons, _ = _model_transcript(False)
+    assert aa_range_for_span(exons, 1000, 1099, False, None) is not None

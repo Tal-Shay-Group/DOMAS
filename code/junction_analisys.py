@@ -326,18 +326,30 @@ def _domains_in_span(df_domains, aa_range):
     return _domains_in_aa_range(df_domains, *aa_range)
 
 
-def _cds_to_bp(exon, cds_bp, minus=False):
+def _cds_to_bp(exon, cds_bp, minus=False, cds_span=None):
     """Map a CDS-relative bp position to its genomic position within `exon`'s CDS
-    span. The inverse of _bp_to_cds(), with the same orientation rule and the same
-    half-open reading of the exon: the minus branch counts down from the exon's
-    last base, genomic_end_tx - 1."""
+    span. The inverse of the mapping aa_range_for_span() applies, and it has to be
+    read the same way or the two disagree: same orientation rule, same half-open
+    exon, and the same clipping to the exon's CODING part.
+
+    Counting from the exon's edge instead of its first coding base puts a position
+    the length of that exon's UTR too far out. On NDST2's canonical, exon 3 carries
+    1,005 coding bases in 1,346, and amino acid 187 landed 341 bp high - enough to
+    stretch the pass-2 window from AA 187 down to AA 73 and pull in a domain the
+    event does not touch.
+    """
     cds_bp = min(max(cds_bp, exon['abs_start_CDS']), exon['abs_end_CDS'])
+    if cds_span is None:
+        coding_lo, coding_hi = exon['genomic_start_tx'], exon['genomic_end_tx'] - 1
+    else:
+        coding_lo = max(exon['genomic_start_tx'], cds_span[0])
+        coding_hi = min(exon['genomic_end_tx'] - 1, cds_span[1])
     if minus:
-        return exon['genomic_end_tx'] - 1 - (cds_bp - exon['abs_start_CDS'])
-    return exon['genomic_start_tx'] + (cds_bp - exon['abs_start_CDS'])
+        return coding_hi - (cds_bp - exon['abs_start_CDS'])
+    return coding_lo + (cds_bp - exon['abs_start_CDS'])
 
 
-def find_bp_range_for_domains(df_exons, domains_in_region, minus=None):
+def find_bp_range_for_domains(df_exons, domains_in_region, minus=None, cds_span=None):
     """
     Genomic (start, end) bp positions - start <= end - spanning the start of
     the nearest-starting domain and the end of the furthest-reaching domain in
@@ -374,8 +386,8 @@ def find_bp_range_for_domains(df_exons, domains_in_region, minus=None):
     # min/max across transcripts, so return it in genomic (low, high) order.
     if minus is None:
         minus = _exons_are_minus(df_exons)
-    bp_a = _cds_to_bp(first_exon, min_domain_bp, minus)
-    bp_b = _cds_to_bp(last_exon, max_domain_bp, minus)
+    bp_a = _cds_to_bp(first_exon, min_domain_bp, minus, cds_span)
+    bp_b = _cds_to_bp(last_exon, max_domain_bp, minus, cds_span)
     return min(bp_a, bp_b), max(bp_a, bp_b)
 
 
@@ -759,8 +771,8 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
     if t_domains_round1.empty and c_domains_round1.empty:
         t_domains_round2, c_domains_round2 = t_domains_round1, c_domains_round1
     else:
-        t_min_bp, t_max_bp = find_bp_range_for_domains(t_exons, t_domains_round1, t_minus)
-        c_min_bp, c_max_bp = find_bp_range_for_domains(c_exons, c_domains_round1, c_minus)
+        t_min_bp, t_max_bp = find_bp_range_for_domains(t_exons, t_domains_round1, t_minus, t_cds)
+        c_min_bp, c_max_bp = find_bp_range_for_domains(c_exons, c_domains_round1, c_minus, c_cds)
         common_min_bp = _min_skip_none([common_first_bp, min_bp, t_min_bp, c_min_bp])
         common_max_bp = _max_skip_none([common_last_bp, max_bp, t_max_bp, c_max_bp])
 
