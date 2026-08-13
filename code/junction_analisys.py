@@ -218,7 +218,7 @@ def get_aa_range(first_exon, last_exon, min_bp=None, max_bp=None, minus=False):
     return min_aa, max_aa
 
 
-def aa_range_for_span(df_exons, min_bp, max_bp, minus=False):
+def aa_range_for_span(df_exons, min_bp, max_bp, minus=False, cds_span=None):
     """The amino-acid interval a genomic span projects to in one transcript, or
     None where the span covers none of its coding sequence.
 
@@ -242,6 +242,19 @@ def aa_range_for_span(df_exons, min_bp, max_bp, minus=False):
     None is the empty interval, and is NOT the same as (0, 0): a caller must read
     it as "no coding here", not as "amino acid 0". Conflating the two is exactly
     what the collapse did.
+
+    `cds_span` is the transcript's coding sequence in genomic coordinates, as
+    (first_coding_base, last_coding_base), both INCLUSIVE - the caller converts
+    from DoChaP's half-open cds_start/cds_end. Given it, each exon's coding part
+    is what the span is measured against, so the UTR half of a partly-coding exon
+    contributes nothing and offsets are counted from the first coding base rather
+    than from the exon's edge.
+
+    Without it the whole exon is assumed to code, which is false for the first and
+    last coding exon of every transcript: a bound landing in the UTR half of one
+    then saturates against the clamp and reports a residue the span does not
+    reach. PCLO's exon 2 is 54 bases carrying 14 coding ones, and a span over its
+    UTR half alone came back as amino acid 46.
     """
     starts = df_exons['genomic_start_tx'].to_numpy()
     # The genomic span is half-open, so an exon's last base is genomic_end_tx - 1.
@@ -249,20 +262,30 @@ def aa_range_for_span(df_exons, min_bp, max_bp, minus=False):
     cds_start = df_exons['abs_start_CDS'].to_numpy()
     cds_end = df_exons['abs_end_CDS'].to_numpy()
 
-    overlap_lo = np.maximum(min_bp, starts)
-    overlap_hi = np.minimum(max_bp, ends)
+    # The coding part of each exon, which is the exon itself except at the two
+    # ends of the coding sequence.
+    if cds_span is None:
+        coding_lo, coding_hi = starts, ends
+    else:
+        coding_lo = np.maximum(starts, cds_span[0])
+        coding_hi = np.minimum(ends, cds_span[1])
+
+    overlap_lo = np.maximum(min_bp, coding_lo)
+    overlap_hi = np.minimum(max_bp, coding_hi)
     # A wholly non-coding exon carries no CDS to contribute. DoChaP writes 0/0 for
     # it, which is a real CDS offset for a coding exon, so both bounds must be 0.
     contributes = (overlap_lo <= overlap_hi) & ((cds_start > 0) | (cds_end > 0))
     if not contributes.any():
         return None
 
+    # abs_start_CDS is the offset of the exon's transcript-order FIRST coding
+    # base, which is coding_lo on the plus strand and coding_hi on the minus.
     if minus:
-        a = cds_start + (ends - overlap_lo)
-        b = cds_start + (ends - overlap_hi)
+        a = cds_start + (coding_hi - overlap_lo)
+        b = cds_start + (coding_hi - overlap_hi)
     else:
-        a = cds_start + (overlap_lo - starts)
-        b = cds_start + (overlap_hi - starts)
+        a = cds_start + (overlap_lo - coding_lo)
+        b = cds_start + (overlap_hi - coding_lo)
     a = np.clip(a, cds_start, cds_end)
     b = np.clip(b, cds_start, cds_end)
 
@@ -615,7 +638,8 @@ def _max_skip_none(values):
 
 
 def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_transcript_id, transcript_id,
-                                  canonical_junctions, transcript_junctions, junctions, strand=None):
+                                  canonical_junctions, transcript_junctions, junctions, strand=None,
+                                  cds_spans=None):
     """
     Determine the genomic window around the differing junctions and return the
     domains of the canonical and compared transcript that fall within it.
@@ -664,6 +688,18 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
     else:
         t_minus, c_minus = _exons_are_minus(t_exons), _exons_are_minus(c_exons)
 
+    # Each transcript's coding sequence in genomic coordinates, as an INCLUSIVE
+    # (first, last) base pair. DoChaP stores cds_end half-open, like every other
+    # end coordinate it writes, so the last coding base is one below it. None for
+    # a transcript with no annotated protein, and for a caller that has no
+    # transcripts frame - the projection then assumes each exon codes throughout,
+    # which is only wrong at the two ends of the coding sequence.
+    t_cds = c_cds = None
+    if cds_spans:
+        t_span, c_span = cds_spans.get(transcript_id), cds_spans.get(canonical_transcript_id)
+        t_cds = (t_span[0], t_span[1] - 1) if t_span else None
+        c_cds = (c_span[0], c_span[1] - 1) if c_span else None
+
     # Round 1: window spanning the boundary exons of the differing junctions.
     # The two transcripts bound the event with exons of their own, which need not
     # line up - one may splice where the other reads through. Taking each
@@ -700,8 +736,8 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
     common_first_bp, common_last_bp = _snap_span_to_whole_exons(
         (t_exons, c_exons), common_first_bp, common_last_bp)
 
-    t_aa_round1 = aa_range_for_span(t_exons, common_first_bp, common_last_bp, t_minus)
-    c_aa_round1 = aa_range_for_span(c_exons, common_first_bp, common_last_bp, c_minus)
+    t_aa_round1 = aa_range_for_span(t_exons, common_first_bp, common_last_bp, t_minus, t_cds)
+    c_aa_round1 = aa_range_for_span(c_exons, common_first_bp, common_last_bp, c_minus, c_cds)
 
     # The domain set is reduced by curated InterPro entry type, not by the
     # geometry of the hits.
@@ -735,9 +771,9 @@ def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_tran
             # aa_range_for_span() reads a bound that falls inside a coding exon as
             # that interior position.
             t_domains_round2 = _domains_in_span(
-                df_t_domains, aa_range_for_span(t_exons, common_min_bp, common_max_bp, t_minus))
+                df_t_domains, aa_range_for_span(t_exons, common_min_bp, common_max_bp, t_minus, t_cds))
             c_domains_round2 = _domains_in_span(
-                df_c_domains, aa_range_for_span(c_exons, common_min_bp, common_max_bp, c_minus))
+                df_c_domains, aa_range_for_span(c_exons, common_min_bp, common_max_bp, c_minus, c_cds))
 
     # _domains_in_aa_range() returns a boolean-mask slice: already independent,
     # but carrying pandas' "copy of a slice" marker, which trips
@@ -891,7 +927,8 @@ def _group_text(c_domains, c_idxs, t_domains, t_idxs, column):
 
 
 def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, transcript_id,
-                     canonical_junctions, transcript_junctions, junctions, strand=None):
+                     canonical_junctions, transcript_junctions, junctions, strand=None,
+                     cds_spans=None):
     """
     Compare the domains of `transcript_id` against `canonical_transcript_id`
     within the Phase 2 window, and classify each group of matched/unmatched
@@ -913,7 +950,7 @@ def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, tr
     """
     t_domains, c_domains = find_relevant_domain_windows(
         transcript_exons, domain_lookup, canonical_transcript_id, transcript_id,
-        canonical_junctions, transcript_junctions, junctions, strand,
+        canonical_junctions, transcript_junctions, junctions, strand, cds_spans,
     )
 
     canonical_names = _domain_name_sets(c_domains)
@@ -1668,7 +1705,7 @@ class ClusterAnalysisResult:
             transcript_in_cds = self._junctions_in_cds(transcript_id, group_features)
             events = list(compare_domains(
                 domain_lookup, transcript_exons, self.canonical_transcript_id, transcript_id,
-                canonical_junctions, junction_idxs, self.junctions, self.strand,
+                canonical_junctions, junction_idxs, self.junctions, self.strand, self.cds_spans,
             ))
             if events:
                 for event in events:

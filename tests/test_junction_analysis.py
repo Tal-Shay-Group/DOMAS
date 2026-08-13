@@ -2298,6 +2298,71 @@ def test_a_span_covering_no_coding_sequence_is_empty_not_amino_acid_zero():
     assert len(_domains_in_span(domains, (0, 90))) == 2
 
 
+def _partly_coding_exons():
+    """A minus-strand transcript modelled on PCLO's ENST00000413807.6.
+
+    Exon 1 codes throughout; exon 2 is 54 bases carrying only 14 coding ones. The
+    transcript runs high-to-low, so exon 2's coding part sits at its HIGH end
+    (2040-2053) and 2000-2039 is 3'UTR. cds_span is the inclusive (first, last)
+    coding base, 2040 to 3125.
+    """
+    exons = pd.DataFrame({
+        'order_in_transcript': [1, 2],
+        'genomic_start_tx': [3000, 2000],
+        'genomic_end_tx': [3126, 2054],
+        'abs_start_CDS': [1, 127],
+        'abs_end_CDS': [126, 140],
+    })
+    return exons, (2040, 3125)
+
+
+def test_the_utr_half_of_a_partly_coding_exon_contributes_nothing():
+    """A span lying entirely in the UTR part of an exon that only partly codes
+    covers no amino acid, and must come back empty.
+
+    Without the coding bounds the projection assumes the whole exon codes, so the
+    bound saturates against the clamp and reports the nearest coding residue - a
+    residue the span does not reach. PCLO's exon 2 came back as amino acid 46 for
+    a span that stopped 7 bases short of its first coding base.
+    """
+    from junction_analisys import aa_range_for_span
+    exons, cds_span = _partly_coding_exons()
+    assert aa_range_for_span(exons, 2000, 2035, minus=True, cds_span=cds_span) is None
+    # the defect this guards against, still visible when the bounds are unknown
+    assert aa_range_for_span(exons, 2000, 2035, minus=True) is not None
+
+
+def test_offsets_of_a_partly_coding_exon_count_from_its_first_coding_base():
+    from junction_analisys import aa_range_for_span
+    exons, cds_span = _partly_coding_exons()
+    # exon 2's coding part alone: CDS 127-140 -> AA 42-46
+    assert aa_range_for_span(exons, 2040, 2053, minus=True, cds_span=cds_span) == (42, 46)
+    # exon 1, which codes throughout: CDS 1-126 -> AA 0-42
+    assert aa_range_for_span(exons, 3000, 3125, minus=True, cds_span=cds_span) == (0, 42)
+    # the UTR flank adds nothing to the exon's own contribution
+    assert (aa_range_for_span(exons, 2000, 2053, minus=True, cds_span=cds_span)
+            == aa_range_for_span(exons, 2040, 2053, minus=True, cds_span=cds_span))
+
+
+def test_the_coding_bounds_do_not_break_monotonicity():
+    """The property has to survive the extra clipping - a span that covers more
+    coding cannot project to less of the protein."""
+    from junction_analisys import aa_range_for_span
+    exons, cds_span = _partly_coding_exons()
+    bounds = [1990, 2000, 2020, 2040, 2050, 2054, 2500, 3000, 3060, 3126, 3200]
+    for i, lo in enumerate(bounds):
+        for hi in bounds[i:]:
+            narrow = aa_range_for_span(exons, lo, hi, minus=True, cds_span=cds_span)
+            if narrow is None:
+                continue
+            for lo2 in (b for b in bounds if b <= lo):
+                for hi2 in (b for b in bounds if b >= hi):
+                    wide = aa_range_for_span(exons, lo2, hi2, minus=True, cds_span=cds_span)
+                    assert wide is not None
+                    assert wide[0] <= narrow[0] and wide[1] >= narrow[1], (
+                        f'{lo2}-{hi2} -> {wide} does not contain {lo}-{hi} -> {narrow}')
+
+
 def test_widening_the_span_never_narrows_the_interval_over_real_exon_layouts():
     """The pipeline re-derives the bounding exons for every span, so the property
     has to hold as they change - which is where reading the bounding pair fails.
