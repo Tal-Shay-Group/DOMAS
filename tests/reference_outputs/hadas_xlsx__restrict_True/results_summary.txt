@@ -1,0 +1,38 @@
+DOMAS run summary
+=================
+
+Input source
+------------
+    <tests>/short_H_vs_M_HN6.xlsx
+
+Input clusters          : 6
+Input junctions         : 38
+
+Genes per cluster
+-----------------
+    1 gene(s) :         6  100.00% of clusters
+
+Junctions
+---------
+    matched to a transcript :        35   92.11% of evaluated
+    not matched             :         3    7.89% of evaluated
+    not evaluated           :         0   (cluster ended before matching ran)
+
+Clusters
+--------
+    comparable     :         6  100.00%
+    non-comparable :         0    0.00%
+
+Why a cluster was not comparable (one reason per cluster+gene)
+-------------------------------------------------------------
+    (none)
+
+Comparison events, by row
+-------------------------
+    no_domains_in_region         29  100.00% of rows
+
+Comparison events, by cluster+gene
+----------------------------------
+    The same event repeated in one cluster and gene counts once.
+
+    no_domains_in_region          6  100.00% of pairs

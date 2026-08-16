@@ -247,7 +247,8 @@ def analyze_leafcutter_input(con, significance_file, effect_sizes_file, output_c
     analyze_junctions(con, df_junctions=df_junctions, output_path=output_csv, create_pdf=False,
                        num_workers=num_workers,
                        max_clusters=max_clusters, filter_non_comparable=filter_non_comparable,
-                       write_all_comparable=write_all_comparable, extra_columns=extra_columns)
+                       write_all_comparable=write_all_comparable, extra_columns=extra_columns,
+                       input_source=[significance_file, effect_sizes_file])
 
 
 # --- internal2: LeafCutter results as a supplementary-table Excel -------------
@@ -364,7 +365,8 @@ def analyze_internal2_input(con, input_file, output_csv, specie='human', num_wor
     analyze_junctions(con, df_junctions=df_junctions, specie=specie, output_path=output_csv, create_pdf=False,
                       num_workers=num_workers,
                       max_clusters=max_clusters, filter_non_comparable=filter_non_comparable,
-                      write_all_comparable=write_all_comparable, extra_columns=extra_columns)
+                      write_all_comparable=write_all_comparable, extra_columns=extra_columns,
+                      input_source=input_file)
 
 
 
@@ -386,11 +388,11 @@ def _limit_clusters(df_junctions, max_clusters):
 
 
 def analyze_junctions(con, df_junctions=None, junctions_csv=None, hadas_format=False, specie=None,
-                        output_path='as_events_junctions_analysis.csv',
+                        output_path='annotated.csv',
                         n=0, create_pdf=True, print_genes=None, num_workers=5,
                         max_clusters=0,
                         filter_non_comparable=False, write_all_comparable=False, extra_columns=False,
-                        restrict_pdf_to_comparable=False):
+                        restrict_pdf_to_comparable=False, input_source=None):
     """Read junctions (from a DataFrame, a plain CSV, or a hadas-format Excel file - exactly
     one of df_junctions/junctions_csv must be given) and run JunctionsAnalysis.analyze_junctions().
 
@@ -409,7 +411,11 @@ def analyze_junctions(con, df_junctions=None, junctions_csv=None, hadas_format=F
                                       filter_transcript_count=n, create_pdf=create_pdf, print_genes=print_genes, num_workers=num_workers,
                                                                             filter_non_comparable=filter_non_comparable,
                                       write_all_comparable=write_all_comparable, extra_columns=extra_columns,
-                                      restrict_pdf_to_comparable=restrict_pdf_to_comparable)
+                                      restrict_pdf_to_comparable=restrict_pdf_to_comparable,
+                                      # Falls back to the file this wrapper read
+                                      # itself; a caller passing a frame it built
+                                      # names the source it came from.
+                                      input_source=input_source or junctions_csv)
 
 def analyze_ioe_file(con, ioe_file, output_csv, specie=None, num_workers=5, max_clusters=0,
                      filter_non_comparable=False, write_all_comparable=False, extra_columns=False):
@@ -420,7 +426,8 @@ def analyze_ioe_file(con, ioe_file, output_csv, specie=None, num_workers=5, max_
     analyze_junctions(con, df_junctions=df_junctions, specie=specie, output_path=output_csv, create_pdf=False, num_workers=num_workers,
                         max_clusters=max_clusters,
                         filter_non_comparable=filter_non_comparable,
-                        write_all_comparable=write_all_comparable, extra_columns=extra_columns)
+                        write_all_comparable=write_all_comparable, extra_columns=extra_columns,
+                        input_source=ioe_file)
 
 
 def analyze_rmats_input(con, rmats_dir, output_csv, specie=None, num_workers=5, max_clusters=0,
@@ -433,7 +440,8 @@ def analyze_rmats_input(con, rmats_dir, output_csv, specie=None, num_workers=5, 
     analyze_junctions(con, df_junctions=df_junctions, specie=specie, output_path=output_csv, create_pdf=False,
                        num_workers=num_workers,
                        max_clusters=max_clusters, filter_non_comparable=filter_non_comparable,
-                       write_all_comparable=write_all_comparable, extra_columns=extra_columns)
+                       write_all_comparable=write_all_comparable, extra_columns=extra_columns,
+                       input_source=utils.rmats_input_files(rmats_dir))
 
 
 def analyze_voila_input(con, voila_tsv, output_csv, specie=None, num_workers=5, max_clusters=0,
@@ -445,7 +453,8 @@ def analyze_voila_input(con, voila_tsv, output_csv, specie=None, num_workers=5, 
     analyze_junctions(con, df_junctions=df_junctions, specie=specie, output_path=output_csv, create_pdf=False,
                        num_workers=num_workers,
                        max_clusters=max_clusters, filter_non_comparable=filter_non_comparable,
-                       write_all_comparable=write_all_comparable, extra_columns=extra_columns)
+                       write_all_comparable=write_all_comparable, extra_columns=extra_columns,
+                       input_source=voila_tsv)
 
 
 def keep_min_transcript_clusters(df, examples_per_event=2):
@@ -476,11 +485,17 @@ def keep_min_transcript_clusters(df, examples_per_event=2):
 def analyze_ioe_files(con, input_path, pattern, output_csv, specie=None, examples_per_event=0, num_workers=5,
                        max_clusters=0, filter_non_comparable=False, write_all_comparable=False, extra_columns=False):
     dfs = []
+    # Kept for the run summary: which of a directory's .ioe files the pattern
+    # actually matched is part of what the run was, and listdir() order is not
+    # stable across filesystems, so it is sorted before being reported.
+    ioe_files = []
     for file in os.listdir(input_path):
         if re.match(pattern, file):
             ioe_file = os.path.join(input_path, file)
+            ioe_files.append(ioe_file)
             df_junctions = utils.ioe2junctions(ioe_file)
             dfs.append(df_junctions)
+    ioe_files.sort()
     if not dfs:
         logger.warning(f"No files matching pattern {pattern} were found in {input_path}.")
         return
@@ -501,13 +516,15 @@ def analyze_ioe_files(con, input_path, pattern, output_csv, specie=None, example
         analyze_junctions(con, df_junctions=df_examples, specie=specie, output_path=output_csv, create_pdf=False, num_workers=num_workers,
                             max_clusters=max_clusters,
                             filter_non_comparable=filter_non_comparable,
-                            write_all_comparable=write_all_comparable, extra_columns=extra_columns)
+                            write_all_comparable=write_all_comparable, extra_columns=extra_columns,
+                            input_source=ioe_files)
     else:
         df_all_junctions.to_csv('ioe_all_junctions.csv', index=False)
         analyze_junctions(con, df_junctions=df_all_junctions, specie=specie, output_path=output_csv, create_pdf=False, num_workers=num_workers,
                             max_clusters=max_clusters,
                             filter_non_comparable=filter_non_comparable,
-                            write_all_comparable=write_all_comparable, extra_columns=extra_columns)
+                            write_all_comparable=write_all_comparable, extra_columns=extra_columns,
+                            input_source=ioe_files)
 
 def analyze_hadas_input(con, input_file, output_csv, print_genes=None, num_workers=5,
                          create_pdf=True, max_clusters=0,
@@ -518,6 +535,7 @@ def analyze_hadas_input(con, input_file, output_csv, print_genes=None, num_worke
                         num_workers=num_workers, max_clusters=max_clusters,
                         filter_non_comparable=filter_non_comparable,
                         write_all_comparable=write_all_comparable, extra_columns=extra_columns,
-                        restrict_pdf_to_comparable=restrict_pdf_to_comparable)
+                        restrict_pdf_to_comparable=restrict_pdf_to_comparable,
+                        input_source=input_file)
     
 

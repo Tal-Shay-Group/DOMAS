@@ -336,6 +336,15 @@ def _rmats_event_feature_types(event_type):
     return None  # all plain junctions
 
 
+def rmats_input_files(rmats_dir):
+    """The [Event].MATS.JC.txt files rmats2junctions() will actually read, in
+    event order. A run is routinely given a directory holding only some of the
+    five, so listing the whole map would name files that were never opened."""
+    return [os.path.join(rmats_dir, filename)
+            for filename in _RMATS_EVENT_FILES.values()
+            if os.path.exists(os.path.join(rmats_dir, filename))]
+
+
 def rmats2junctions(rmats_dir):
     """Parse an rMATS-turbo output directory (the five [Event].MATS.JC.txt files)
     into a junctions DataFrame ready for JunctionsAnalysis.analyze_junctions().
@@ -356,6 +365,8 @@ def rmats2junctions(rmats_dir):
             logger.warning(f"rMATS {event_type} file not found at {path} - no {event_type} "
                            f"events will be analysed.")
             continue
+        # Same existence test rmats_input_files() applies, so the run summary
+        # names exactly the files this loop goes on to read.
         df = pd.read_csv(path, sep='\t')
         _check_rmats_columns(event_type, df.columns, path)
         malformed = 0

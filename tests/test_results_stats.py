@@ -62,7 +62,12 @@ def test_hadas_analysis_and_stats_report_flow(con, tmp_path):
     )
 
     assert os.path.exists(results_csv), "analyze_hadas_input should have written a results.csv"
-    df = pd.read_csv(results_csv)
+    # The run writes its compared rows here and the rest to non_results.csv
+    # beside it; the report covers both, so the row count to check against is
+    # the pair's.
+    run_files = results_stats.results_csv_paths(results_csv)
+    assert len(run_files) == 2, f"expected a non_ companion beside {results_csv}"
+    df = pd.concat([pd.read_csv(one) for one in run_files], ignore_index=True)
     assert len(df) > 0, "Expected at least one analyzed row"
     assert 'event_type' in df.columns
 

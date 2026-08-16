@@ -1,0 +1,51 @@
+DOMAS run summary
+=================
+
+Input source
+------------
+    <tests>/rmats/SE.MATS.JC.txt
+    <tests>/rmats/A5SS.MATS.JC.txt
+    <tests>/rmats/A3SS.MATS.JC.txt
+    <tests>/rmats/MXE.MATS.JC.txt
+    <tests>/rmats/RI.MATS.JC.txt
+
+Input clusters          : 200
+Input junctions         : 520
+
+Genes per cluster
+-----------------
+    1 gene(s) :       200  100.00% of clusters
+
+Junctions
+---------
+    matched to a transcript :       399   76.73% of evaluated
+    not matched             :       121   23.27% of evaluated
+    not evaluated           :         0   (cluster ended before matching ran)
+
+Clusters
+--------
+    comparable     :       123   61.50%
+    non-comparable :        77   38.50%
+
+Why a cluster was not comparable (one reason per cluster+gene)
+-------------------------------------------------------------
+    no_unique_transcript          43   55.84% of non-comparable
+    no_canonical_features         34   44.16% of non-comparable
+
+Comparison events, by row
+-------------------------
+    no_domains_in_region        297   87.35% of rows
+    dropped_domain               21    6.18% of rows
+    added_domain                 20    5.88% of rows
+    merged_domain                 1    0.29% of rows
+    unchanged                     1    0.29% of rows
+
+Comparison events, by cluster+gene
+----------------------------------
+    The same event repeated in one cluster and gene counts once.
+
+    no_domains_in_region        109   80.15% of pairs
+    added_domain                 15   11.03% of pairs
+    dropped_domain               10    7.35% of pairs
+    merged_domain                 1    0.74% of pairs
+    unchanged                     1    0.74% of pairs

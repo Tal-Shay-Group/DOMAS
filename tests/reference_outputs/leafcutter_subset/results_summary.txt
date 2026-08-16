@@ -1,0 +1,46 @@
+DOMAS run summary
+=================
+
+Input source
+------------
+    <tests>/leafcutter/leafcutter_ds_cluster_significance.txt
+    <tests>/leafcutter/leafcutter_ds_effect_sizes.txt
+
+Input clusters          : 126
+Input junctions         : 446
+
+Genes per cluster
+-----------------
+    1 gene(s) :       126  100.00% of clusters
+
+Junctions
+---------
+    matched to a transcript :       337   75.56% of evaluated
+    not matched             :       109   24.44% of evaluated
+    not evaluated           :         0   (cluster ended before matching ran)
+
+Clusters
+--------
+    comparable     :        82   65.08%
+    non-comparable :        44   34.92%
+
+Why a cluster was not comparable (one reason per cluster+gene)
+-------------------------------------------------------------
+    no_unique_transcript          42   95.45% of non-comparable
+    no_canonical_features          2    4.55% of non-comparable
+
+Comparison events, by row
+-------------------------
+    no_domains_in_region        365   94.56% of rows
+    added_domain                 11    2.85% of rows
+    dropped_domain                9    2.33% of rows
+    unchanged                     1    0.26% of rows
+
+Comparison events, by cluster+gene
+----------------------------------
+    The same event repeated in one cluster and gene counts once.
+
+    no_domains_in_region         77   87.50% of pairs
+    added_domain                  7    7.95% of pairs
+    dropped_domain                3    3.41% of pairs
+    unchanged                     1    1.14% of pairs

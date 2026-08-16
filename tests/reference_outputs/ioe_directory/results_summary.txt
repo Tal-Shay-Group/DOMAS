@@ -1,0 +1,50 @@
+DOMAS run summary
+=================
+
+Input source
+------------
+    <tests>/ioe/output_prefix_A3_strict.ioe
+    <tests>/ioe/output_prefix_A5_strict.ioe
+    <tests>/ioe/output_prefix_AF_strict.ioe
+    <tests>/ioe/output_prefix_AL_strict.ioe
+    <tests>/ioe/output_prefix_MX_strict.ioe
+    <tests>/ioe/output_prefix_RI_strict.ioe
+    <tests>/ioe/output_prefix_SE_strict.ioe
+
+Input clusters          : 140
+Input junctions         : 340
+
+Genes per cluster
+-----------------
+    1 gene(s) :       140  100.00% of clusters
+
+Junctions
+---------
+    matched to a transcript :       340  100.00% of evaluated
+    not matched             :         0    0.00% of evaluated
+    not evaluated           :         0   (cluster ended before matching ran)
+
+Clusters
+--------
+    comparable     :        99   70.71%
+    non-comparable :        41   29.29%
+
+Why a cluster was not comparable (one reason per cluster+gene)
+-------------------------------------------------------------
+    no_canonical_features         41  100.00% of non-comparable
+
+Comparison events, by row
+-------------------------
+    no_domains_in_region        173   87.82% of rows
+    added_domain                 14    7.11% of rows
+    dropped_domain                9    4.57% of rows
+    merged_domain                 1    0.51% of rows
+
+Comparison events, by cluster+gene
+----------------------------------
+    The same event repeated in one cluster and gene counts once.
+
+    no_domains_in_region         87   81.31% of pairs
+    added_domain                 11   10.28% of pairs
+    dropped_domain                8    7.48% of pairs
+    merged_domain                 1    0.93% of pairs

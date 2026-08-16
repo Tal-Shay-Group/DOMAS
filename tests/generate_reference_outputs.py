@@ -23,6 +23,8 @@ sys.path.insert(0, CODE_DIR)
 from junction_analisys import JunctionsAnalysis  # noqa: E402
 from alternative_splicing import hadas_read_input_file, read_junctions_csv  # noqa: E402
 from pdf_text_utils import write_pdf_text_manifest  # noqa: E402
+from summary_utils import make_summary_portable  # noqa: E402
+from junction_analisys import summary_path  # noqa: E402
 
 DB_PATH = '/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite'
 IOE_CSV = os.path.join(TESTS_DIR, 'ioe_example_junctions.csv')
@@ -65,10 +67,15 @@ def run_one(con, label, junctions_csv, hadas_format, restrict_pdf_to_comparable)
             create_pdf=True,
             num_workers=1,
             restrict_pdf_to_comparable=restrict_pdf_to_comparable,
+            input_source=junctions_csv,
             write_all_comparable=True,
         )
     finally:
         os.chdir(cwd_before)
+
+    # The run names its input by full path; this summary is committed, so the
+    # path is stored relative to tests/ instead (see summary_utils).
+    make_summary_portable(summary_path(output_path), TESTS_DIR)
 
     num_pdfs = len([f for f in os.listdir(case_dir) if f.endswith('.pdf')])
     write_pdf_text_manifest(case_dir)

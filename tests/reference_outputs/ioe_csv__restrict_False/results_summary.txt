@@ -1,0 +1,45 @@
+DOMAS run summary
+=================
+
+Input source
+------------
+    <tests>/ioe_example_junctions.csv
+
+Input clusters          : 35
+Input junctions         : 85
+
+Genes per cluster
+-----------------
+    1 gene(s) :        35  100.00% of clusters
+
+Junctions
+---------
+    matched to a transcript :        70   82.35% of evaluated
+    not matched             :        15   17.65% of evaluated
+    not evaluated           :         0   (cluster ended before matching ran)
+
+Clusters
+--------
+    comparable     :        31   88.57%
+    non-comparable :         4   11.43%
+
+Why a cluster was not comparable (one reason per cluster+gene)
+-------------------------------------------------------------
+    no_canonical_features          3   75.00% of non-comparable
+    no_unique_transcript           1   25.00% of non-comparable
+
+Comparison events, by row
+-------------------------
+    no_domains_in_region         28   90.32% of rows
+    longer                        1    3.23% of rows
+    unchanged                     1    3.23% of rows
+    added_domain                  1    3.23% of rows
+
+Comparison events, by cluster+gene
+----------------------------------
+    The same event repeated in one cluster and gene counts once.
+
+    no_domains_in_region         28   90.32% of pairs
+    longer                        1    3.23% of pairs
+    unchanged                     1    3.23% of pairs
+    added_domain                  1    3.23% of pairs

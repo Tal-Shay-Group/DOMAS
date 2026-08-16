@@ -9,6 +9,7 @@ import time
 import warnings
 import numpy as np
 import pandas as pd
+from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import utils
@@ -1183,14 +1184,49 @@ class ClusterAnalysisResult:
         # (see JunctionsAnalysis._generate_pdfs).
         self.matched_features = {}
         self.kept_domains = {}
+        # How many of self.junctions mapped to at least one transcript of the
+        # gene. None while the matching has not run - which is not the same as 0,
+        # and the run summary reports the two apart.
+        self.features_matched = None
         self.events = []
+
+    def _matched_junction_text(self, transcript_id):
+        """The event's features that one transcript carries, as
+        'low-high;low-high' in ascending order - the canonical_junctions /
+        alternative_junctions columns.
+
+        Read from self.matched_features, which _match_features_to_transcripts()
+        fills as soon as the matching is done, so the rows it records itself
+        (feature_not_mapped, no_canonical_features) already carry the canonical's
+        list. Empty for a transcript that carries none of them, and for the rows
+        recorded before any matching happened (gene_not_in_db,
+        no_canonical_transcript, ...) - both mean "no feature to name here", and
+        the event column already says which.
+
+        Identity of a feature is its coordinate pair, which is also what the
+        matching is done on, so a pair repeated in the input is written once.
+        """
+        if not transcript_id:
+            return None
+        matched = self.matched_features.get(transcript_id)
+        if not matched:
+            return None
+        return ';'.join(f'{low}-{high}' for low, high in
+                        sorted({(min(a, b), max(a, b)) for a, b in matched}))
 
     def add_event(self, event, alternative_transcript_id=None, domain_id=None, domain_name=None, domain_description=None,
                   canonical_domain_length=None, alternative_domain_length=None,
                   canonical_domains_number=None, alternative_domains_number=None, is_longest_cds=None,
                   is_most_like_canonical=None, group=None, rank=None,
                   canonical_junction_in_cds=None, alternative_junction_in_cds=None):
-        self.events.append((event, alternative_transcript_id, group, rank, domain_id, domain_name, domain_description, canonical_domain_length,
+        # Worked out here rather than passed in by each caller: every event type
+        # wants the same two lists, and they follow from the row's own transcript
+        # ids. A caller that records a row before the matching has run gets empty
+        # ones, which is the honest answer for it.
+        self.events.append((event, alternative_transcript_id,
+                            self._matched_junction_text(self.canonical_transcript_id),
+                            self._matched_junction_text(alternative_transcript_id),
+                            group, rank, domain_id, domain_name, domain_description, canonical_domain_length,
                             alternative_domain_length, canonical_domains_number, alternative_domains_number,
                             canonical_junction_in_cds, alternative_junction_in_cds,
                             is_longest_cds, is_most_like_canonical))
@@ -1245,12 +1281,6 @@ class ClusterAnalysisResult:
         self.canonical_exons = transcript_exons.get(self.canonical_transcript_id)
 
         transcript_junctions, canonical_junctions = self._match_features_to_transcripts(transcript_exons)
-        # Recorded whatever happens next: which junctions a transcript carries is
-        # worth drawing even for one that never gets compared.
-        self.matched_features = {
-            tid: [self.junctions[i] for i in sorted(idxs) if i < len(self.junctions)]
-            for tid, idxs in transcript_junctions.items()
-        }
         if canonical_junctions is None:
             return
 
@@ -1450,6 +1480,15 @@ class ClusterAnalysisResult:
                                                           feature_types=self.feature_types)
             for transcript_id, exons in transcript_exons.items()
         }
+        # Recorded whatever happens next: which junctions a transcript carries is
+        # worth drawing even for one that never gets compared, and it is what the
+        # canonical_junctions / alternative_junctions columns are written from.
+        # Filled here rather than by the caller so the rows recorded just below -
+        # feature_not_mapped, no_canonical_features - can name them too.
+        self.matched_features = {
+            tid: [self.junctions[i] for i in sorted(idxs) if i < len(self.junctions)]
+            for tid, idxs in transcript_junctions.items()
+        }
 
         unmapped = 0
         for idx, junction in enumerate(self.junctions):
@@ -1457,6 +1496,7 @@ class ClusterAnalysisResult:
                 logger.debug(f"Junction {junction} in cluster {self.cluster_name} does not map to any transcript. ")
                 self.add_event('feature_not_mapped', None)
                 unmapped += 1
+        self.features_matched = len(self.junctions) - unmapped
 
         # One feature of an event failing to map is ordinary - a novel junction is
         # exactly what a splicing tool reports. EVERY feature failing is not: it
@@ -1754,7 +1794,9 @@ class ClusterAnalysisResult:
     def get_results_df(self):
         df = pd.DataFrame(
             self.events,
-            columns=['event', 'alternative_transcript_id', 'group', 'rank', 'domain_id', 'domain_name', 'domain_description',
+            columns=['event', 'alternative_transcript_id',
+                        'canonical_junctions', 'alternative_junctions',
+                        'group', 'rank', 'domain_id', 'domain_name', 'domain_description',
                         'canonical_domain_length', 'alternative_domain_length',
                         'canonical_domains_number', 'alternative_domains_number',
                         'canonical_junction_in_cds', 'alternative_junction_in_cds',
@@ -1847,25 +1889,278 @@ def selected_comparable_rows(df_cluster_results):
     return df_cluster_results[~is_comparison | keep]
 
 
+# The non-comparison events that END a cluster's analysis - exactly one of them
+# is recorded for any cluster that never reached a comparison, each `return`ing
+# from analyze(). The rest of NON_COMPARISON_EVENTS are per-transcript outcomes
+# that can appear many times in a cluster and alongside comparisons, so they are
+# not what "why was this cluster not comparable" means. Ordered for a stable
+# answer if a cluster ever carried two.
+TERMINAL_NON_COMPARISON_EVENTS = (
+    'no_gene_specified', 'gene_not_in_db', 'only_one_transcript',
+    'no_canonical_transcript', 'no_canonical_features', 'no_unique_transcript',
+)
+
+
+def _distinct_genes(cluster_df):
+    """How many genes one cluster's rows name.
+
+    The Ensembl id where there is one, the symbol where there is not: a symbol
+    DoChaP cannot resolve leaves gene_ensembl_id empty, and counting only the ids
+    would file every such cluster under "names no gene" when it plainly names
+    one. Those clusters are still reported - as gene_not_in_db, in the
+    non-comparable breakdown, which is where that belongs.
+    """
+    columns = [c for c in ('gene_ensembl_id', 'gene_symbol') if c in cluster_df.columns]
+    if not columns:
+        return 0
+    names = cluster_df[columns[0]]
+    for fallback in columns[1:]:
+        names = names.fillna(cluster_df[fallback])
+    return names.nunique(dropna=True)
+
+
+class RunSummary:
+    """The counts behind <output>_summary.txt: what went in, how much of it could be
+    analysed, and what came out.
+
+    Seeded from the junctions frame, then fed one cluster at a time by the writer
+    thread as results arrive. Only counters are kept - a run at IOE scale streams
+    tens of millions of rows past this, so nothing here may grow with them.
+
+    Two units of counting run side by side, because they answer different
+    questions. Rows say how much of the output a category takes up; cluster+gene
+    pairs say how many events it actually describes - a single cluster reporting
+    the same dropped domain against four transcripts is four rows but one
+    finding, and counting only rows makes the busiest clusters look like the
+    commonest outcome.
+    """
+
+    def __init__(self, input_source=None):
+        # Every file the run read, listed rather than summarised as the directory
+        # holding them: which of a format's files were present is part of what
+        # the run was, and an rMATS directory missing RI.MATS.JC.txt produces a
+        # different analysis from one that has it. A bare string is taken as a
+        # single file.
+        if input_source is None:
+            self.input_source = []
+        elif isinstance(input_source, str):
+            self.input_source = [input_source]
+        else:
+            self.input_source = list(input_source)
+        self.input_clusters = 0
+        self.input_junctions = 0
+        self.genes_per_cluster = Counter()      # distinct genes -> clusters with that many
+        # Junctions are counted per cluster, so one coordinate pair reported in
+        # two clusters counts twice - it is matched against a different gene's
+        # transcripts each time and can map in one and not the other.
+        self.junctions_matched = 0
+        self.junctions_unmatched = 0
+        self.junctions_not_evaluated = 0        # clusters that ended before matching ran
+        self.comparable = 0                     # cluster+gene pairs
+        self.non_comparable = 0
+        self.non_comparable_reasons = Counter()
+        self.event_rows = Counter()             # comparison event -> rows written
+        self.event_pairs = Counter()            # comparison event -> cluster+gene pairs
+
+    def seed(self, df_junctions, cluster_groups):
+        """What the input holds, before any of it is analysed."""
+        self.input_clusters = len(cluster_groups)
+        self.input_junctions = len(df_junctions)
+        for _, cluster_df in cluster_groups:
+            self.genes_per_cluster[_distinct_genes(cluster_df)] += 1
+
+    def add_cluster(self, cluster_result):
+        """One analysed cluster: whether it reached a comparison, why not where it
+        did not, and how many of its junctions mapped to a transcript."""
+        matched = cluster_result.features_matched
+        if matched is None:
+            self.junctions_not_evaluated += len(cluster_result.junctions)
+        else:
+            self.junctions_matched += matched
+            self.junctions_unmatched += len(cluster_result.junctions) - matched
+
+        events = {event[0] for event in cluster_result.events}
+        if events - NON_COMPARISON_EVENTS:
+            self.comparable += 1
+            return
+        self.non_comparable += 1
+        reason = next((name for name in TERMINAL_NON_COMPARISON_EVENTS if name in events),
+                      None)
+        # Every path that ends an analysis records one of the terminal events, so
+        # this is defensive rather than expected - but a cluster counted under no
+        # reason at all would leave the breakdown quietly short of the total.
+        self.non_comparable_reasons[reason or 'unknown'] += 1
+
+    def add_frame(self, df_chunk):
+        """The comparison rows of one chunk, as they are about to be written.
+
+        Taken from the frame rather than from the cluster results so the numbers
+        describe the file that was produced: write_all_comparable=False has
+        already reduced each group to its selected transcript by this point.
+        """
+        comparisons = df_chunk[~df_chunk['event_type'].isin(NON_COMPARISON_EVENTS)]
+        if comparisons.empty:
+            return
+        self.event_rows.update(comparisons['event_type'].value_counts().to_dict())
+        # specie is part of the key: two species can use the same cluster name,
+        # and they are separate clusters everywhere else in the run.
+        pairs = comparisons[['event', 'gene_symbol', 'specie', 'event_type']].drop_duplicates()
+        self.event_pairs.update(pairs['event_type'].value_counts().to_dict())
+
+    @staticmethod
+    def _table(counter, total, unit):
+        if not counter:
+            return ['    (none)']
+        width = max(len(name) for name in counter)
+        return [f'    {name:<{width}}  {count:>9,}  {count / total:>7.2%} of {unit}'
+                for name, count in counter.most_common()]
+
+    def text(self):
+        """The summary file's contents."""
+        junctions_evaluated = self.junctions_matched + self.junctions_unmatched
+        analysed = self.comparable + self.non_comparable
+        lines = [
+            'DOMAS run summary',
+            '=================',
+            '',
+            'Input source',
+            '------------',
+        ]
+        # Only reachable when a caller hands analyze_junctions() a DataFrame it
+        # built itself and names no file - every reader passes its own. Says that
+        # rather than "unknown", which would read as a bug in the summary.
+        lines += ([f'    {source}' for source in self.input_source]
+                  or ['    (no file - the junctions were passed in as a DataFrame)'])
+        lines += [
+            '',
+            f'Input clusters          : {self.input_clusters:,}',
+            f'Input junctions         : {self.input_junctions:,}',
+            '',
+            'Genes per cluster',
+            '-----------------',
+        ]
+        for genes, clusters in sorted(self.genes_per_cluster.items()):
+            share = clusters / self.input_clusters if self.input_clusters else 0
+            lines.append(f'    {genes} gene(s) : {clusters:>9,}  {share:>7.2%} of clusters')
+        # A cluster naming more than one gene is analysed against the first of
+        # them only, so this is worth seeing rather than deriving.
+        multi = sum(c for g, c in self.genes_per_cluster.items() if g > 1)
+        if multi:
+            lines.append(f'    ({multi:,} cluster(s) name more than one gene; each is '
+                         f'analysed against the first)')
+
+        lines += [
+            '',
+            'Junctions',
+            '---------',
+            f'    matched to a transcript : {self.junctions_matched:>9,}'
+            + (f'  {self.junctions_matched / junctions_evaluated:>7.2%} of evaluated'
+               if junctions_evaluated else ''),
+            f'    not matched             : {self.junctions_unmatched:>9,}'
+            + (f'  {self.junctions_unmatched / junctions_evaluated:>7.2%} of evaluated'
+               if junctions_evaluated else ''),
+            f'    not evaluated           : {self.junctions_not_evaluated:>9,}'
+            '   (cluster ended before matching ran)',
+            '',
+            'Clusters',
+            '--------',
+            f'    comparable     : {self.comparable:>9,}'
+            + (f'  {self.comparable / analysed:>7.2%}' if analysed else ''),
+            f'    non-comparable : {self.non_comparable:>9,}'
+            + (f'  {self.non_comparable / analysed:>7.2%}' if analysed else ''),
+            '',
+            'Why a cluster was not comparable (one reason per cluster+gene)',
+            '-------------------------------------------------------------',
+        ]
+        lines += self._table(self.non_comparable_reasons, self.non_comparable or 1,
+                             'non-comparable')
+
+        total_rows = sum(self.event_rows.values())
+        total_pairs = sum(self.event_pairs.values())
+        lines += [
+            '',
+            'Comparison events, by row',
+            '-------------------------',
+        ]
+        lines += self._table(self.event_rows, total_rows or 1, 'rows')
+        lines += [
+            '',
+            'Comparison events, by cluster+gene',
+            '----------------------------------',
+            '    The same event repeated in one cluster and gene counts once.',
+            '',
+        ]
+        lines += self._table(self.event_pairs, total_pairs or 1, 'pairs')
+        return '\n'.join(lines) + '\n'
+
+    def write(self, path):
+        with open(path, 'w') as handle:
+            handle.write(self.text())
+
+
+def summary_path(output_path):
+    """The run's summary, named after its output CSV: annotated.csv gives
+    annotated_summary.txt, results.csv gives results_summary.txt.
+
+    Named after the CSV rather than a flat summary.txt so that several runs can
+    share an output directory - which they routinely do, one per input table -
+    without each one silently overwriting the last one's summary.
+    """
+    stem = os.path.splitext(output_path)[0]
+    return stem + '_summary.txt'
+
+
+def non_annotated_path(output_path):
+    """Where the rows that were not compared go, given where the compared ones
+    go: the same name with 'non_' in front of it, in the same directory. The
+    default output_path is annotated.csv, so the pair reads annotated.csv /
+    non_annotated.csv; -output_csv results.csv gives results.csv /
+    non_results.csv.
+
+    Only the file name is prefixed, never the directory - out/results.csv yields
+    out/non_results.csv rather than non_out/results.csv.
+    """
+    directory, name = os.path.split(output_path)
+    return os.path.join(directory, 'non_' + name)
+
+
 def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_instance=None,
-                       filter_non_comparable=False, write_all_comparable=False):
+                       filter_non_comparable=False, write_all_comparable=False,
+                       summary=None):
     """
     Dedicated writer thread that processes results from a queue and writes to CSV.
 
     Runs continuously until it receives a None sentinel value.
     Writes results incrementally as they arrive from compute workers.
 
-    filter_non_comparable: if True, rows whose event is in NON_COMPARISON_EVENTS
-    (transcripts that were not actually compared to canonical) are dropped.
+    Two files, not one: output_path takes the rows of transcripts actually
+    compared to the canonical, and non_annotated_path(output_path) takes all the
+    rest - the non-comparisons of NON_COMPARISON_EVENTS, each naming why that
+    transcript or cluster never reached a comparison. They were one file with the
+    two kinds of row interleaved, where the comparisons are what a reader is
+    after and are outnumbered by the others several times over.
+
+    filter_non_comparable: if True, the non-comparison rows are dropped instead
+    of written, and the second file is not created - the flag asks for those rows
+    to be discarded, and splitting them off does not change that.
     write_all_comparable: if False (the default), the comparison rows of each
     cluster are reduced to the selected transcript - see selected_comparable_rows().
+    summary: a seeded RunSummary to feed as the results go past, written out as
+    summary_path(output_path) beside the CSVs. This thread is where every result is already in
+    hand one cluster at a time, so counting here costs no second pass.
     """
     log = logger_instance or logger
     output_dir = tempfile.mkdtemp(prefix='domas_csv_')
+    # Chunks of the two files are kept apart by subdirectory, so combining each
+    # one stays the plain sorted-file concatenation it was.
+    compared_dir = os.path.join(output_dir, 'compared')
+    other_dir = os.path.join(output_dir, 'other')
+    os.makedirs(compared_dir)
+    os.makedirs(other_dir)
 
     try:
         chunk_num = 0
-        total_rows = 0
+        total_rows = {compared_dir: 0, other_dir: 0}
 
         while True:
             # Get results from queue (blocks until available)
@@ -1879,6 +2174,12 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
             if chunk_results:
                 result_frames = []
                 for cluster_result in chunk_results:
+                    # Before the empty check and before any filtering: the
+                    # summary describes the run, so a cluster that yields no row
+                    # at all still happened and still has to be accounted for.
+                    if summary is not None:
+                        summary.add_cluster(cluster_result)
+
                     df_cluster_results = cluster_result.get_results_df()
                     if df_cluster_results.empty:
                         continue
@@ -1919,12 +2220,23 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
                             raise ValueError(f"Missing columns in result: {missing_cols}")
                         df_chunk = df_chunk[df_results_columns]
 
-                        chunk_path = os.path.join(output_dir, f'chunk_{chunk_num:04d}.csv')
-                        df_chunk.to_csv(chunk_path, index=False)
+                        if summary is not None:
+                            summary.add_frame(df_chunk)
 
-                        chunk_rows = len(df_chunk)
-                        total_rows += chunk_rows
-                        log.info(f"[Writer] Wrote chunk {chunk_num} ({chunk_rows} rows)")
+                        # Split on the same predicate filter_non_comparable uses,
+                        # so the two files together are exactly what the single
+                        # one held, in the same order.
+                        is_comparison = ~df_chunk['event_type'].isin(NON_COMPARISON_EVENTS)
+                        for directory, part in ((compared_dir, df_chunk[is_comparison]),
+                                                (other_dir, df_chunk[~is_comparison])):
+                            if part.empty:
+                                continue
+                            part.to_csv(os.path.join(directory, f'chunk_{chunk_num:04d}.csv'),
+                                        index=False)
+                            total_rows[directory] += len(part)
+                        log.info(f"[Writer] Wrote chunk {chunk_num} "
+                                 f"({int(is_comparison.sum())} compared, "
+                                 f"{int((~is_comparison).sum())} not)")
 
                         chunk_num += 1
 
@@ -1935,21 +2247,34 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
         # with read_csv, concatenating in memory, and re-serializing with
         # to_csv - which doubles the I/O and peak memory for no benefit on a
         # large results file.
-        chunk_files = sorted([os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.csv')])
+        # The compared rows always get a file, empty or not - it is the run's
+        # output and its absence would read as a failed run. The companion is
+        # skipped entirely under filter_non_comparable, which asked for those
+        # rows to be dropped.
+        targets = [(compared_dir, output_path)]
+        if not filter_non_comparable:
+            targets.append((other_dir, non_annotated_path(output_path)))
 
-        if chunk_files:
-            log.info(f"[Writer] Combining {len(chunk_files)} chunks...")
-            with open(output_path, 'w', newline='') as out_f:
-                for i, chunk_path in enumerate(chunk_files):
-                    with open(chunk_path, 'r', newline='') as in_f:
-                        if i > 0:
-                            next(in_f)  # skip this chunk's header line
-                        shutil.copyfileobj(in_f, out_f)
-            log.info(f"[Writer] Final CSV written: {output_path} ({total_rows} rows)")
-        else:
-            df_all_results = pd.DataFrame(columns=df_results_columns)
-            df_all_results.to_csv(output_path, index=False)
-            log.info(f"[Writer] Empty results CSV written: {output_path}")
+        for directory, path in targets:
+            chunk_files = sorted(os.path.join(directory, f) for f in os.listdir(directory)
+                                 if f.endswith('.csv'))
+            if chunk_files:
+                log.info(f"[Writer] Combining {len(chunk_files)} chunks into {path}...")
+                with open(path, 'w', newline='') as out_f:
+                    for i, chunk_path in enumerate(chunk_files):
+                        with open(chunk_path, 'r', newline='') as in_f:
+                            if i > 0:
+                                next(in_f)  # skip this chunk's header line
+                            shutil.copyfileobj(in_f, out_f)
+                log.info(f"[Writer] Final CSV written: {path} ({total_rows[directory]} rows)")
+            else:
+                pd.DataFrame(columns=df_results_columns).to_csv(path, index=False)
+                log.info(f"[Writer] Empty results CSV written: {path}")
+
+        if summary is not None:
+            path = summary_path(output_path)
+            summary.write(path)
+            log.info(f"[Writer] Run summary written: {path}")
 
     finally:
         # Drop the temporary chunk files.
@@ -2148,7 +2473,8 @@ class JunctionsAnalysis:
     def _run_parallel_analysis(self, cluster_groups, df_exons, df_domains, canonical_transcript_ids,
                                gene_strand, transcripts_by_gene, num_workers, output_path,
                                filter_non_comparable=False, canonical_rank=None,
-                               write_all_comparable=False, extra_columns=False):
+                               write_all_comparable=False, extra_columns=False,
+                               summary=None):
         """Execute cluster analysis in parallel with dedicated writer thread."""
         total = len(cluster_groups)
         actual_workers = min(num_workers, total)
@@ -2184,8 +2510,13 @@ class JunctionsAnalysis:
         # only under write_all_comparable, where several transcripts share a
         # cluster and the reader needs to know which one the rule picked. With one
         # comparison row per cluster they would be True on every row of it.
+        # canonical_junctions / alternative_junctions sit next to the two
+        # transcript id columns they describe: each lists the event's features
+        # that that transcript carries, so the pair reads as one block.
         df_results_columns = ['event', 'group', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id',
-                              'alternative_transcript_id', 'domain_id', 'domain_name',
+                              'alternative_transcript_id',
+                              'canonical_junctions', 'alternative_junctions',
+                              'domain_id', 'domain_name',
                               'canonical_domain_length', 'alternative_domain_length', 'canonical_domains_number', 'alternative_domains_number']
         # The optional three, off unless the run asked for them: which exons the
         # group's junctions join, and whether they fall in each side's CDS.
@@ -2205,7 +2536,7 @@ class JunctionsAnalysis:
         writer_thread = threading.Thread(
             target=_csv_writer_worker,
             args=(result_queue, output_path, df_results_columns, self.logger,
-                  filter_non_comparable, write_all_comparable),
+                  filter_non_comparable, write_all_comparable, summary),
             daemon=False
         )
         writer_thread.start()
@@ -2384,9 +2715,15 @@ class JunctionsAnalysis:
                     df_junction=df_cluster_junctions,
                     # The description is a CSV column, not a PDF one: it is a
                     # paragraph of InterPro prose per domain, and the PDF draws
-                    # this frame as a narrow per-transcript table.
+                    # this frame as a narrow per-transcript table. The two
+                    # junction lists are dropped for the same reason - a cluster
+                    # of 30 features is a 600-character cell - and the picture
+                    # already says which transcript carries which junction, both
+                    # in the first-page table and as the brackets on each track.
                     df_results=cluster_result.get_results_df().drop(
-                        columns=['domain_description', 'domain_name'], errors='ignore'),
+                        columns=['domain_description', 'domain_name',
+                                 'canonical_junctions', 'alternative_junctions'],
+                        errors='ignore'),
                     transcript_ids=transcript_ids,
                     no_comparison_note=no_comparison_note,
                     # Which transcript the comparison used as the reference - not
@@ -2401,11 +2738,12 @@ class JunctionsAnalysis:
             except ValueError as e:
                 self.logger.warning(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}, specie {cluster_result.specie}: {e}")
 
-    def analyze_junctions(self, df_junctions, output_path='as_events_junctions_analysis.csv',
+    def analyze_junctions(self, df_junctions, output_path='annotated.csv',
                           specie=None, filter_transcript_count=0, create_pdf=True, print_genes=None,
                           num_workers=4, use_ensembl_only=False, restrict_pdf_to_comparable=False,
                           filter_non_comparable=False,
-                          write_all_comparable=False, extra_columns=False):
+                          write_all_comparable=False, extra_columns=False,
+                          input_source=None):
         """
         Analyze junctions and detect domain changes across alternative transcripts.
 
@@ -2417,7 +2755,12 @@ class JunctionsAnalysis:
             df_junctions: DataFrame of junctions. Reading junctions from a file
                 (plain CSV, hadas-format Excel, IOE, ...) is alternative_splicing.py's
                 responsibility - pass the already-loaded DataFrame here.
-            output_path: Path for output CSV file
+            output_path: Path for the CSV of transcripts actually compared to the
+                canonical one. The rows for everything else - the transcripts and
+                clusters that never reached a comparison, each naming why - go to
+                non_annotated_path(output_path) alongside it, so the default pair
+                is annotated.csv and non_annotated.csv. Not written under
+                filter_non_comparable, which asks for those rows to be dropped.
             filter_transcript_count: If > 0, only analyze genes with exactly this many transcripts
             create_pdf: Whether to generate PDF visualizations
             print_genes: List of gene symbols to generate PDFs for (or all if None)
@@ -2436,17 +2779,36 @@ class JunctionsAnalysis:
                 the selection rule picks. If False (default), only that transcript
                 is compared - so the domains of the others are never fetched - and
                 the two columns are omitted, being True on every written row.
-            filter_non_comparable: If True, the output CSV contains only rows for
-                transcripts that were actually compared to canonical - rows whose
-                event is a non-comparison / skip event (see NON_COMPARISON_EVENTS)
-                are dropped. The returned ClusterAnalysisResult objects and any
-                PDFs are unaffected; only the written CSV is filtered.
+            filter_non_comparable: If True, the rows whose event is a
+                non-comparison / skip event (see NON_COMPARISON_EVENTS) are
+                dropped rather than written, and the non_annotated companion file
+                is not created at all. The returned ClusterAnalysisResult objects
+                and any PDFs are unaffected; only the written CSVs are filtered.
             extra_columns: If True, the CSV carries three further columns, for
                 every input format: `rank`, naming the canonical transcript's
                 exons the group's junctions join (E2_E4, *_E5), and
                 canonical_junction_in_cds / alternative_junction_in_cds, saying whether those
                 junctions fall inside the canonical and the compared
                 transcript's coding sequence. Omitted by default.
+
+            input_source: What the junctions were read from, recorded verbatim at
+                the top of the summary file. Only the caller knows it - the frame
+                arrives here already loaded - so an unset one leaves the line
+                reading "(not recorded)" rather than guessing.
+
+        A <output>_summary.txt is written beside the CSVs (see summary_path and
+        RunSummary): what the input held, how many of its junctions mapped to a
+        transcript, how many clusters reached a comparison and why the rest did
+        not, and the comparison events counted both by row and by cluster+gene.
+
+        The CSV always carries canonical_junctions and alternative_junctions:
+        every feature of the event that the canonical, and that the row's
+        compared transcript, was found to carry, as 'low-high;low-high' in
+        ascending order. Both lists are the transcript's whole set, not the
+        group's, so the junctions unique to the compared transcript - what the
+        group is defined by - are the difference between the two. Empty where the
+        transcript carries none, which is what a no_canonical_features or
+        transcript_doesnt_have_features row says in words.
 
         Returns:
             List of ClusterAnalysisResult objects
@@ -2476,13 +2838,18 @@ class JunctionsAnalysis:
         # Group junctions into clusters
         cluster_groups = self._prepare_cluster_groups(df_junctions)
 
+        # Seeded from the input here, where the frame and the clusters are both
+        # in hand; the writer thread fills the rest in as results arrive.
+        summary = RunSummary(input_source=input_source)
+        summary.seed(df_junctions, cluster_groups)
+
         # Run parallel analysis (with dedicated writer thread for CSV output)
         results = self._run_parallel_analysis(
             cluster_groups, df_exons, df_domains, canonical_transcript_ids,
             gene_strand, transcripts_by_gene, num_workers,
             output_path, filter_non_comparable=filter_non_comparable,
             canonical_rank=canonical_rank, write_all_comparable=write_all_comparable,
-            extra_columns=extra_columns,
+            extra_columns=extra_columns, summary=summary,
         )
 
         # Generate PDFs if requested

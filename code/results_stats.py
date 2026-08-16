@@ -336,8 +336,27 @@ def _cluster_prefix(c):
     return prefix if prefix in _AS_TYPE_PREFIXES else ""
 
 
+def results_csv_paths(path):
+    """Every result file of the run that wrote `path`.
+
+    A run writes its compared rows to the name it was given and the rest to
+    non_<name> beside it (see junction_analisys.non_annotated_path). A report
+    over the compared file alone would show an empty unanalyzable breakdown -
+    the whole "why did these clusters not reach a comparison" half of it - so
+    the companion is read with it whenever it is there.
+
+    Just [path] when there is no companion: a run with -omit_non_comparable
+    writes none, and a results.csv from before the split is one whole file.
+    """
+    from junction_analisys import non_annotated_path   # heavy module, only needed here
+
+    companion = non_annotated_path(path)
+    return [path, companion] if os.path.exists(companion) else [path]
+
+
 def _read_results_csv(path, chunk_rows=1_000_000):
-    """Memory-efficient reader for a results.csv of any size.
+    """Memory-efficient reader for a results.csv of any size. `path` may also be
+    a list of them, read as one frame - see results_csv_paths().
 
     Reads in chunks with compact dtypes (category/float32/nullable-boolean)
     and drops columns that are never used downstream. The full "event" id
@@ -349,11 +368,15 @@ def _read_results_csv(path, chunk_rows=1_000_000):
     would. For a small file this just runs as a single chunk - no
     meaningful overhead either way.
     """
-    header_cols = list(pd.read_csv(path, nrows=0).columns)
+    paths = [path] if isinstance(path, str) else list(path)
+    # Column selection comes from the first file; the writer gives every file of
+    # a run the same header, so reading the rest with it keeps them aligned.
+    header_cols = list(pd.read_csv(paths[0], nrows=0).columns)
     usecols = [c for c in header_cols if c not in _UNUSED_COLS]
     dtype = {k: v for k, v in RESULTS_CSV_DTYPES.items() if k in usecols}
 
-    chunks = list(pd.read_csv(path, usecols=usecols, dtype=dtype, chunksize=chunk_rows))
+    chunks = [chunk for one in paths
+              for chunk in pd.read_csv(one, usecols=usecols, dtype=dtype, chunksize=chunk_rows)]
     if len(chunks) == 1:
         return chunks[0]
 
@@ -413,9 +436,10 @@ def normalize_event_types(df):
 
 
 def _load_single(path, label):
-    """Load and normalise one results.csv. Warns (and fills a blank column)
-    for any of OPTIONAL_COLUMNS that isn't present, rather than failing."""
-    df = _read_results_csv(path)
+    """Load and normalise one run's results, the compared rows and the
+    non-compared ones together (see results_csv_paths). Warns (and fills a blank
+    column) for any of OPTIONAL_COLUMNS that isn't present, rather than failing."""
+    df = _read_results_csv(results_csv_paths(path))
     df = normalize_event_types(df)
 
     # Every event_type the algorithm can produce must be in ALL_EVENT_TYPES

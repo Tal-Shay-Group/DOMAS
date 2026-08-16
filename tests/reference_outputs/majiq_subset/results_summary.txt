@@ -1,0 +1,41 @@
+DOMAS run summary
+=================
+
+Input source
+------------
+    <tests>/majiq/NveB_Mono_voila.txt
+
+Input clusters          : 28
+Input junctions         : 85
+
+Genes per cluster
+-----------------
+    1 gene(s) :        28  100.00% of clusters
+
+Junctions
+---------
+    matched to a transcript :        69   81.18% of evaluated
+    not matched             :        16   18.82% of evaluated
+    not evaluated           :         0   (cluster ended before matching ran)
+
+Clusters
+--------
+    comparable     :        24   85.71%
+    non-comparable :         4   14.29%
+
+Why a cluster was not comparable (one reason per cluster+gene)
+-------------------------------------------------------------
+    no_unique_transcript           2   50.00% of non-comparable
+    no_canonical_features          2   50.00% of non-comparable
+
+Comparison events, by row
+-------------------------
+    no_domains_in_region        145   98.64% of rows
+    added_domain                  2    1.36% of rows
+
+Comparison events, by cluster+gene
+----------------------------------
+    The same event repeated in one cluster and gene counts once.
+
+    no_domains_in_region         24   96.00% of pairs
+    added_domain                  1    4.00% of pairs

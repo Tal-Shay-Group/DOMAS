@@ -1,0 +1,62 @@
+DOMAS run summary
+=================
+
+Input source
+------------
+    <tests>/leafcutter/leafcutter_ds_cluster_significance.txt
+    <tests>/leafcutter/leafcutter_ds_effect_sizes.txt
+
+Input clusters          : 18,186
+Input junctions         : 67,818
+
+Genes per cluster
+-----------------
+    0 gene(s) :        82    0.45% of clusters
+    1 gene(s) :    18,104   99.55% of clusters
+
+Junctions
+---------
+    matched to a transcript :    44,782   73.77% of evaluated
+    not matched             :    15,920   26.23% of evaluated
+    not evaluated           :     7,116   (cluster ended before matching ran)
+
+Clusters
+--------
+    comparable     :    10,165   55.89%
+    non-comparable :     8,021   44.11%
+
+Why a cluster was not comparable (one reason per cluster+gene)
+-------------------------------------------------------------
+    no_unique_transcript       5,979   74.54% of non-comparable
+    gene_not_in_db             1,582   19.72% of non-comparable
+    no_canonical_features        314    3.91% of non-comparable
+    no_gene_specified             82    1.02% of non-comparable
+    only_one_transcript           64    0.80% of non-comparable
+
+Comparison events, by row
+-------------------------
+    no_domains_in_region      45,583   83.28% of rows
+    dropped_domain             4,977    9.09% of rows
+    added_domain               2,293    4.19% of rows
+    shorter                      802    1.47% of rows
+    unchanged                    741    1.35% of rows
+    longer                       219    0.40% of rows
+    merged_domain                 40    0.07% of rows
+    split_domain                  31    0.06% of rows
+    reduced_domain_number         30    0.05% of rows
+    unchanged_domains             18    0.03% of rows
+
+Comparison events, by cluster+gene
+----------------------------------
+    The same event repeated in one cluster and gene counts once.
+
+    no_domains_in_region       8,462   72.72% of pairs
+    dropped_domain             1,228   10.55% of pairs
+    added_domain               1,010    8.68% of pairs
+    shorter                      440    3.78% of pairs
+    unchanged                    327    2.81% of pairs
+    longer                       112    0.96% of pairs
+    split_domain                  24    0.21% of pairs
+    merged_domain                 15    0.13% of pairs
+    unchanged_domains             11    0.09% of pairs
+    reduced_domain_number          8    0.07% of pairs

@@ -28,14 +28,16 @@ sys.path.insert(0, CODE_DIR)
 
 from junction_analisys import (  # noqa: E402
     JunctionsAnalysis, ClusterAnalysisResult, NON_COMPARISON_EVENTS,
+    RunSummary, non_annotated_path, summary_path,
 )
 from alternative_splicing import (  # noqa: E402
     hadas_read_input_file, read_junctions_csv, leafcutter_read_input_files,
 )
-from utils import rmats2junctions, voila2junctions  # noqa: E402
+from utils import rmats2junctions, rmats_input_files, voila2junctions  # noqa: E402
 from pdf_text_utils import (  # noqa: E402
     PDF_TEXT_MANIFEST_FILENAME, build_pdf_text_manifest,
 )
+from summary_utils import portable_summary_lines  # noqa: E402
 
 IOE_CSV = os.path.join(TESTS_DIR, 'ioe_example_junctions.csv')
 HADAS_XLSX = os.path.join(TESTS_DIR, 'short_H_vs_M_HN6.xlsx')
@@ -143,7 +145,7 @@ def _run_analysis(con, tmp_path, junctions_csv, hadas_format, restrict_pdf_to_co
             create_pdf=True,
             num_workers=1,
             restrict_pdf_to_comparable=restrict_pdf_to_comparable,
-        
+            input_source=junctions_csv,
             write_all_comparable=True,
         )
     finally:
@@ -259,7 +261,7 @@ def _run_case_to_dir(con, case_dir, junctions_csv, hadas_format, restrict_pdf_to
             create_pdf=True,
             num_workers=1,
             restrict_pdf_to_comparable=restrict_pdf_to_comparable,
-        
+            input_source=junctions_csv,
             write_all_comparable=True,
         )
     finally:
@@ -267,17 +269,68 @@ def _run_case_to_dir(con, case_dir, junctions_csv, hadas_format, restrict_pdf_to
     return output_path
 
 
-def _compare_csv_to_reference(generated_csv, reference_csv):
+def _compare_one_csv_to_reference(generated_csv, reference_csv):
     """Assert generated_csv has the same rows as reference_csv, ignoring row order."""
-    if not os.path.exists(reference_csv):
-        pytest.skip(f"No reference output committed to compare against at {reference_csv}")
-
     df_generated = pd.read_csv(generated_csv).fillna('')
     df_reference = pd.read_csv(reference_csv).fillna('')
     sort_columns = list(df_reference.columns)
     df_generated = df_generated.sort_values(sort_columns).reset_index(drop=True)
     df_reference = df_reference.sort_values(sort_columns).reset_index(drop=True)
     pd.testing.assert_frame_equal(df_generated, df_reference, check_dtype=False)
+
+
+def _summary_lines(path):
+    """A summary file's lines, with each input file made checkout-independent.
+
+    A real run records full paths, which differ between checkouts; the committed
+    reference stores them relative to tests/ - see summary_utils. Everything else
+    in the file is a count, and counts are what a golden reference checks.
+    """
+    with open(path) as handle:
+        return portable_summary_lines(handle.read().splitlines(), TESTS_DIR)
+
+
+def _write_reference_summary(generated_csv, reference_csv):
+    """Write a run's summary to its golden reference with the input files stored
+    relative to tests/, so the committed file names the fixtures it read without
+    carrying the absolute path of whichever checkout bootstrapped it."""
+    with open(summary_path(reference_csv), 'w') as handle:
+        handle.write('\n'.join(_summary_lines(summary_path(generated_csv))) + '\n')
+
+
+def _compare_summary_to_reference(generated_csv, reference_csv):
+    """Assert the run's summary matches the committed one, line for line."""
+    generated = summary_path(generated_csv)
+    reference = summary_path(reference_csv)
+    assert os.path.exists(generated), f"The run wrote no {generated}"
+    assert os.path.exists(reference), f"No reference committed at {reference}"
+    assert _summary_lines(generated) == _summary_lines(reference), (
+        f"{generated} does not match {reference}")
+
+
+def _compare_csv_to_reference(generated_csv, reference_csv):
+    """Assert every file the run produced matches the committed one, ignoring row
+    order.
+
+    All three: a run writes the compared rows to the named file, the rest to
+    non_<name>, and its counts to <name>_summary.txt. Checking only the first
+    would leave every non-comparison outcome - most of the rows - uncovered, and
+    the summary is the one place the run's totals are stated, so a miscount there
+    would otherwise go unnoticed. All three are required to exist on both sides,
+    so the split itself is asserted too.
+    """
+    if not os.path.exists(reference_csv):
+        pytest.skip(f"No reference output committed to compare against at {reference_csv}")
+
+    _compare_one_csv_to_reference(generated_csv, reference_csv)
+
+    generated_other = non_annotated_path(generated_csv)
+    reference_other = non_annotated_path(reference_csv)
+    assert os.path.exists(generated_other), f"The run wrote no {generated_other}"
+    assert os.path.exists(reference_other), f"No reference committed at {reference_other}"
+    _compare_one_csv_to_reference(generated_other, reference_other)
+
+    _compare_summary_to_reference(generated_csv, reference_csv)
 
 
 def _compare_pdf_text_to_reference(output_dir, reference_dir):
@@ -379,30 +432,43 @@ def _run_leafcutter_case_to_dir(con, case_dir, subset):
         output_path=output_path,
         create_pdf=False,
         num_workers=1,
-    
+        input_source=[LEAFCUTTER_SIG, LEAFCUTTER_EFFECT],
         write_all_comparable=True,
     )
     return output_path
 
 
 def _compare_or_create_reference(generated_csv, reference_csv):
-    """Compare generated_csv to the golden reference (ignoring row order). On the
-    first run, when no reference exists yet, create it from the generated output
-    and pass, so the reference is bootstrapped."""
+    """Compare the run's result files to the golden references (ignoring row
+    order). On the first run, when no reference exists yet, create them from the
+    generated output and pass, so the references are bootstrapped.
+
+    Both files where the run wrote both - the compared rows under the named path
+    and the rest under non_<name> - plus the <name>_summary.txt beside them. A
+    run with filter_non_comparable writes no non_<name>, and then only the other
+    two are compared.
+    """
+    generated = [generated_csv]
+    reference = [reference_csv]
+    if os.path.exists(non_annotated_path(generated_csv)):
+        generated.append(non_annotated_path(generated_csv))
+        reference.append(non_annotated_path(reference_csv))
+
     if not os.path.exists(reference_csv):
         os.makedirs(os.path.dirname(reference_csv), exist_ok=True)
-        shutil.copyfile(generated_csv, reference_csv)
+        for source, target in zip(generated, reference):
+            shutil.copyfile(source, target)
+        _write_reference_summary(generated_csv, reference_csv)
         warnings.warn(
             f"Created new golden reference at {reference_csv} (first run); "
             f"re-run the test to compare against it.")
         return
 
-    df_generated = pd.read_csv(generated_csv).fillna('')
-    df_reference = pd.read_csv(reference_csv).fillna('')
-    sort_columns = list(df_reference.columns)
-    df_generated = df_generated.sort_values(sort_columns).reset_index(drop=True)
-    df_reference = df_reference.sort_values(sort_columns).reset_index(drop=True)
-    pd.testing.assert_frame_equal(df_generated, df_reference, check_dtype=False)
+    for source, target in zip(generated, reference):
+        assert os.path.exists(target), f"No reference committed at {target}"
+        _compare_one_csv_to_reference(source, target)
+
+    _compare_summary_to_reference(generated_csv, reference_csv)
 
 
 def test_full_scale_ioe_compare_against_reference(con, tmp_path, ioe_input_dir,
@@ -526,7 +592,7 @@ def _run_rmats_case_to_dir(con, case_dir, subset, filter_non_comparable=False):
         create_pdf=False,
         num_workers=1,
         filter_non_comparable=filter_non_comparable,
-    
+        input_source=rmats_input_files(RMATS_DIR),
         write_all_comparable=True,
     )
     return output_path
@@ -619,7 +685,7 @@ def _run_majiq_case_to_dir(con, case_dir, subset):
         output_path=output_path,
         create_pdf=False,
         num_workers=1,
-    
+        input_source=MAJIQ_TSV,
         write_all_comparable=True,
     )
     return output_path
@@ -853,6 +919,147 @@ def test_create_pdf_transcript_ids_filters_real_gene(con, tmp_path):
     assert unrestricted_pages > 1, "Sanity check: unrestricted PDF should span more than one page"
     assert restricted_pages == 1, "Restricting to a single transcript should always fit on one page"
     assert restricted_pages < unrestricted_pages
+
+
+# ---------------------------------------------------------------------------
+# summary.txt: the run-level counters, without touching the database
+# ---------------------------------------------------------------------------
+
+def _summary_cluster(cluster, gene, junctions, events, features_matched):
+    """A ClusterAnalysisResult filled in by hand, standing in for one the
+    analysis produced - RunSummary reads only these few attributes."""
+    result = ClusterAnalysisResult(cluster, gene, gene, specie='human')
+    result.junctions = junctions
+    result.features_matched = features_matched
+    for event, transcript in events:
+        result.add_event(event, alternative_transcript_id=transcript)
+    return result
+
+
+def test_non_annotated_path_prefixes_the_name_not_the_directory():
+    assert non_annotated_path('annotated.csv') == 'non_annotated.csv'
+    assert non_annotated_path(os.path.join('out', 'results.csv')) == os.path.join('out', 'non_results.csv')
+
+
+def test_run_summary_lists_every_input_file():
+    """Each file on its own line - an rMATS directory is five of them, and which
+    ones were there is part of what the run was."""
+    files = ['/data/SE.MATS.JC.txt', '/data/RI.MATS.JC.txt']
+    text = RunSummary(input_source=files).text()
+    for one in files:
+        assert f'    {one}' in text.splitlines()
+    assert 'passed in as a DataFrame' in RunSummary().text()
+    # A bare string is one file, not a list of characters.
+    assert RunSummary(input_source='one.csv').input_source == ['one.csv']
+
+
+def test_summary_records_full_paths_but_references_store_them_relative(tmp_path):
+    """A run's own summary carries the full path of every input. What is
+    committed under reference_outputs/ has them relative to tests/, so the same
+    run compares equal from any checkout and still names its fixtures."""
+    def written(sources, name):
+        summary = RunSummary(input_source=sources)
+        summary.input_clusters = 3
+        path = tmp_path / f'{name}_summary.txt'
+        summary.write(str(path))
+        return path
+
+    path = written([os.path.join(RMATS_DIR, 'SE.MATS.JC.txt'), IOE_CSV], 'fixtures')
+    written_lines = path.read_text().splitlines()
+    assert f'    {os.path.join(RMATS_DIR, "SE.MATS.JC.txt")}' in written_lines
+    assert f'    {IOE_CSV}' in written_lines
+
+    reference_lines = _summary_lines(str(path))
+    assert '    <tests>/rmats/SE.MATS.JC.txt' in reference_lines
+    assert '    <tests>/ioe_example_junctions.csv' in reference_lines
+    assert TESTS_DIR not in '\n'.join(reference_lines)
+    # Everything after the block still counts.
+    assert any('Input clusters' in line for line in reference_lines)
+    # A path outside the tests tree has nothing stable to rewrite against.
+    assert '    /elsewhere/in.csv' in _summary_lines(str(written(['/elsewhere/in.csv'], 'out')))
+
+
+def test_summary_path_is_named_after_the_output_csv():
+    """Named after the CSV so runs sharing an output directory - one per input
+    table - do not overwrite each other's summary."""
+    assert summary_path('annotated.csv') == 'annotated_summary.txt'
+    assert summary_path(os.path.join('out', 'table05.csv')) == os.path.join('out', 'table05_summary.txt')
+    assert summary_path('table05.csv') != summary_path('table06.csv')
+
+
+def test_run_summary_counts_genes_junctions_and_reasons():
+    """A cluster naming two genes, one naming a symbol with no Ensembl id, and
+    one that ended before its junctions were ever matched."""
+    df = pd.DataFrame({
+        'specie': ['human'] * 5,
+        'cluster_name': ['c1', 'c1', 'c2', 'c3', 'c3'],
+        'gene_ensembl_id': ['ENSG1', 'ENSG2', None, 'ENSG3', 'ENSG3'],
+        'gene_symbol': ['A', 'B', 'UNKNOWNGENE', 'C', 'C'],
+    })
+    groups = list(df.groupby(['specie', 'cluster_name'], dropna=False))
+
+    summary = RunSummary(input_source='fixture.csv')
+    summary.seed(df, groups)
+    assert summary.input_clusters == 3
+    assert summary.input_junctions == 5
+    # c1 names two genes; c2 names one by symbol alone (not "no gene"); c3 one.
+    assert dict(summary.genes_per_cluster) == {2: 1, 1: 2}
+
+    summary.add_cluster(_summary_cluster(
+        'c1', 'ENSG1', [(1, 2), (3, 4)],
+        [('feature_not_mapped', None), ('dropped_domain', 'ENST1')],
+        features_matched=1))
+    summary.add_cluster(_summary_cluster(
+        'c2', None, [(5, 6)], [('gene_not_in_db', None)], features_matched=None))
+    summary.add_cluster(_summary_cluster(
+        'c3', 'ENSG3', [(7, 8), (9, 10)],
+        [('transcript_doesnt_have_features', 'ENST2'), ('no_unique_transcript', None)],
+        features_matched=2))
+
+    assert (summary.junctions_matched, summary.junctions_unmatched,
+            summary.junctions_not_evaluated) == (3, 1, 1)
+    assert (summary.junctions_matched + summary.junctions_unmatched
+            + summary.junctions_not_evaluated) == summary.input_junctions
+    assert (summary.comparable, summary.non_comparable) == (1, 2)
+    assert summary.input_source == ['fixture.csv']
+    # One reason per cluster, and the terminal one - not the per-transcript
+    # transcript_doesnt_have_features that c3 also recorded.
+    assert dict(summary.non_comparable_reasons) == {
+        'gene_not_in_db': 1, 'no_unique_transcript': 1}
+    assert summary.comparable + summary.non_comparable == summary.input_clusters
+    assert 'fixture.csv' in summary.text()
+
+
+def test_run_summary_counts_events_by_row_and_by_cluster_gene():
+    """Two dropped_domain rows for one cluster+gene are two rows but one pair;
+    the same event in another cluster is a second pair."""
+    df_chunk = pd.DataFrame({
+        'event': ['c1', 'c1', 'c1', 'c2', 'c1'],
+        'gene_symbol': ['A', 'A', 'A', 'B', 'A'],
+        'specie': ['human'] * 5,
+        'event_type': ['dropped_domain', 'dropped_domain', 'added_domain',
+                       'dropped_domain', 'no_unique_features'],
+    })
+    summary = RunSummary()
+    summary.add_frame(df_chunk)
+
+    # no_unique_features is a non-comparison event and belongs to neither count.
+    assert dict(summary.event_rows) == {'dropped_domain': 3, 'added_domain': 1}
+    assert dict(summary.event_pairs) == {'dropped_domain': 2, 'added_domain': 1}
+
+
+def test_run_summary_separates_species_sharing_a_cluster_name():
+    """Two species can use the same cluster name; they are separate clusters
+    everywhere else in the run, so they must be separate pairs here."""
+    df_chunk = pd.DataFrame({
+        'event': ['c1', 'c1'],
+        'gene_symbol': ['A', 'A'],
+        'specie': ['human', 'mouse'],
+        'event_type': ['dropped_domain', 'dropped_domain'],
+    })
+    summary = RunSummary()
+    summary.add_frame(df_chunk)
+    assert dict(summary.event_pairs) == {'dropped_domain': 2}
 
 
 if __name__ == '__main__':
