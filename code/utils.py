@@ -45,6 +45,22 @@ _RMATS_EVENT_FILES = {
 GENE_ID_COLUMNS = ('gene_ensembl_id', 'gene_GeneID_id')
 
 
+def combined_transcript_ids(df):
+    """The transcript id to key on per row: transcript_ensembl_id where present,
+    else transcript_refseq_id - the same key ClusterAnalysisResult.analyze()
+    builds its gene_transcript_ids from, so a lookup built on this matches what
+    the analysis asks for.
+
+    A third of the transcripts in DoChaP carry no Ensembl id at all. Keying the
+    domain source on transcript_ensembl_id alone left every one of them with an
+    empty domain frame, which reads downstream as a transcript that lost all of
+    the canonical's domains rather than one nothing was known about.
+    """
+    if 'transcript_refseq_id' not in df.columns:
+        return df['transcript_ensembl_id']
+    return df['transcript_ensembl_id'].fillna(df['transcript_refseq_id'])
+
+
 def combined_gene_ids(df):
     """The gene id to key on per row: gene_ensembl_id where present, else
     gene_GeneID_id - matching what the readers put in the junctions frame."""
@@ -847,23 +863,58 @@ def _link_proteins_by_refseq(df_transcript, df_protein, df_all_proteins):
     return df_transcript, df_protein
 
 
+TRANSCRIPT_KEY = '_transcript_key'      # combined_transcript_ids(), as a column
+
+
 def _read_transcripts_and_proteins(con, transcript_ids):
-    """Transcripts/Proteins rows for transcript_ids, filtered to a non-empty
-    protein_ensembl_id. Shared by get_transcript_domains_db() and
-    get_representative_domains_db() so get_domains_db() reads these tables once."""
+    """Transcripts/Proteins rows for transcript_ids, keyed by TRANSCRIPT_KEY.
+    Shared by get_transcript_domains_db() and get_representative_domains_db() so
+    get_domains_db() reads these tables once.
+
+    Matched on the combined transcript id, not on transcript_ensembl_id: a
+    RefSeq-only transcript is a transcript the analysis will ask about, and it
+    reaches RepresentativeDomains through its protein's protein_interpro_id like
+    any other - that column is a property of the Proteins row, not of which
+    accessions it carries. 59,334 RefSeq-only proteins in DoChaP have entries
+    there, 26,987 of them a curated Domain or Repeat.
+
+    A protein with no protein_ensembl_id is therefore kept. What it cannot do is
+    take part in _link_proteins_by_refseq(), which repairs a BROKEN Ensembl link;
+    that still runs on the Ensembl-keyed rows alone.
+    """
     df_transcript = pd.read_sql_query('select * from Transcripts', con)
-    df_transcript = df_transcript[df_transcript.transcript_ensembl_id.isin(transcript_ids)]
+    df_transcript[TRANSCRIPT_KEY] = combined_transcript_ids(df_transcript)
+    df_transcript = df_transcript[df_transcript[TRANSCRIPT_KEY].isin(transcript_ids)]
+
     df_all_proteins = pd.read_sql_query('select * from Proteins', con)
-    df_protein = df_all_proteins[df_all_proteins.transcript_ensembl_id.isin(transcript_ids)]
-    df_protein = df_protein.dropna(subset=['protein_ensembl_id'])
-    df_protein = df_protein[df_protein.protein_ensembl_id.str.strip() != '']
-    return _link_proteins_by_refseq(df_transcript, df_protein, df_all_proteins)
+    df_all_proteins[TRANSCRIPT_KEY] = combined_transcript_ids(df_all_proteins)
+    df_protein = df_all_proteins[df_all_proteins[TRANSCRIPT_KEY].isin(transcript_ids)]
+
+    # The Ensembl-keyed half, repaired as before; the RefSeq-only half joins on
+    # its own key and has no Ensembl link to repair.
+    has_ensembl = (df_protein.protein_ensembl_id.notna()
+                   & (df_protein.protein_ensembl_id.astype(str).str.strip() != ''))
+    df_transcript, df_ensembl = _link_proteins_by_refseq(
+        df_transcript, df_protein[has_ensembl], df_all_proteins)
+    df_protein = pd.concat([df_ensembl, df_protein[~has_ensembl]], ignore_index=True)
+    if TRANSCRIPT_KEY not in df_protein.columns or df_protein[TRANSCRIPT_KEY].isna().any():
+        # _link_proteins_by_refseq() appends recovered rows built by hand, which
+        # need not carry the key column.
+        df_protein[TRANSCRIPT_KEY] = combined_transcript_ids(df_protein)
+    return df_transcript, df_protein
 
 
 def get_transcript_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
     logger.log(PROGRESS, 'Reading domains from DomainEvent/DomainType')
     if df_transcript is None or df_protein is None:
         df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
+    # DomainEvent is keyed by protein_ensembl_id, so this path can only ever see
+    # the Ensembl-keyed proteins. Restricted explicitly because the frame now
+    # also carries RefSeq-only rows, and pandas matches NaN to NaN in a merge -
+    # leaving them in would cross-join every such protein against every such
+    # transcript on the merge below.
+    df_protein = df_protein[df_protein.protein_ensembl_id.notna()
+                            & (df_protein.protein_ensembl_id.astype(str).str.strip() != '')]
     proteins_ids = np.unique(df_protein.protein_ensembl_id.values).tolist()
     df_domain_event = pd.read_sql_query('select * from DomainEvent', con)
 
@@ -978,8 +1029,20 @@ def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_pr
     if 'type' not in df_rep.columns:
         df_rep['type'] = None
 
-    merged_df = pd.merge(df_protein, df_transcript, on=['protein_ensembl_id', 'transcript_ensembl_id'])
+    # On the combined transcript key rather than the Ensembl id pair: the pair
+    # excluded every RefSeq-only transcript from the domain source outright. The
+    # protein columns are dropped from one side first so the merge does not
+    # suffix them - the protein's are the ones the rest of this function reads.
+    merged_df = pd.merge(
+        df_protein,
+        df_transcript.drop(columns=['protein_ensembl_id', 'protein_refseq_id'],
+                           errors='ignore'),
+        on=TRANSCRIPT_KEY, suffixes=('', '_tx'))
     merged_df = pd.merge(merged_df, df_rep, on='protein_interpro_id')
+
+    # The lookup is keyed on transcript_ensembl_id_version below, and the
+    # analysis asks for the combined id - so that is what has to go in it.
+    merged_df['transcript_ensembl_id'] = merged_df[TRANSCRIPT_KEY]
 
     domain_column = merged_df['domain_id'].map(_route_domain_id_to_column)
     for col in ('CDD_id', 'cdd', 'pfam', 'smart', 'tigr', 'interpro'):
