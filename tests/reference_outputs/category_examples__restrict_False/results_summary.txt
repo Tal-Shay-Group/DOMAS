@@ -43,8 +43,7 @@ Comparison events, by cluster+gene
     The same event repeated in one cluster and gene counts once.
 
     no_domains_in_region            13   43.33% of pairs
-    :q
-                     7   23.33% of pairs
+    added_domain                     7   23.33% of pairs
     longer                           3   10.00% of pairs
     dropped_domain                   3   10.00% of pairs
     reduced_domain_number            1    3.33% of pairs
