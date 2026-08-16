@@ -11,6 +11,10 @@ __pycache__/
 # Logs & scratch
 *.log
 error.txt
+*.swp
+# analyze_ioe_files() dumps this into the cwd on every run, so it appears
+# wherever the SUPPA tests happen to be run from. Regenerated, never edited.
+ioe_all_junctions.csv
 SESSION_HANDOFF_CONTEXT.md
 /a
 tests/x.py
