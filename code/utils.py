@@ -573,6 +573,126 @@ def ioe2junctions(file_path):
                                                     FEATURE_TYPE_COLUMN])
     return df_junctions
 
+def _split_synonyms(value):
+    """The synonyms one Genes row lists.
+
+    DoChaP writes them '; '-separated, but the RefSeq builder currently stores
+    only the first of the GFF's comma-separated list (gffRefseqBuilder keeps
+    `syno[0]`), so most rows hold a single token. Both separators are accepted so
+    the split does not depend on which builder wrote the row, or on that being
+    fixed.
+    """
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return []
+    out = []
+    for part in str(value).replace(';', ',').split(','):
+        part = part.strip()
+        if part and part.lower() not in ('', '-', 'nan', 'none', 'na'):
+            out.append(part)
+    return out
+
+
+def _is_readthrough_component(synonym, symbol):
+    """True when `symbol` is a readthrough named after its constituents and
+    `synonym` is one of them - BORCS8-MEF2B listing MEF2B, SYNJ2BP-COX16 listing
+    COX16.
+
+    Those are NOT renames and must not resolve. A readthrough is a separate locus
+    with its own transcripts and its own protein; answering "MEF2B" with
+    BORCS8-MEF2B would analyse a different gene's domains and say nothing about
+    it. MEF2B is a real gene that this DoChaP build drops entirely (see
+    DoChaP-db/MEF2B_GENE_LOST.md), and reporting gene_not_in_db for it is the
+    honest answer - silently substituting the readthrough is not.
+    """
+    return '-' in str(symbol) and str(synonym).upper() in {
+        part.strip().upper() for part in str(symbol).split('-')}
+
+
+def resolve_gene_symbols(con, symbols, db_specie, logger_instance=None):
+    """{UPPER(symbol): gene id} for as many of `symbols` as the Genes table can
+    place, by current symbol first and by synonym second.
+
+    A symbol that names no gene is usually a gene DoChaP does not carry at all -
+    a pseudogene or lncRNA, which the build excludes by design. But some are
+    genes it does carry under a newer name: an input naming C16orf72, C7orf50 or
+    CBWD2 is naming HAPSTR1, CHLSN and ZNG1B, all present. Those were being
+    reported as gene_not_in_db and dropped before analysis.
+
+    Only the symbols the first pass could not place are looked up again, and a
+    synonym is accepted only when it names exactly ONE gene. Synonyms are not
+    unique - an old symbol can be listed by several genes - and picking one
+    arbitrarily would attribute an event to the wrong gene silently, which is
+    worse than not placing it. Ambiguous ones are logged and left unresolved.
+
+    The gene id is combined_gene_ids()'s: the Ensembl id where there is one, else
+    the GeneID, matching what the readers put in the junctions frame.
+    """
+    log = logger_instance or logger
+    symbols = [s for s in dict.fromkeys(symbols)
+               if s and str(s).strip().lower() not in ('nan', 'na', '.', 'none', '')]
+    if not symbols:
+        return {}
+
+    resolved = {}
+    for chunk in (symbols[i:i + 450] for i in range(0, len(symbols), 450)):
+        placeholders = ','.join(['?'] * len(chunk))
+        # gene_GeneID_id comes back too: 13% of DoChaP genes carry no
+        # gene_ensembl_id, and resolving to that column alone yields NaN.
+        df = pd.read_sql_query(
+            f'SELECT gene_ensembl_id, gene_GeneID_id, gene_symbol FROM Genes '
+            f'WHERE specie = ? AND UPPER(gene_symbol) IN ({placeholders})',
+            con, params=[db_specie] + [str(s).upper() for s in chunk])
+        resolved.update({str(sym).upper(): gid
+                         for gid, sym in zip(combined_gene_ids(df), df['gene_symbol'])})
+
+    missing = [s for s in symbols if str(s).upper() not in resolved]
+    if not missing:
+        return resolved
+
+    # One pass over the species' synonym-bearing rows, rather than a LIKE per
+    # missing symbol: the column is small enough to scan and there is no index
+    # that would serve a substring match anyway.
+    df_syn = pd.read_sql_query(
+        'SELECT gene_ensembl_id, gene_GeneID_id, gene_symbol, synonyms FROM Genes '
+        "WHERE specie = ? AND synonyms IS NOT NULL AND TRIM(synonyms) NOT IN ('', '-')",
+        con, params=(db_specie,))
+    if df_syn.empty:
+        return resolved
+
+    by_synonym = {}
+    for gid, symbol, synonyms in zip(combined_gene_ids(df_syn),
+                                     df_syn['gene_symbol'], df_syn['synonyms']):
+        for syn in _split_synonyms(synonyms):
+            if _is_readthrough_component(syn, symbol):
+                continue
+            by_synonym.setdefault(syn.upper(), {})[gid] = symbol
+
+    found, ambiguous = 0, 0
+    for s in missing:
+        candidates = by_synonym.get(str(s).upper())
+        if not candidates:
+            continue
+        if len(candidates) > 1:
+            ambiguous += 1
+            log.warning(
+                "Gene symbol %s is a synonym of %d genes (%s); not resolved - "
+                "attributing the event to one of them would be a guess.",
+                s, len(candidates), ', '.join(sorted(candidates.values())))
+            continue
+        gid, symbol = next(iter(candidates.items()))
+        resolved[str(s).upper()] = gid
+        found += 1
+        log.info('Gene symbol %s not found; resolved by synonym to %s (%s).',
+                 s, symbol, gid)
+
+    if found or ambiguous:
+        log.log(PROGRESS,
+                'Resolved %d of %d unknown gene symbol(s) by synonym%s',
+                found, len(missing),
+                f' ({ambiguous} left unresolved as ambiguous)' if ambiguous else '')
+    return resolved
+
+
 def get_gene_symbols(con, gene_ensembl_ids):
     """
     Retrieves gene symbols for a list of gene IDs, each either an Ensembl gene id

@@ -33,7 +33,9 @@ from junction_analisys import (  # noqa: E402
 from alternative_splicing import (  # noqa: E402
     hadas_read_input_file, read_junctions_csv, leafcutter_read_input_files,
 )
-from utils import rmats2junctions, rmats_input_files, voila2junctions  # noqa: E402
+from utils import (  # noqa: E402
+    rmats2junctions, rmats_input_files, resolve_gene_symbols, voila2junctions,
+)
 from pdf_text_utils import (  # noqa: E402
     PDF_TEXT_MANIFEST_FILENAME, build_pdf_text_manifest,
 )
@@ -934,6 +936,62 @@ def _summary_cluster(cluster, gene, junctions, events, features_matched):
     for event, transcript in events:
         result.add_event(event, alternative_transcript_id=transcript)
     return result
+
+
+def _genes_db(rows):
+    """An in-memory Genes table, so the symbol resolution is tested against known
+    content rather than whatever the local DoChaP build happens to hold."""
+    con = sqlite3.connect(':memory:')
+    con.execute('CREATE TABLE Genes (gene_ensembl_id TEXT, gene_GeneID_id TEXT, '
+                'gene_symbol TEXT, synonyms TEXT, specie TEXT)')
+    con.executemany('INSERT INTO Genes VALUES (?,?,?,?,?)',
+                    [(e, g, s, syn, 'H_sapiens') for e, g, s, syn in rows])
+    return con
+
+
+def test_symbol_resolution_prefers_the_current_symbol():
+    """A symbol that IS a gene resolves to that gene, even when another gene
+    lists it as a synonym - a rename must never shadow a live symbol."""
+    con = _genes_db([('ENSG1', '1', 'REALGENE', None),
+                     ('ENSG2', '2', 'OTHER', 'REALGENE')])
+    assert resolve_gene_symbols(con, ['REALGENE'], 'H_sapiens') == {'REALGENE': 'ENSG1'}
+
+
+def test_symbol_resolution_falls_back_to_a_synonym():
+    """The case this exists for: the input names a gene by its old symbol."""
+    con = _genes_db([('ENSG1', '1', 'HAPSTR1', 'C16orf72')])
+    assert resolve_gene_symbols(con, ['C16orf72'], 'H_sapiens') == {'C16ORF72': 'ENSG1'}
+    # and both separators are read, since the two builders disagree
+    con2 = _genes_db([('ENSG1', '1', 'NEW', 'OLD1; OLD2'),
+                      ('ENSG2', '2', 'NEW2', 'OLD3,OLD4')])
+    got = resolve_gene_symbols(con2, ['OLD2', 'OLD4'], 'H_sapiens')
+    assert got == {'OLD2': 'ENSG1', 'OLD4': 'ENSG2'}
+
+
+def test_symbol_resolution_leaves_an_ambiguous_synonym_unresolved():
+    """Two genes claiming the same old symbol: picking one would attribute the
+    event to the wrong gene silently, which is worse than not placing it."""
+    con = _genes_db([('ENSG1', '1', 'GENEA', 'SHARED'),
+                     ('ENSG2', '2', 'GENEB', 'SHARED')])
+    assert resolve_gene_symbols(con, ['SHARED'], 'H_sapiens') == {}
+
+
+def test_symbol_resolution_does_not_answer_with_a_readthrough():
+    """BORCS8-MEF2B lists MEF2B as a synonym, but it is a different locus with
+    its own transcripts and protein. Answering MEF2B with it would analyse the
+    wrong gene; gene_not_in_db is the honest outcome."""
+    con = _genes_db([('ENSG1', '1', 'BORCS8-MEF2B', 'MEF2B; LOC729991-MEF2B')])
+    assert resolve_gene_symbols(con, ['MEF2B'], 'H_sapiens') == {}
+    # the readthrough's own symbol still resolves
+    assert resolve_gene_symbols(con, ['BORCS8-MEF2B'], 'H_sapiens') == {
+        'BORCS8-MEF2B': 'ENSG1'}
+
+
+def test_symbol_resolution_uses_the_geneid_when_there_is_no_ensembl_id():
+    """13% of DoChaP genes carry no gene_ensembl_id; resolving to that column
+    alone would yield None and drop the gene before analysis."""
+    con = _genes_db([(None, '4207', 'NEWNAME', 'OLDNAME')])
+    assert resolve_gene_symbols(con, ['OLDNAME'], 'H_sapiens') == {'OLDNAME': '4207'}
 
 
 def test_non_annotated_path_prefixes_the_name_not_the_directory():

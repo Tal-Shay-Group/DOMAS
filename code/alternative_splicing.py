@@ -46,16 +46,18 @@ def hadas_read_input_file(con, input_path):
         df_m['end_position'] = df_m['end_position'].astype(int)
         df_m = df_m[(df_m.start_position >= 0) & (df_m.end_position >= 0)]
         df_m['specie'] = 'mouse'
-        # get gene ensembl id from genes column, which is in the format "gene_symbol (gene_ensembl_id)"
-        # gene_GeneID_id is the fallback for the 13% of genes with no
-        # gene_ensembl_id, which otherwise resolve to NaN and are dropped.
-        query = "SELECT gene_ensembl_id, gene_GeneID_id, gene_symbol FROM Genes WHERE specie = 'M_musculus' AND UPPER(gene_symbol) IN ({gene_symbols})"
-        gene_symbols = df_m['genes'].unique().tolist()
-        df_mouse_genes = pd.read_sql_query(query.format(gene_symbols=','.join(['?']*len(gene_symbols))), con, params=gene_symbols)
-        df_mouse_genes['gene_ensembl_id'] = utils.combined_gene_ids(df_mouse_genes)
-        df_mouse_genes = df_mouse_genes.drop(columns=['gene_GeneID_id'])
-        df_mouse_genes['gene_symbol'] = df_mouse_genes['gene_symbol'].str.upper()
-        df_m = pd.merge(df_m, df_mouse_genes, left_on='genes', right_on='gene_symbol', how='left')
+        # Resolve the mouse symbols by current symbol, then by synonym for those
+        # it cannot place - see utils.resolve_gene_symbols(). gene_GeneID_id is
+        # the fallback there for the 13% of genes with no gene_ensembl_id, which
+        # would otherwise resolve to NaN and be dropped.
+        symbol_to_id = utils.resolve_gene_symbols(
+            con, df_m['genes'].dropna().unique().tolist(), 'M_musculus',
+            logger_instance=logger)
+        upper = df_m['genes'].astype(str).str.upper()
+        df_m['gene_ensembl_id'] = upper.map(symbol_to_id)
+        # Unresolved rows keep no symbol, as they did when this was a left merge
+        # against the matched rows only.
+        df_m['gene_symbol'] = upper.where(df_m['gene_ensembl_id'].notna())
         df_m.drop(columns=['genes'], inplace=True)
         df_m.rename(columns={ 'm_junction': 'junction_name', 'cluster': 'cluster_name'}, inplace=True)
         df_m = df_m[['gene_symbol', 'gene_ensembl_id', 'junction_name', 'chromosome',
@@ -167,21 +169,14 @@ def _leafcutter_attach_genes(con, df, cluster_to_symbols, specie):
     # resolve gene symbol -> gene_ensembl_id via the DoChaP Genes table.
     # The same symbol exists across species in the DB (e.g. USP16 -> human,
     # mouse, rat, ...), so the lookup must be restricted to this input's species.
+    # By current symbol, then by synonym for whatever is left - see
+    # utils.resolve_gene_symbols(). A LeafCutter file names whichever symbol its
+    # annotation carried, which for a renamed gene is not the one DoChaP stores.
     db_specie = _SPECIE_DB_NAME.get(specie, specie)
     symbols = [s for s in df['gene_symbol'].dropna().unique().tolist()
                if s and str(s).lower() not in ('nan', 'na', '.')]
-    symbol_to_ensembl = {}
-    if symbols:
-        placeholders = ','.join(['?'] * len(symbols))
-        # gene_GeneID_id is selected as a fallback: 13% of DoChaP genes carry no
-        # gene_ensembl_id, and resolving a symbol to that column alone yields NaN,
-        # dropping the gene before analysis (see utils.combined_gene_ids).
-        query = (f"SELECT gene_ensembl_id, gene_GeneID_id, gene_symbol FROM Genes "
-                 f"WHERE specie = ? AND UPPER(gene_symbol) IN ({placeholders})")
-        df_genes = pd.read_sql_query(query, con, params=[db_specie] + [s.upper() for s in symbols])
-        symbol_to_ensembl = {sym.upper(): gid
-                             for gid, sym in zip(utils.combined_gene_ids(df_genes),
-                                                 df_genes['gene_symbol'])}
+    symbol_to_ensembl = utils.resolve_gene_symbols(con, symbols, db_specie,
+                                                   logger_instance=logger)
     df['gene_ensembl_id'] = df['gene_symbol'].apply(
         lambda s: symbol_to_ensembl.get(str(s).upper()) if pd.notna(s) else None)
 
