@@ -1082,7 +1082,7 @@ class GeneVisualization:
         num_pages = len(pages)
 
         # Cluster-level events (not tied to a specific transcript) shown once above canonical
-        _CLUSTER_EVENTS = {'feature_not_mapped', 'no_canonical_features',
+        _CLUSTER_EVENTS = {'junction_not_mapped', 'no_canonical_junctions',
                            'no_canonical_transcript', 'only_one_transcript',
                            'no_gene_specified'}
         cluster_events_df = None
@@ -1092,7 +1092,7 @@ class GeneVisualization:
                 _ce = df_results[_mask][['event', 'alternative_transcript_id']].copy()
                 _ce['alternative_transcript_id'] = _ce.apply(
                     lambda r: f"junction #{int(r['alternative_transcript_id'])}"
-                              if r['event'] == 'feature_not_mapped' and pd.notna(r['alternative_transcript_id'])
+                              if r['event'] == 'junction_not_mapped' and pd.notna(r['alternative_transcript_id'])
                               else '',
                     axis=1,
                 )

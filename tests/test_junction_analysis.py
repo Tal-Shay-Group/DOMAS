@@ -300,14 +300,21 @@ def test_find_matching_junction_indices_non_adjacent_exons_do_not_match():
 # classify_domain_change - pure decision-matrix function
 # ---------------------------------------------------------------------------
 
+# Instance counts of 0 and 1 are not special cases: unequal counts are a count
+# change whatever the numbers, equal counts are a length comparison. The first
+# seven rows are the cases that used to have labels of their own - 'added_domain',
+# 'dropped_domain', 'split_domain', 'merged_domain' and the bare
+# 'unchanged'/'longer'/'shorter' - and each now lands on one of the five.
 @pytest.mark.parametrize('c_count,t_count,c_length,t_length,expected', [
-    (0, 1, None, 50, 'added_domain'),
-    (1, 0, 50, None, 'dropped_domain'),
-    (1, 1, 50, 50, 'unchanged'),
-    (1, 1, 50, 80, 'longer'),
-    (1, 1, 80, 50, 'shorter'),
-    (1, 2, 50, 90, 'split_domain'),
-    (2, 1, 90, 50, 'merged_domain'),
+    (0, 1, None, 50, 'increased_domain_number'),   # was added_domain
+    (1, 0, 50, None, 'reduced_domain_number'),     # was dropped_domain
+    (1, 1, 50, 50, 'unchanged_domains'),           # was unchanged
+    (1, 1, 50, 80, 'longer_domains'),              # was longer
+    (1, 1, 80, 50, 'shorter_domains'),             # was shorter
+    (1, 2, 50, 90, 'increased_domain_number'),     # was split_domain
+    (2, 1, 90, 50, 'reduced_domain_number'),       # was merged_domain
+    (0, 5, None, 200, 'increased_domain_number'),  # 0 is just another count
+    (5, 0, 200, None, 'reduced_domain_number'),
     (2, 2, 100, 100, 'unchanged_domains'),
     (2, 2, 100, 150, 'longer_domains'),
     (2, 2, 150, 100, 'shorter_domains'),
@@ -874,8 +881,8 @@ def test_analyze_treats_retained_intron_transcript_as_comparable():
     )
 
     df_results = cluster_result.get_results_df()
-    skipped = {'transcript_doesnt_have_features', 'no_unique_features',
-               'no_canonical_features', 'feature_not_mapped', 'gene_not_in_db'}
+    skipped = {'transcript_doesnt_have_junctions', 'no_unique_junctions',
+               'no_canonical_junctions', 'junction_not_mapped', 'gene_not_in_db'}
     comparable = set(df_results.loc[~df_results['event'].isin(skipped), 'alternative_transcript_id'].dropna())
     assert comparable == {'ENST_RETAINED'}, f"expected the retained transcript, got {comparable}"
 
@@ -1972,8 +1979,8 @@ def test_cluster_where_no_transcript_differs_reports_no_unique_transcript():
     assert len(cluster_rows) == 1
     assert pd.isna(cluster_rows['alternative_transcript_id'].iloc[0])
     # The per-transcript reasons are still there.
-    assert 'no_unique_features' in events
-    assert 'transcript_doesnt_have_features' in events
+    assert 'no_unique_junctions' in events
+    assert 'transcript_doesnt_have_junctions' in events
 
 
 def test_no_unique_transcript_is_not_reported_when_a_group_forms():

@@ -40,3 +40,4 @@ alphafold_benchmark/repro_data/
 
 # run_examples.sh default output directory
 run_examples_output/
+DIAGRAMS_SESSION_CONTEXT.md

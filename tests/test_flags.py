@@ -28,7 +28,7 @@ sys.path.insert(0, CODE_DIR)
 
 from junction_analisys import (  # noqa: E402
     JunctionsAnalysis, ClusterAnalysisResult, NON_COMPARISON_EVENTS,
-    RunSummary, non_annotated_path, summary_path,
+    RunSummary, non_compared_path, summary_path,
 )
 from alternative_splicing import (  # noqa: E402
     hadas_read_input_file, read_junctions_csv, leafcutter_read_input_files,
@@ -70,8 +70,8 @@ IOE_DIR = os.path.join(TESTS_DIR, 'ioe')
 # Mirrors JunctionsAnalysis._SKIPPED_TRANSCRIPT_EVENTS plus the cluster-level
 # events that carry no real transcript id.
 _SKIPPED_EVENTS = {
-    'gene_not_in_db', 'no_gene_specified', 'transcript_doesnt_have_features', 'no_unique_features',
-    'no_canonical_transcript', 'only_one_transcript', 'no_canonical_features', 'feature_not_mapped',
+    'gene_not_in_db', 'no_gene_specified', 'transcript_doesnt_have_junctions', 'no_unique_junctions',
+    'no_canonical_transcript', 'only_one_transcript', 'no_canonical_junctions', 'junction_not_mapped',
 }
 
 # restrict_pdf_to_comparable. The tie-break rules
@@ -326,8 +326,8 @@ def _compare_csv_to_reference(generated_csv, reference_csv):
 
     _compare_one_csv_to_reference(generated_csv, reference_csv)
 
-    generated_other = non_annotated_path(generated_csv)
-    reference_other = non_annotated_path(reference_csv)
+    generated_other = non_compared_path(generated_csv)
+    reference_other = non_compared_path(reference_csv)
     assert os.path.exists(generated_other), f"The run wrote no {generated_other}"
     assert os.path.exists(reference_other), f"No reference committed at {reference_other}"
     _compare_one_csv_to_reference(generated_other, reference_other)
@@ -452,9 +452,9 @@ def _compare_or_create_reference(generated_csv, reference_csv):
     """
     generated = [generated_csv]
     reference = [reference_csv]
-    if os.path.exists(non_annotated_path(generated_csv)):
-        generated.append(non_annotated_path(generated_csv))
-        reference.append(non_annotated_path(reference_csv))
+    if os.path.exists(non_compared_path(generated_csv)):
+        generated.append(non_compared_path(generated_csv))
+        reference.append(non_compared_path(reference_csv))
 
     if not os.path.exists(reference_csv):
         os.makedirs(os.path.dirname(reference_csv), exist_ok=True)
@@ -621,8 +621,8 @@ def test_rmats_subset_compare_against_reference(con, keep_test_output):
 # mirrors junction_analisys.NON_COMPARISON_EVENTS; filter_non_comparable drops these.
 _NON_COMPARISON_EVENTS = {
     'gene_not_in_db', 'no_gene_specified', 'no_canonical_transcript', 'only_one_transcript',
-    'no_canonical_features', 'feature_not_mapped',
-    'transcript_doesnt_have_features', 'no_unique_features',
+    'no_canonical_junctions', 'junction_not_mapped',
+    'transcript_doesnt_have_junctions', 'no_unique_junctions',
 }
 
 
@@ -780,7 +780,7 @@ def test_no_canonical_transcript_falls_back_instead_of_skipping():
     """A gene that IS in the database but has no canonical transcript is no longer
     skipped: the longest-CDS transcript stands in as canonical, so 'no_canonical_transcript'
     is not what comes back. (Here the exons are empty, so the run stops one step later
-    at 'no_canonical_features' - the point is that it got past canonical selection.)"""
+    at 'no_canonical_junctions' - the point is that it got past canonical selection.)"""
     cluster_result = ClusterAnalysisResult('TEST_1', 'ENSG12345678', 'KNOWNGENE', specie='H_sapiens')
     # DataFrame with transcripts but no canonical ones (empty canonical_transcript_ids)
     df_with_transcripts = pd.DataFrame({
@@ -833,10 +833,10 @@ def test_comparable_transcript_ids_excludes_skipped_events():
 
     cluster_result = ClusterAnalysisResult('cluster_1', 'ENSG00001', 'GENE1')
     cluster_result.canonical_transcript_id = 'ENST_CANON'
-    cluster_result.add_event('added_domain', alternative_transcript_id='ENST_COMPARED')
+    cluster_result.add_event('increased_domain_number', alternative_transcript_id='ENST_COMPARED')
     cluster_result.add_event('no_domains_in_region', alternative_transcript_id='ENST_COMPARED_2')
-    cluster_result.add_event('transcript_doesnt_have_features', alternative_transcript_id='ENST_NO_JUNCTIONS')
-    cluster_result.add_event('no_unique_features', alternative_transcript_id='ENST_NOT_UNIQUE')
+    cluster_result.add_event('transcript_doesnt_have_junctions', alternative_transcript_id='ENST_NO_JUNCTIONS')
+    cluster_result.add_event('no_unique_junctions', alternative_transcript_id='ENST_NOT_UNIQUE')
 
     comparable_ids = analysis._comparable_transcript_ids(cluster_result)
 
@@ -994,9 +994,9 @@ def test_symbol_resolution_uses_the_geneid_when_there_is_no_ensembl_id():
     assert resolve_gene_symbols(con, ['OLDNAME'], 'H_sapiens') == {'OLDNAME': '4207'}
 
 
-def test_non_annotated_path_prefixes_the_name_not_the_directory():
-    assert non_annotated_path('annotated.csv') == 'non_annotated.csv'
-    assert non_annotated_path(os.path.join('out', 'results.csv')) == os.path.join('out', 'non_results.csv')
+def test_non_compared_path_prefixes_the_name_not_the_directory():
+    assert non_compared_path('compared.csv') == 'non_compared.csv'
+    assert non_compared_path(os.path.join('out', 'results.csv')) == os.path.join('out', 'non_results.csv')
 
 
 def test_run_summary_lists_every_input_file():
@@ -1040,7 +1040,7 @@ def test_summary_records_full_paths_but_references_store_them_relative(tmp_path)
 def test_summary_path_is_named_after_the_output_csv():
     """Named after the CSV so runs sharing an output directory - one per input
     table - do not overwrite each other's summary."""
-    assert summary_path('annotated.csv') == 'annotated_summary.txt'
+    assert summary_path('compared.csv') == 'compared_summary.txt'
     assert summary_path(os.path.join('out', 'table05.csv')) == os.path.join('out', 'table05_summary.txt')
     assert summary_path('table05.csv') != summary_path('table06.csv')
 
@@ -1065,13 +1065,13 @@ def test_run_summary_counts_genes_junctions_and_reasons():
 
     summary.add_cluster(_summary_cluster(
         'c1', 'ENSG1', [(1, 2), (3, 4)],
-        [('feature_not_mapped', None), ('dropped_domain', 'ENST1')],
+        [('junction_not_mapped', None), ('reduced_domain_number', 'ENST1')],
         features_matched=1))
     summary.add_cluster(_summary_cluster(
         'c2', None, [(5, 6)], [('gene_not_in_db', None)], features_matched=None))
     summary.add_cluster(_summary_cluster(
         'c3', 'ENSG3', [(7, 8), (9, 10)],
-        [('transcript_doesnt_have_features', 'ENST2'), ('no_unique_transcript', None)],
+        [('transcript_doesnt_have_junctions', 'ENST2'), ('no_unique_transcript', None)],
         features_matched=2))
 
     assert (summary.junctions_matched, summary.junctions_unmatched,
@@ -1081,7 +1081,7 @@ def test_run_summary_counts_genes_junctions_and_reasons():
     assert (summary.comparable, summary.non_comparable) == (1, 2)
     assert summary.input_source == ['fixture.csv']
     # One reason per cluster, and the terminal one - not the per-transcript
-    # transcript_doesnt_have_features that c3 also recorded.
+    # transcript_doesnt_have_junctions that c3 also recorded.
     assert dict(summary.non_comparable_reasons) == {
         'gene_not_in_db': 1, 'no_unique_transcript': 1}
     assert summary.comparable + summary.non_comparable == summary.input_clusters
@@ -1089,21 +1089,24 @@ def test_run_summary_counts_genes_junctions_and_reasons():
 
 
 def test_run_summary_counts_events_by_row_and_by_cluster_gene():
-    """Two dropped_domain rows for one cluster+gene are two rows but one pair;
-    the same event in another cluster is a second pair."""
+    """Two reduced_domain_number rows for one cluster+gene are two rows but one
+    pair; the same event in another cluster is a second pair."""
     df_chunk = pd.DataFrame({
         'event': ['c1', 'c1', 'c1', 'c2', 'c1'],
         'gene_symbol': ['A', 'A', 'A', 'B', 'A'],
         'specie': ['human'] * 5,
-        'event_type': ['dropped_domain', 'dropped_domain', 'added_domain',
-                       'dropped_domain', 'no_unique_features'],
+        'event_type': ['reduced_domain_number', 'reduced_domain_number',
+                       'increased_domain_number', 'reduced_domain_number',
+                       'no_unique_junctions'],
     })
     summary = RunSummary()
     summary.add_frame(df_chunk)
 
-    # no_unique_features is a non-comparison event and belongs to neither count.
-    assert dict(summary.event_rows) == {'dropped_domain': 3, 'added_domain': 1}
-    assert dict(summary.event_pairs) == {'dropped_domain': 2, 'added_domain': 1}
+    # no_unique_junctions is a non-comparison event and belongs to neither count.
+    assert dict(summary.event_rows) == {'reduced_domain_number': 3,
+                                        'increased_domain_number': 1}
+    assert dict(summary.event_pairs) == {'reduced_domain_number': 2,
+                                         'increased_domain_number': 1}
 
 
 def test_run_summary_separates_species_sharing_a_cluster_name():
@@ -1113,11 +1116,11 @@ def test_run_summary_separates_species_sharing_a_cluster_name():
         'event': ['c1', 'c1'],
         'gene_symbol': ['A', 'A'],
         'specie': ['human', 'mouse'],
-        'event_type': ['dropped_domain', 'dropped_domain'],
+        'event_type': ['reduced_domain_number', 'reduced_domain_number'],
     })
     summary = RunSummary()
     summary.add_frame(df_chunk)
-    assert dict(summary.event_pairs) == {'dropped_domain': 2}
+    assert dict(summary.event_pairs) == {'reduced_domain_number': 2}
 
 
 if __name__ == '__main__':

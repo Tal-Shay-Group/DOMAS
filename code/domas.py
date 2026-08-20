@@ -51,18 +51,18 @@ def parse_args():
                               "field, so it cannot be read from them. DOMAS aborts if the gene "
                               "ids turn out to belong to a different species.")
     parser.add_argument("-dochap", required=False, type=str, help="Path to the DoChaP sqlite db")
-    parser.add_argument("-output_csv", type=str, default="annotated.csv",
+    parser.add_argument("-output_csv", type=str, default="compared.csv",
                          help="Path to the output csv, which holds the rows for the "
                               "transcripts actually compared to the canonical one. The "
                               "rows for everything else - the transcripts and clusters "
                               "that never reached a comparison, each naming why - are "
                               "written beside it under the same name with 'non_' in "
-                              "front: the default pair is annotated.csv and "
-                              "non_annotated.csv, and -output_csv results.csv gives "
+                              "front: the default pair is compared.csv and "
+                              "non_compared.csv, and -output_csv results.csv gives "
                               "results.csv and non_results.csv. -omit_non_comparable "
                               "drops those rows instead, and writes no second file. "
                               "A run summary is written alongside them under the same "
-                              "name again - annotated_summary.txt, results_summary.txt - "
+                              "name again - compared_summary.txt, results_summary.txt - "
                               "so several runs can share an output directory without "
                               "overwriting each other's.")
     parser.add_argument("-gene_ids", type=str, default=None,
@@ -101,7 +101,7 @@ def parse_args():
                               "clusters. 0 (default) means no limit.")
     parser.add_argument("-omit_non_comparable", action="store_true",
                          help="Drop the rows for non-comparable transcripts (e.g. those with "
-                              "a gene_not_in_db / feature_not_mapped / no_unique_features "
+                              "a gene_not_in_db / junction_not_mapped / no_unique_junctions "
                               "event) instead of writing them, so no non_<output_csv> file "
                               "is produced. By default they are written to that second file, "
                               "so the two together account for every cluster in the input - "

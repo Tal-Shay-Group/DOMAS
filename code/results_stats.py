@@ -106,10 +106,10 @@ UNANALYZABLE_TYPES = [
     "gene_not_in_db",
     "no_canonical_transcript",
     "only_one_transcript",
-    "feature_not_mapped",
-    "no_unique_features",
-    "transcript_doesnt_have_features",
-    "no_canonical_features",
+    "junction_not_mapped",
+    "no_unique_junctions",
+    "transcript_doesnt_have_junctions",
+    "no_canonical_junctions",
     "no_domains_in_region",
     # Has unique features, but they are a subset of another event's in the same
     # cluster, so the larger event speaks for the region and this transcript is
@@ -118,21 +118,23 @@ UNANALYZABLE_TYPES = [
     # In a group that was compared, but not the transcript the selection rule
     # picked to represent it - so it carries no comparison of its own.
     "transcript_not_chosen",
-    # The event-level counterpart of no_unique_features: not one transcript of the
+    # The event-level counterpart of no_unique_junctions: not one transcript of the
     # gene differs from the canonical within the event, so no group forms.
     "no_unique_transcript",
 ]
 
+# Five outcomes, because classify_domain_change() stopped treating instance
+# counts of 0 and 1 as special cases: a group is either a count change or, at
+# equal counts, a length change. 'added_domain'/'split_domain' folded into
+# increased_domain_number, 'dropped_domain'/'merged_domain' into
+# reduced_domain_number, and the bare 'shorter'/'longer'/'unchanged' single-pair
+# labels into their '_domains' forms.
 ANALYZED_TYPES = [
-    "dropped_domain",
-    "added_domain",
-    "shorter",
-    "longer",
-    "unchanged",
-    "split_domain",
-    "merged_domain",
-    "reduced_domain_number",
+    "unchanged_domains",
+    "longer_domains",
+    "shorter_domains",
     "increased_domain_number",
+    "reduced_domain_number",
 ]
 
 ALL_EVENT_TYPES = UNANALYZABLE_TYPES + ANALYZED_TYPES
@@ -150,7 +152,7 @@ COLORS = {
     "Hadas": "#ED7D31",
 }
 
-LENGTH_CHANGE_COLORS = {"shorter": "#FF8C00", "longer": "#FFC000"}
+LENGTH_CHANGE_COLORS = {"shorter_domains": "#FF8C00", "longer_domains": "#FFC000"}
 
 
 def _warn(message):
@@ -164,7 +166,7 @@ def _warn(message):
 # added) would otherwise make zip() truncate and shift every later color by
 # one, shifting every later colour by one.
 _UNANALYZABLE_COLORS = ["#8C8C8C", "#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2", "#937860", "#CCB974", "#64B5CD", "#B07AA1", "#3E8E8E", "#6B8E23"]
-_ANALYZED_COLORS = ["#C00000", "#2E8B57", "#FF8C00", "#FFC000", "#70AD47", "#7030A0", "#4472C4", "#A6761D", "#E7298A"]
+_ANALYZED_COLORS = ["#70AD47", "#FFC000", "#FF8C00", "#2E8B57", "#C00000"]
 assert len(_UNANALYZABLE_COLORS) == len(UNANALYZABLE_TYPES), \
     f"event_color(): {len(_UNANALYZABLE_COLORS)} unanalyzable colors for {len(UNANALYZABLE_TYPES)} UNANALYZABLE_TYPES"
 assert len(_ANALYZED_COLORS) == len(ANALYZED_TYPES), \
@@ -200,23 +202,22 @@ def event_sort_key(event_type):
 
 # Chart-only labels. The analyzed side renders under a title that already says
 # "domain", so the word is dropped from the category names, and
-# "transcript_doesnt_have_features" is shortened for width. "features" covers
-# junctions and retained introns alike. Display only: filtering and the CSV use
+# "transcript_doesnt_have_junctions" is shortened for width. Note the label
+# says "junctions" but a retained intron counts as one here too. Display only: filtering and the CSV use
 # ANALYZED_TYPES / UNANALYZABLE_TYPES and the raw event_type values.
 SHORT_LABELS = {
     "no_gene_specified": "no gene named",
     "gene_not_in_db": "not in DB",
-    "dropped_domain": "dropped",
-    "added_domain": "added",
-    "split_domain": "split",
-    "merged_domain": "merged",
+    "unchanged_domains": "unchanged",
+    "longer_domains": "longer",
+    "shorter_domains": "shorter",
     # Not "fewer/more copies" - that phrasing is already the stacked-bar
     # legend text in domain_count_change() for a different, row-level
     # concept (this is the row's classified outcome type).
     "reduced_domain_number": "fewer domains",
     "increased_domain_number": "more domains",
     "domain swap": "swap",
-    "transcript_doesnt_have_features": "lacks features",
+    "transcript_doesnt_have_junctions": "lacks junctions",
     "transcript_not_chosen": "not chosen",
     "no_unique_transcript": "no unique transcript",
 }
@@ -340,7 +341,7 @@ def results_csv_paths(path):
     """Every result file of the run that wrote `path`.
 
     A run writes its compared rows to the name it was given and the rest to
-    non_<name> beside it (see junction_analisys.non_annotated_path). A report
+    non_<name> beside it (see junction_analisys.non_compared_path). A report
     over the compared file alone would show an empty unanalyzable breakdown -
     the whole "why did these clusters not reach a comparison" half of it - so
     the companion is read with it whenever it is there.
@@ -348,9 +349,9 @@ def results_csv_paths(path):
     Just [path] when there is no companion: a run with -omit_non_comparable
     writes none, and a results.csv from before the split is one whole file.
     """
-    from junction_analisys import non_annotated_path   # heavy module, only needed here
+    from junction_analisys import non_compared_path   # heavy module, only needed here
 
-    companion = non_annotated_path(path)
+    companion = non_compared_path(path)
     return [path, companion] if os.path.exists(companion) else [path]
 
 
@@ -412,25 +413,37 @@ def normalize_event_types(df):
     nor unanalyzable.
     """
     df["event_type"] = df["event_type"].replace({
-        "unchanged_domains": "unchanged",
-        "longer_domains": "longer",
-        "shorter_domains": "shorter",
+        # The single-pair labels are the OLD spelling now - classify_domain_change()
+        # emits the "_domains" form for every equal-count group, one instance
+        # included - so the mapping runs the other way than it used to.
+        "unchanged": "unchanged_domains",
+        "longer": "longer_domains",
+        "shorter": "shorter_domains",
+        # Counts of 0 and 1 stopped being special cases, so these four collapse
+        # into the two count-change labels.
+        "added_domain": "increased_domain_number",
+        "split_domain": "increased_domain_number",
+        "dropped_domain": "reduced_domain_number",
+        "merged_domain": "reduced_domain_number",
         # Pre-rename classification labels, from before the vocabulary was made
         # uniform (underscores throughout, "unchanged" rather than "same") to
         # match Table S5. Kept so an older results.csv still lands inside
         # ANALYZED_TYPES instead of tripping the unknown-event_type check.
-        "dropped domain": "dropped_domain",
-        "split domain": "split_domain",
-        "merged domain": "merged_domain",
-        "same": "unchanged",
-        "same_domains": "unchanged",
-        # Pre-rename labels, from before an event became a set of features rather
-        # than of junctions. Mapped so a results.csv produced by an older run still
-        # lands inside UNANALYZABLE_TYPES instead of counting as neither.
-        "junction_not_mapped": "feature_not_mapped",
-        "no_canonical_junctions": "no_canonical_features",
-        "transcript_doesnt_have_junctions": "transcript_doesnt_have_features",
-        "no_unique_junctions": "no_unique_features",
+        "dropped domain": "reduced_domain_number",
+        "split domain": "increased_domain_number",
+        "merged domain": "reduced_domain_number",
+        "same": "unchanged_domains",
+        "same_domains": "unchanged_domains",
+        # The vocabulary said "junction", then "feature", and now says "junction"
+        # again. Only the "feature" spellings need mapping - the current ones are
+        # already correct, and listing them as identity entries (which a blanket
+        # rename will happily produce) is just noise. Kept so a results.csv from
+        # either older run still lands inside UNANALYZABLE_TYPES rather than
+        # counting as neither analyzed nor unanalyzable.
+        "feature_not_mapped": "junction_not_mapped",
+        "no_canonical_features": "no_canonical_junctions",
+        "transcript_doesnt_have_features": "transcript_doesnt_have_junctions",
+        "no_unique_features": "no_unique_junctions",
     })
     return df
 
@@ -577,13 +590,14 @@ def select_representative_transcript(df, on_ambiguous="raise"):
 # 1. EVENT-TYPE DISTRIBUTION
 # ══════════════════════════════════════════════════════════════════════════════
 
-DOMAIN_SWAP_COMBO = frozenset({"added_domain", "dropped_domain"})
+DOMAIN_SWAP_COMBO = frozenset({"increased_domain_number", "reduced_domain_number"})
 
 
 def _collapse_to_cluster_label(sub_df, group_cols):
     """
     One label per group in sub_df: its sole distinct event_type; "domain
-    swap" if the group's rows are exactly {added_domain, dropped domain} -
+    swap" if the group's rows are exactly {increased_domain_number,
+    reduced_domain_number} -
     common enough, and semantically distinct enough (one domain gained, one
     lost, in the same comparison) to name explicitly instead of burying in
     the generic bucket (see mixed_combinations() for what else ends up
@@ -606,7 +620,7 @@ def _cluster_event_labels(df):
     One row per (specie, cluster): whether it's "unanalyzable" or
     "analyzable", and its label - the sole event_type behind that, or
     "mixed" if more than one applies. Multiple transcript-comparison rows
-    per cluster (e.g. no_unique_features can fire once per non-matching
+    per cluster (e.g. no_unique_junctions can fire once per non-matching
     candidate transcript) would otherwise inflate a per-row count in a way
     that mixes "one row per cluster" event types (e.g.
     no_canonical_transcript) with "one row per candidate transcript" ones in
@@ -1502,11 +1516,11 @@ def _pdf_length_change_combined(pdf, label_dfs, event_type, page_title):
 
 
 def length_change_shorter(df, label):
-    _length_change(df, label, "shorter")
+    _length_change(df, label, "shorter_domains")
 
 
 def length_change_longer(df, label):
-    _length_change(df, label, "longer")
+    _length_change(df, label, "longer_domains")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1822,12 +1836,21 @@ def _severity_values(df):
     what was blowing up memory on a multi-million-row IOE file.
     """
     et = df["event_type"]
-    dropped_vals = np.zeros(int((et == "dropped_domain").sum()))
+    # A domain lost entirely retains 0% of its length. Under the collapsed
+    # vocabulary that case lives inside reduced_domain_number, which also holds
+    # merges (n -> 1) where length survives, so the rows are picked by an
+    # ALTERNATIVE length of zero rather than by their label.
+    t_all = df.get("alternative_domain_length")
+    if t_all is None:
+        dropped_vals = np.zeros(0)
+    else:
+        dropped_vals = np.zeros(int(((et == "reduced_domain_number")
+                                     & (t_all.isna() | (t_all == 0))).sum()))
 
     c = df.get("canonical_domain_length")
     t = df.get("alternative_domain_length")
     if c is not None and t is not None:
-        valid_mask = et.isin(["shorter", "longer", "unchanged"]) & c.notna() & t.notna() & (c > 0)
+        valid_mask = et.isin(["shorter_domains", "longer_domains", "unchanged_domains"]) & c.notna() & t.notna() & (c > 0)
         other_vals = (100 * t[valid_mask] / c[valid_mask]).to_numpy(dtype=float)
     else:
         other_vals = np.array([])
@@ -1902,7 +1925,7 @@ def analyze_file(path, label=None, fetch_domain_descriptions=False, specie_filte
     clusters from all their rows, analyzable ones from the representative
     transcript - so "one row per cluster" event types (e.g.
     no_canonical_transcript) aren't mixed with "one row per candidate
-    transcript" ones (e.g. no_unique_features) in the same tally.
+    transcript" ones (e.g. no_unique_junctions) in the same tally.
 
     Returns the loaded, normalised DataFrame, so callers can pass several of
     these into compare_files() without reloading.
@@ -2417,7 +2440,8 @@ def _run_pdf_report(runs, pdf_path, title, fetch_domain_descriptions=False, comb
                 if prefix == "event_distribution":
                     _pdf_event_distribution_combined(pdf, label_dfs, page_title)
                 elif prefix in ("length_change_shorter", "length_change_longer"):
-                    event_type = "shorter" if prefix == "length_change_shorter" else "longer"
+                    event_type = ("shorter_domains" if prefix == "length_change_shorter"
+                                  else "longer_domains")
                     _pdf_length_change_combined(pdf, label_dfs, event_type, page_title)
 
             for df, label in prepared:

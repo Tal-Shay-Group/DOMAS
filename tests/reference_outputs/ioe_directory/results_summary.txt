@@ -31,20 +31,24 @@ Clusters
 
 Why a cluster was not comparable (one reason per cluster+gene)
 -------------------------------------------------------------
-    no_canonical_features         41  100.00% of non-comparable
+    no_canonical_junctions         41  100.00% of non-comparable
 
 Comparison events, by row
 -------------------------
-    no_domains_in_region        173   87.82% of rows
-    added_domain                 14    7.11% of rows
-    dropped_domain                9    4.57% of rows
-    merged_domain                 1    0.51% of rows
+    no_domains_in_region           145   71.78% of rows
+    reduced_domain_number           32   15.84% of rows
+    unchanged_domains               15    7.43% of rows
+    increased_domain_number          6    2.97% of rows
+    shorter_domains                  3    1.49% of rows
+    longer_domains                   1    0.50% of rows
 
 Comparison events, by cluster+gene
 ----------------------------------
     The same event repeated in one cluster and gene counts once.
 
-    no_domains_in_region         87   81.31% of pairs
-    added_domain                 11   10.28% of pairs
-    dropped_domain                8    7.48% of pairs
-    merged_domain                 1    0.93% of pairs
+    no_domains_in_region            69   60.53% of pairs
+    reduced_domain_number           25   21.93% of pairs
+    unchanged_domains               11    9.65% of pairs
+    increased_domain_number          5    4.39% of pairs
+    shorter_domains                  3    2.63% of pairs
+    longer_domains                   1    0.88% of pairs

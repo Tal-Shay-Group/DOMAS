@@ -902,20 +902,24 @@ def classify_domain_change(c_count, t_count, c_length, t_length):
     """
     Classify a group of matched domains (c_count in canonical, t_count in the
     compared transcript) into one of the Phase 3 result categories.
+
+    Counts of 0 and 1 are NOT special cases. A group where the two sides hold
+    different numbers of domain instances is a count change whatever those
+    numbers are, so what used to be 'added_domain' (0 -> n) and 'split_domain'
+    (1 -> n) are both 'increased_domain_number', and 'dropped_domain' (n -> 0)
+    and 'merged_domain' (n -> 1) are both 'reduced_domain_number'. Equal counts
+    are a length comparison, single pairs included - so the old 'shorter' /
+    'longer' / 'unchanged' are now always the '_domains' forms.
+
+    That leaves five outcomes, and every one of them says the same thing
+    regardless of how many instances are involved:
+
+      C != T  -> 'increased_domain_number' / 'reduced_domain_number'
+      C == T  -> 'unchanged_domains' / 'longer_domains' / 'shorter_domains'
     """
-    if c_count == 0:
-        return 'added_domain'
-    if t_count == 0:
-        return 'dropped_domain'
-    if c_count == 1 and t_count == 1:
-        return classify_length_pair(t_length, c_length)
-    if c_count == 1:
-        return 'split_domain'
-    if t_count == 1:
-        return 'merged_domain'
-    if c_count == t_count:
-        return classify_length_pair(t_length, c_length) + '_domains'
-    return 'increased_domain_number' if c_count < t_count else 'reduced_domain_number'
+    if c_count != t_count:
+        return 'increased_domain_number' if c_count < t_count else 'reduced_domain_number'
+    return classify_length_pair(t_length, c_length) + '_domains'
 
 
 def choose_domain_display_name(names, prefixes=DOMAIN_NAME_PREFIX_PRIORITY):
@@ -968,14 +972,10 @@ def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, tr
     transitively.
 
     Yields one event dict per group, classified as:
-    - C=0, T>0          -> 'added_domain'
-    - C>0, T=0          -> 'dropped_domain'
-    - C=1, T=1          -> 'unchanged' / 'longer' / 'shorter' (by length)
-    - C=1, T>1          -> 'split_domain'
-    - C>1, T=1          -> 'merged_domain'
-    - C>1, T>1, C==T    -> 'unchanged_domains' / 'longer_domains' / 'shorter_domains' (by total length)
-    - C>1, T>1, C<T     -> 'increased_domain_number'
-    - C>1, T>1, C>T     -> 'reduced_domain_number'
+    - C < T             -> 'increased_domain_number'   (includes C=0, and C=1 splits)
+    - C > T             -> 'reduced_domain_number'     (includes T=0, and T=1 merges)
+    - C == T            -> 'unchanged_domains' / 'longer_domains' / 'shorter_domains'
+                           (by total length; includes the single-pair C=T=1 case)
     """
     t_domains, c_domains = find_relevant_domain_windows(
         transcript_exons, domain_lookup, canonical_transcript_id, transcript_id,
@@ -1197,7 +1197,7 @@ class ClusterAnalysisResult:
 
         Read from self.matched_features, which _match_features_to_transcripts()
         fills as soon as the matching is done, so the rows it records itself
-        (feature_not_mapped, no_canonical_features) already carry the canonical's
+        (junction_not_mapped, no_canonical_junctions) already carry the canonical's
         list. Empty for a transcript that carries none of them, and for the rows
         recorded before any matching happened (gene_not_in_db,
         no_canonical_transcript, ...) - both mean "no feature to name here", and
@@ -1472,7 +1472,7 @@ class ClusterAnalysisResult:
     def _match_features_to_transcripts(self, transcript_exons):
         """Which of the event's features each transcript carries, and which of them
         the canonical transcript carries. Features matching no transcript at all are
-        recorded as feature_not_mapped. The canonical set is None - ending the
+        recorded as junction_not_mapped. The canonical set is None - ending the
         analysis - when the canonical transcript carries none of them.
         """
         transcript_junctions = {
@@ -1484,7 +1484,7 @@ class ClusterAnalysisResult:
         # worth drawing even for one that never gets compared, and it is what the
         # canonical_junctions / alternative_junctions columns are written from.
         # Filled here rather than by the caller so the rows recorded just below -
-        # feature_not_mapped, no_canonical_features - can name them too.
+        # junction_not_mapped, no_canonical_junctions - can name them too.
         self.matched_features = {
             tid: [self.junctions[i] for i in sorted(idxs) if i < len(self.junctions)]
             for tid, idxs in transcript_junctions.items()
@@ -1494,7 +1494,7 @@ class ClusterAnalysisResult:
         for idx, junction in enumerate(self.junctions):
             if not any(idx in junction_idxs for junction_idxs in transcript_junctions.values()):
                 logger.debug(f"Junction {junction} in cluster {self.cluster_name} does not map to any transcript. ")
-                self.add_event('feature_not_mapped', None)
+                self.add_event('junction_not_mapped', None)
                 unmapped += 1
         self.features_matched = len(self.junctions) - unmapped
 
@@ -1515,7 +1515,7 @@ class ClusterAnalysisResult:
 
         canonical_junctions = transcript_junctions.get(self.canonical_transcript_id, set())
         if not canonical_junctions:
-            self.add_event('no_canonical_features')
+            self.add_event('no_canonical_junctions')
             logger.debug(f"No canonical junctions found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
             return transcript_junctions, None
 
@@ -1536,7 +1536,7 @@ class ClusterAnalysisResult:
                 continue
             if not junction_idxs:
                 logger.debug(f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} does not have any junctions. ")
-                self.add_event('transcript_doesnt_have_features', alternative_transcript_id=transcript_id)
+                self.add_event('transcript_doesnt_have_junctions', alternative_transcript_id=transcript_id)
                 continue
 
             unique_junctions = junction_idxs - canonical_junctions
@@ -1545,7 +1545,7 @@ class ClusterAnalysisResult:
                     f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} does not have any unique junctions "
                     "compared to the canonical transcript. Skipping this transcript for comparison."
                 )
-                self.add_event('no_unique_features', alternative_transcript_id=transcript_id)
+                self.add_event('no_unique_junctions', alternative_transcript_id=transcript_id)
                 continue
 
             unique_by_transcript[transcript_id] = frozenset(unique_junctions)
@@ -1845,10 +1845,21 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
 # problems) plus per-transcript skips (no junctions / no unique junction). Rows
 # carrying these events are the "non-comparable" / "not chosen" transcripts that
 # analyze_junctions(filter_non_comparable=True) drops from the output CSV.
+# The five outcomes classify_domain_change() can produce. The results CSV is
+# split on membership of THIS set, not on NON_COMPARISON_EVENTS: a row belongs in
+# compared.csv when a domain comparison actually produced an outcome. That puts
+# no_domains_in_region on the other side - the transcript was compared, but the
+# window held no domains, so there is no domain result to read. It is the bulk of
+# the output (about 78% of rows), which is the point of separating it.
+DOMAIN_COMPARISON_EVENTS = frozenset({
+    'unchanged_domains', 'longer_domains', 'shorter_domains',
+    'increased_domain_number', 'reduced_domain_number',
+})
+
 NON_COMPARISON_EVENTS = frozenset({
     'no_gene_specified', 'gene_not_in_db', 'no_canonical_transcript', 'only_one_transcript',
-    'no_canonical_features', 'feature_not_mapped', 'no_unique_transcript',
-    'transcript_doesnt_have_features', 'no_unique_features', 'subsumed_by_larger_event',
+    'no_canonical_junctions', 'junction_not_mapped', 'no_unique_transcript',
+    'transcript_doesnt_have_junctions', 'no_unique_junctions', 'subsumed_by_larger_event',
     # Carries its group's junctions and could have been compared, but the
     # selection rule picked another transcript of the same group.
     'transcript_not_chosen',
@@ -1897,7 +1908,7 @@ def selected_comparable_rows(df_cluster_results):
 # answer if a cluster ever carried two.
 TERMINAL_NON_COMPARISON_EVENTS = (
     'no_gene_specified', 'gene_not_in_db', 'only_one_transcript',
-    'no_canonical_transcript', 'no_canonical_features', 'no_unique_transcript',
+    'no_canonical_transcript', 'no_canonical_junctions', 'no_unique_transcript',
 )
 
 
@@ -2099,8 +2110,8 @@ class RunSummary:
 
 
 def summary_path(output_path):
-    """The run's summary, named after its output CSV: annotated.csv gives
-    annotated_summary.txt, results.csv gives results_summary.txt.
+    """The run's summary, named after its output CSV: compared.csv gives
+    compared_summary.txt, results.csv gives results_summary.txt.
 
     Named after the CSV rather than a flat summary.txt so that several runs can
     share an output directory - which they routinely do, one per input table -
@@ -2110,11 +2121,11 @@ def summary_path(output_path):
     return stem + '_summary.txt'
 
 
-def non_annotated_path(output_path):
-    """Where the rows that were not compared go, given where the compared ones
-    go: the same name with 'non_' in front of it, in the same directory. The
-    default output_path is annotated.csv, so the pair reads annotated.csv /
-    non_annotated.csv; -output_csv results.csv gives results.csv /
+def non_compared_path(output_path):
+    """Where the rows without a domain outcome go, given where the ones with a
+    domain outcome go: the same name with 'non_' in front of it, in the same
+    directory. The default output_path is compared.csv, so the pair reads
+    compared.csv / non_compared.csv; -output_csv results.csv gives results.csv /
     non_results.csv.
 
     Only the file name is prefixed, never the directory - out/results.csv yields
@@ -2133,10 +2144,12 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
     Runs continuously until it receives a None sentinel value.
     Writes results incrementally as they arrive from compute workers.
 
-    Two files, not one: output_path takes the rows of transcripts actually
-    compared to the canonical, and non_annotated_path(output_path) takes all the
-    rest - the non-comparisons of NON_COMPARISON_EVENTS, each naming why that
-    transcript or cluster never reached a comparison. They were one file with the
+    Two files, not one: output_path takes the rows where a domain comparison
+    produced an outcome (DOMAIN_COMPARISON_EVENTS), and
+    non_compared_path(output_path) takes all the rest - the non-comparisons of
+    NON_COMPARISON_EVENTS, each naming why that transcript or cluster never
+    reached a comparison, plus no_domains_in_region where it did but the window
+    held no domains. They were one file with the
     two kinds of row interleaved, where the comparisons are what a reader is
     after and are outnumbered by the others several times over.
 
@@ -2223,10 +2236,14 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
                         if summary is not None:
                             summary.add_frame(df_chunk)
 
-                        # Split on the same predicate filter_non_comparable uses,
-                        # so the two files together are exactly what the single
-                        # one held, in the same order.
-                        is_comparison = ~df_chunk['event_type'].isin(NON_COMPARISON_EVENTS)
+                        # Split on whether a domain comparison produced an
+                        # outcome - NOT on filter_non_comparable's predicate,
+                        # which asks a different question (did the transcript
+                        # reach a comparison at all). no_domains_in_region
+                        # answers yes to that and no to this, and belongs with
+                        # the non-comparisons. The two files together are still
+                        # exactly what the single one held, in the same order.
+                        is_comparison = df_chunk['event_type'].isin(DOMAIN_COMPARISON_EVENTS)
                         for directory, part in ((compared_dir, df_chunk[is_comparison]),
                                                 (other_dir, df_chunk[~is_comparison])):
                             if part.empty:
@@ -2253,7 +2270,7 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
         # rows to be dropped.
         targets = [(compared_dir, output_path)]
         if not filter_non_comparable:
-            targets.append((other_dir, non_annotated_path(output_path)))
+            targets.append((other_dir, non_compared_path(output_path)))
 
         for directory, path in targets:
             chunk_files = sorted(os.path.join(directory, f) for f in os.listdir(directory)
@@ -2604,7 +2621,7 @@ class JunctionsAnalysis:
             features = len(result.junctions)
             if not features:
                 continue
-            unmapped = sum(1 for event in result.events if event[0] == 'feature_not_mapped')
+            unmapped = sum(1 for event in result.events if event[0] == 'junction_not_mapped')
             counts = per_specie.setdefault(result.specie, [0, 0, 0, 0])
             counts[0] += unmapped
             counts[1] += features
@@ -2631,7 +2648,7 @@ class JunctionsAnalysis:
     # its group's junctions and could have been compared, but another transcript
     # of the group represented it, so its domains were never even fetched.
     _SKIPPED_TRANSCRIPT_EVENTS = {
-        'transcript_doesnt_have_features', 'no_unique_features', 'subsumed_by_larger_event',
+        'transcript_doesnt_have_junctions', 'no_unique_junctions', 'subsumed_by_larger_event',
         'transcript_not_chosen',
     }
 
@@ -2738,7 +2755,7 @@ class JunctionsAnalysis:
             except ValueError as e:
                 self.logger.warning(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}, specie {cluster_result.specie}: {e}")
 
-    def analyze_junctions(self, df_junctions, output_path='annotated.csv',
+    def analyze_junctions(self, df_junctions, output_path='compared.csv',
                           specie=None, filter_transcript_count=0, create_pdf=True, print_genes=None,
                           num_workers=4, use_ensembl_only=False, restrict_pdf_to_comparable=False,
                           filter_non_comparable=False,
@@ -2758,8 +2775,8 @@ class JunctionsAnalysis:
             output_path: Path for the CSV of transcripts actually compared to the
                 canonical one. The rows for everything else - the transcripts and
                 clusters that never reached a comparison, each naming why - go to
-                non_annotated_path(output_path) alongside it, so the default pair
-                is annotated.csv and non_annotated.csv. Not written under
+                non_compared_path(output_path) alongside it, so the default pair
+                is compared.csv and non_compared.csv. Not written under
                 filter_non_comparable, which asks for those rows to be dropped.
             filter_transcript_count: If > 0, only analyze genes with exactly this many transcripts
             create_pdf: Whether to generate PDF visualizations
@@ -2781,7 +2798,7 @@ class JunctionsAnalysis:
                 the two columns are omitted, being True on every written row.
             filter_non_comparable: If True, the rows whose event is a
                 non-comparison / skip event (see NON_COMPARISON_EVENTS) are
-                dropped rather than written, and the non_annotated companion file
+                dropped rather than written, and the non_compared companion file
                 is not created at all. The returned ClusterAnalysisResult objects
                 and any PDFs are unaffected; only the written CSVs are filtered.
             extra_columns: If True, the CSV carries three further columns, for
@@ -2807,8 +2824,8 @@ class JunctionsAnalysis:
         ascending order. Both lists are the transcript's whole set, not the
         group's, so the junctions unique to the compared transcript - what the
         group is defined by - are the difference between the two. Empty where the
-        transcript carries none, which is what a no_canonical_features or
-        transcript_doesnt_have_features row says in words.
+        transcript carries none, which is what a no_canonical_junctions or
+        transcript_doesnt_have_junctions row says in words.
 
         Returns:
             List of ClusterAnalysisResult objects

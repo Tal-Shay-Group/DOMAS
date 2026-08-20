@@ -383,7 +383,7 @@ def _limit_clusters(df_junctions, max_clusters):
 
 
 def analyze_junctions(con, df_junctions=None, junctions_csv=None, hadas_format=False, specie=None,
-                        output_path='annotated.csv',
+                        output_path='compared.csv',
                         n=0, create_pdf=True, print_genes=None, num_workers=5,
                         max_clusters=0,
                         filter_non_comparable=False, write_all_comparable=False, extra_columns=False,

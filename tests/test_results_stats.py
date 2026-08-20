@@ -99,7 +99,7 @@ def _rep_df(rows):
         'specie': ['H_sapiens'] * len(rows),
         'event': clusters,
         'alternative_transcript_id': transcripts,
-        'event_type': ['shorter'] * len(rows),
+        'event_type': ['shorter_domains'] * len(rows),
         'is_most_like_canonical': most_like,
         'is_longest_cds': longest,
     })
