@@ -106,15 +106,15 @@ UNANALYZABLE_TYPES = [
     "gene_not_in_db",
     "no_canonical_transcript",
     "only_one_transcript",
-    "junction_not_mapped",
+    "novel_junction",
     "no_unique_junctions",
     "transcript_doesnt_have_junctions",
     "no_canonical_junctions",
     "no_domains_in_region",
-    # Has unique features, but they are a subset of another event's in the same
-    # cluster, so the larger event speaks for the region and this transcript is
+    # Has unique junctions, but they are a subset of another group's in the same
+    # cluster, so the larger group speaks for the region and this transcript is
     # never compared - nothing to analyze.
-    "subsumed_by_larger_event",
+    "subsumed_by_larger_group",
     # In a group that was compared, but not the transcript the selection rule
     # picked to represent it - so it carries no comparison of its own.
     "transcript_not_chosen",
@@ -435,12 +435,19 @@ def normalize_event_types(df):
         "same": "unchanged_domains",
         "same_domains": "unchanged_domains",
         # The vocabulary said "junction", then "feature", and now says "junction"
-        # again. Only the "feature" spellings need mapping - the current ones are
+        # again; the not-mapped class went one step further and is now
+        # novel_junction, after the name the paper gives it - a junction of the
+        # event that matches no transcript of the gene is a novel junction.
+        # Only the superseded spellings need mapping - the current ones are
         # already correct, and listing them as identity entries (which a blanket
         # rename will happily produce) is just noise. Kept so a results.csv from
-        # either older run still lands inside UNANALYZABLE_TYPES rather than
+        # any older run still lands inside UNANALYZABLE_TYPES rather than
         # counting as neither analyzed nor unanalyzable.
-        "feature_not_mapped": "junction_not_mapped",
+        "feature_not_mapped": "novel_junction",
+        "junction_not_mapped": "novel_junction",
+        # Named for the group that subsumes it, not the event: the subset relation
+        # is between the transcript groups of one cluster.
+        "subsumed_by_larger_event": "subsumed_by_larger_group",
         "no_canonical_features": "no_canonical_junctions",
         "transcript_doesnt_have_features": "transcript_doesnt_have_junctions",
         "no_unique_features": "no_unique_junctions",

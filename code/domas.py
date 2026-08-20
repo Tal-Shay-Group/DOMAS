@@ -101,7 +101,7 @@ def parse_args():
                               "clusters. 0 (default) means no limit.")
     parser.add_argument("-omit_non_comparable", action="store_true",
                          help="Drop the rows for non-comparable transcripts (e.g. those with "
-                              "a gene_not_in_db / junction_not_mapped / no_unique_junctions "
+                              "a gene_not_in_db / novel_junction / no_unique_junctions "
                               "event) instead of writing them, so no non_<output_csv> file "
                               "is produced. By default they are written to that second file, "
                               "so the two together account for every cluster in the input - "

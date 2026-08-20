@@ -1197,7 +1197,7 @@ class ClusterAnalysisResult:
 
         Read from self.matched_features, which _match_features_to_transcripts()
         fills as soon as the matching is done, so the rows it records itself
-        (junction_not_mapped, no_canonical_junctions) already carry the canonical's
+        (novel_junction, no_canonical_junctions) already carry the canonical's
         list. Empty for a transcript that carries none of them, and for the rows
         recorded before any matching happened (gene_not_in_db,
         no_canonical_transcript, ...) - both mean "no feature to name here", and
@@ -1472,7 +1472,7 @@ class ClusterAnalysisResult:
     def _match_features_to_transcripts(self, transcript_exons):
         """Which of the event's features each transcript carries, and which of them
         the canonical transcript carries. Features matching no transcript at all are
-        recorded as junction_not_mapped. The canonical set is None - ending the
+        recorded as novel_junction. The canonical set is None - ending the
         analysis - when the canonical transcript carries none of them.
         """
         transcript_junctions = {
@@ -1484,7 +1484,7 @@ class ClusterAnalysisResult:
         # worth drawing even for one that never gets compared, and it is what the
         # canonical_junctions / alternative_junctions columns are written from.
         # Filled here rather than by the caller so the rows recorded just below -
-        # junction_not_mapped, no_canonical_junctions - can name them too.
+        # novel_junction, no_canonical_junctions - can name them too.
         self.matched_features = {
             tid: [self.junctions[i] for i in sorted(idxs) if i < len(self.junctions)]
             for tid, idxs in transcript_junctions.items()
@@ -1494,7 +1494,7 @@ class ClusterAnalysisResult:
         for idx, junction in enumerate(self.junctions):
             if not any(idx in junction_idxs for junction_idxs in transcript_junctions.values()):
                 logger.debug(f"Junction {junction} in cluster {self.cluster_name} does not map to any transcript. ")
-                self.add_event('junction_not_mapped', None)
+                self.add_event('novel_junction', None)
                 unmapped += 1
         self.features_matched = len(self.junctions) - unmapped
 
@@ -1563,7 +1563,7 @@ class ClusterAnalysisResult:
         A group whose feature set is a proper subset of another group's is dropped:
         both describe the same region, and the larger set is the fuller account of
         it, so the smaller one would only report a partial version of the same
-        change. Its transcripts are recorded as subsumed_by_larger_event rather than
+        change. Its transcripts are recorded as subsumed_by_larger_group rather than
         dropped silently. Subset is transitive, so one pass over the pairs is enough.
 
         Groups are numbered from 1 in order of their features, which keeps the index
@@ -1606,12 +1606,12 @@ class ClusterAnalysisResult:
                 logger.info(
                     "Cluster %s, specie %s: transcript %s adds %s - a subset of group %s, "
                     "which gives the fuller account of the same region. Not compared "
-                    "(subsumed_by_larger_event).",
+                    "(subsumed_by_larger_group).",
                     self.cluster_name, self.specie, transcript_id,
                     self._features_text(features),
                     ' and '.join(str(number) for number in subsuming) or '?',
                 )
-                self.add_event('subsumed_by_larger_event', alternative_transcript_id=transcript_id)
+                self.add_event('subsumed_by_larger_group', alternative_transcript_id=transcript_id)
 
         return groups
 
@@ -1858,8 +1858,8 @@ DOMAIN_COMPARISON_EVENTS = frozenset({
 
 NON_COMPARISON_EVENTS = frozenset({
     'no_gene_specified', 'gene_not_in_db', 'no_canonical_transcript', 'only_one_transcript',
-    'no_canonical_junctions', 'junction_not_mapped', 'no_unique_transcript',
-    'transcript_doesnt_have_junctions', 'no_unique_junctions', 'subsumed_by_larger_event',
+    'no_canonical_junctions', 'novel_junction', 'no_unique_transcript',
+    'transcript_doesnt_have_junctions', 'no_unique_junctions', 'subsumed_by_larger_group',
     # Carries its group's junctions and could have been compared, but the
     # selection rule picked another transcript of the same group.
     'transcript_not_chosen',
@@ -2621,7 +2621,7 @@ class JunctionsAnalysis:
             features = len(result.junctions)
             if not features:
                 continue
-            unmapped = sum(1 for event in result.events if event[0] == 'junction_not_mapped')
+            unmapped = sum(1 for event in result.events if event[0] == 'novel_junction')
             counts = per_specie.setdefault(result.specie, [0, 0, 0, 0])
             counts[0] += unmapped
             counts[1] += features
@@ -2648,7 +2648,7 @@ class JunctionsAnalysis:
     # its group's junctions and could have been compared, but another transcript
     # of the group represented it, so its domains were never even fetched.
     _SKIPPED_TRANSCRIPT_EVENTS = {
-        'transcript_doesnt_have_junctions', 'no_unique_junctions', 'subsumed_by_larger_event',
+        'transcript_doesnt_have_junctions', 'no_unique_junctions', 'subsumed_by_larger_group',
         'transcript_not_chosen',
     }
 

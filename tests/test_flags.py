@@ -71,7 +71,7 @@ IOE_DIR = os.path.join(TESTS_DIR, 'ioe')
 # events that carry no real transcript id.
 _SKIPPED_EVENTS = {
     'gene_not_in_db', 'no_gene_specified', 'transcript_doesnt_have_junctions', 'no_unique_junctions',
-    'no_canonical_transcript', 'only_one_transcript', 'no_canonical_junctions', 'junction_not_mapped',
+    'no_canonical_transcript', 'only_one_transcript', 'no_canonical_junctions', 'novel_junction',
 }
 
 # restrict_pdf_to_comparable. The tie-break rules
@@ -621,7 +621,7 @@ def test_rmats_subset_compare_against_reference(con, keep_test_output):
 # mirrors junction_analisys.NON_COMPARISON_EVENTS; filter_non_comparable drops these.
 _NON_COMPARISON_EVENTS = {
     'gene_not_in_db', 'no_gene_specified', 'no_canonical_transcript', 'only_one_transcript',
-    'no_canonical_junctions', 'junction_not_mapped',
+    'no_canonical_junctions', 'novel_junction',
     'transcript_doesnt_have_junctions', 'no_unique_junctions',
 }
 
@@ -1065,7 +1065,7 @@ def test_run_summary_counts_genes_junctions_and_reasons():
 
     summary.add_cluster(_summary_cluster(
         'c1', 'ENSG1', [(1, 2), (3, 4)],
-        [('junction_not_mapped', None), ('reduced_domain_number', 'ENST1')],
+        [('novel_junction', None), ('reduced_domain_number', 'ENST1')],
         features_matched=1))
     summary.add_cluster(_summary_cluster(
         'c2', None, [(5, 6)], [('gene_not_in_db', None)], features_matched=None))

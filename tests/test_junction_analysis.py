@@ -882,7 +882,7 @@ def test_analyze_treats_retained_intron_transcript_as_comparable():
 
     df_results = cluster_result.get_results_df()
     skipped = {'transcript_doesnt_have_junctions', 'no_unique_junctions',
-               'no_canonical_junctions', 'junction_not_mapped', 'gene_not_in_db'}
+               'no_canonical_junctions', 'novel_junction', 'gene_not_in_db'}
     comparable = set(df_results.loc[~df_results['event'].isin(skipped), 'alternative_transcript_id'].dropna())
     assert comparable == {'ENST_RETAINED'}, f"expected the retained transcript, got {comparable}"
 
@@ -1640,7 +1640,7 @@ def _grouped(unique_by_transcript):
     result = _cluster()
     groups = result._group_by_unique_features(
         {tid: frozenset(features) for tid, features in unique_by_transcript.items()})
-    subsumed = sorted(tid for event, tid, *_ in result.events if event == 'subsumed_by_larger_event')
+    subsumed = sorted(tid for event, tid, *_ in result.events if event == 'subsumed_by_larger_group')
     return [(index, transcript_ids) for index, _features, transcript_ids in groups], subsumed
 
 
