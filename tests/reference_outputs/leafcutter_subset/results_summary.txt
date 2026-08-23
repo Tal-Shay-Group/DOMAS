@@ -33,14 +33,16 @@ Comparison events, by row
 -------------------------
     no_domains_in_region           356   90.82% of rows
     reduced_domain_number           17    4.34% of rows
-    unchanged_domains               13    3.32% of rows
+    unchanged_domains               10    2.55% of rows
     increased_domain_number          6    1.53% of rows
+    shorter_domains                  3    0.77% of rows
 
 Comparison events, by cluster+gene
 ----------------------------------
     The same event repeated in one cluster and gene counts once.
 
-    no_domains_in_region            75   86.21% of pairs
-    reduced_domain_number            5    5.75% of pairs
-    increased_domain_number          5    5.75% of pairs
-    unchanged_domains                2    2.30% of pairs
+    no_domains_in_region            75   85.23% of pairs
+    reduced_domain_number            5    5.68% of pairs
+    increased_domain_number          5    5.68% of pairs
+    unchanged_domains                2    2.27% of pairs
+    shorter_domains                  1    1.14% of pairs

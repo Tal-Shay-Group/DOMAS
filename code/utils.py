@@ -1109,6 +1109,37 @@ def _route_domain_id_to_column(domain_id):
     return 'interpro'
 
 
+def _clip_domains_to_protein(df):
+    """Drop or trim domains that do not fit the protein they are attached to.
+
+    RepresentativeDomains is keyed by UniProt accession, and several Ensembl
+    proteins of different lengths cross-reference the same accession - UniProt
+    holds one canonical sequence per entry, and isoforms without an accession of
+    their own point at it. Every one of them therefore inherits the same domain
+    coordinates, measured on UniProt's sequence. THEMIS2's 123 aa isoform came
+    back carrying a CABIT domain at 275-515.
+
+    A domain starting past the protein's end is unreachable anyway - the window's
+    amino-acid interval is bounded by the transcript's own coding length - so
+    dropping it changes no comparison, only the drawing. One that STARTS inside
+    and ENDS past the end does reach the window, and total_covered_length() then
+    measures it from the stored coordinates and counts residues the protein does
+    not have: 3.1% of human Domain/Repeat rows, and 785 of them overstating the
+    length by more than half. Those are trimmed to the last residue that exists.
+
+    Proteins with no recorded length are left alone rather than guessed at.
+    """
+    if 'length' not in df.columns:
+        return df
+    length = pd.to_numeric(df['length'], errors='coerce')
+    fits = length.isna() | (df['AA_start'] <= length)
+    df = df[fits].copy()
+    length = pd.to_numeric(df['length'], errors='coerce')
+    trim = length.notna() & (df['AA_end'] > length)
+    df.loc[trim, 'AA_end'] = length[trim].astype(int)
+    return df
+
+
 def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
     """
     Domains sourced from the RepresentativeDomains table (populated by
@@ -1181,6 +1212,7 @@ def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_pr
     })
     merged_df['AA_start'] = merged_df['AA_start'].astype(int)
     merged_df['AA_end'] = merged_df['AA_end'].astype(int)
+    merged_df = _clip_domains_to_protein(merged_df)
 
     logger.log(PROGRESS, 'Read %d domain rows from RepresentativeDomains', len(merged_df))
     return merged_df[REPRESENTATIVE_DOMAINS_COLUMNS]
