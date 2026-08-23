@@ -1,3 +1,5 @@
+import collections
+import itertools
 import logging
 import os
 import queue
@@ -10,7 +12,7 @@ import warnings
 import numpy as np
 import pandas as pd
 from collections import Counter
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
 
 import utils
 from utils import (
@@ -429,6 +431,33 @@ def build_filtered_domain_lookup(domain_lookup):
     return lookup, kept
 
 
+# How many materialised lookup results each worker keeps. Bounds the memory the
+# cache can take while still absorbing the access pattern: a gene's transcripts
+# are looked up again for every cluster of that gene, and genes with many
+# clusters are most of the work.
+# Chunks in flight per worker. Caps how many chunks' results the parent holds
+# at once; the writer thread has already persisted them, so this only needs to
+# be deep enough that no worker waits for work.
+_CHUNK_WINDOW = 8
+
+_LOOKUP_CACHE_SIZE = 4096
+
+
+def _row_positions(df, column):
+    """{key: row positions} for one column, as numpy index arrays.
+
+    groupby(...).indices rather than a dict of sub-frames: iterating a groupby
+    yields COPIES, so materialising one frame per transcript stored the whole
+    table again - twice over here, once per id column - and paid a DataFrame's
+    object overhead (BlockManager, Index, per-column arrays) for every one of
+    them. Over a whole-genome run that reached ~7.7 GB per worker, and since
+    every worker builds its own lookups, the default of one worker per core
+    asked more memory than the machine had. The positions point into the single
+    frame the worker already holds.
+    """
+    return df.groupby(column).indices
+
+
 def build_exon_lookup(df_exons):
     """
     Precompute, once per analyze_junctions() run, a transcript_id -> exons
@@ -436,26 +465,36 @@ def build_exon_lookup(df_exons):
     DataFrame (the dominant cost of analyze()) is replaced by O(1)
     dict lookups.
     """
-    by_ensembl = {tid: g for tid, g in df_exons.groupby('transcript_ensembl_id')}
-    by_refseq = {tid: g for tid, g in df_exons.groupby('transcript_refseq_id')}
+    by_ensembl = _row_positions(df_exons, 'transcript_ensembl_id')
+    by_refseq = _row_positions(df_exons, 'transcript_refseq_id')
     empty = df_exons.iloc[0:0]
-    # A transcript id that's ambiguous between the ensembl/refseq groupings is
-    # looked up once per cluster it appears in - across a gene with many
-    # clusters that's the same pd.concat + drop_duplicates() re-run
-    # identically every time. Memoize the merged result per transcript id
-    # instead of recomputing it on every lookup() call.
-    merged_cache = {}
+    # take() builds the caller's frame per lookup, so the same transcript asked
+    # for once per cluster of its gene would rebuild it every time. Bounded
+    # cache instead of the unbounded materialisation this used to hold: same
+    # hit rate over a gene's clusters, memory that cannot grow with the
+    # transcriptome. A transcript id ambiguous between the two groupings is
+    # merged here too, once, as it was before.
+    cache = collections.OrderedDict()
 
     def lookup(transcript_id):
+        hit = cache.get(transcript_id)
+        if hit is not None:
+            cache.move_to_end(transcript_id)
+            return hit
         a = by_ensembl.get(transcript_id)
         b = by_refseq.get(transcript_id)
         if a is not None and b is not None:
-            merged = merged_cache.get(transcript_id)
-            if merged is None:
-                merged = pd.concat([a, b]).drop_duplicates()
-                merged_cache[transcript_id] = merged
-            return merged
-        return a if a is not None else (b if b is not None else empty)
+            result = pd.concat([df_exons.take(a), df_exons.take(b)]).drop_duplicates()
+        elif a is not None:
+            result = df_exons.take(a)
+        elif b is not None:
+            result = df_exons.take(b)
+        else:
+            return empty
+        cache[transcript_id] = result
+        if len(cache) > _LOOKUP_CACHE_SIZE:
+            cache.popitem(last=False)
+        return result
 
     return lookup
 
@@ -466,14 +505,26 @@ def build_domain_lookup(df_domains):
     lookup so per-cluster filtering of the full `df_domains` DataFrame is
     replaced by O(1) dict lookups.
     """
-    by_transcript = {
-        tid: g.rename(columns={'transcript_ensembl_id_version': 'transcript_ensembl_id'})
-        for tid, g in df_domains.groupby('transcript_ensembl_id_version')
-    }
-    empty = df_domains.rename(columns={'transcript_ensembl_id_version': 'transcript_ensembl_id'}).iloc[0:0]
+    # Renamed once over the whole frame, not once per transcript: the per-group
+    # rename copied the domain table a transcript at a time, for one column name.
+    renamed = df_domains.rename(columns={'transcript_ensembl_id_version': 'transcript_ensembl_id'})
+    by_transcript = _row_positions(df_domains, 'transcript_ensembl_id_version')
+    empty = renamed.iloc[0:0]
+    cache = collections.OrderedDict()
 
     def lookup(transcript_id):
-        return by_transcript.get(transcript_id, empty)
+        hit = cache.get(transcript_id)
+        if hit is not None:
+            cache.move_to_end(transcript_id)
+            return hit
+        positions = by_transcript.get(transcript_id)
+        if positions is None:
+            return empty
+        result = renamed.take(positions)
+        cache[transcript_id] = result
+        if len(cache) > _LOOKUP_CACHE_SIZE:
+            cache.popitem(last=False)
+        return result
 
     return lookup
 
@@ -2491,7 +2542,7 @@ class JunctionsAnalysis:
                                gene_strand, transcripts_by_gene, num_workers, output_path,
                                filter_non_comparable=False, canonical_rank=None,
                                write_all_comparable=False, extra_columns=False,
-                               summary=None):
+                               summary=None, collect_results=True):
         """Execute cluster analysis in parallel with dedicated writer thread."""
         total = len(cluster_groups)
         actual_workers = min(num_workers, total)
@@ -2563,7 +2614,13 @@ class JunctionsAnalysis:
             for chunk_idx, chunk in enumerate(chunks)
         ]
 
-        all_results = []  # Collect results for PDF generation
+        # Every comparison of the run, retained for the PDFs and for the return
+        # value. On a whole-transcriptome run that is millions of objects the
+        # writer thread has already put on disk, and the parent grew to 39 GB
+        # holding them. collect_results=False keeps only the counters the
+        # unmapped summary needs, for callers that read neither.
+        all_results = []
+        unmapped_counts = {}
         processed_count = 0
         last_time = time.perf_counter()
 
@@ -2573,26 +2630,45 @@ class JunctionsAnalysis:
             initargs=(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene,
                       canonical_rank, write_all_comparable, extra_columns),
         ) as executor:
-            # Submit all tasks - df_exons/df_domains are sent once per worker via
-            # initargs above, not re-pickled per chunk here.
-            futures = [executor.submit(_process_cluster_chunk, chunk_info) for chunk_info in chunks_with_info]
+            # A bounded window of chunks in flight, rather than submitting all of
+            # them up front. A Future keeps its results in _result until it is
+            # collected - future.result() hands them over but does not release
+            # them - so a list of every Future held every chunk's results for the
+            # whole run, and the parent reached tens of gigabytes carrying rows
+            # the writer thread had already put on disk. Only the window's worth
+            # of arguments is pickled at a time for the same reason.
+            queued = iter(chunks_with_info)
+            pending = {executor.submit(_process_cluster_chunk, info)
+                       for info in itertools.islice(queued, actual_workers * _CHUNK_WINDOW)}
 
-            # Process results as they complete: send to writer AND collect for PDFs
-            for future in as_completed(futures):
-                chunk_results = future.result()
-                result_queue.put(chunk_results)  # Send to writer thread for CSV
-                all_results.extend(chunk_results)  # Collect for PDF generation
-                processed_count += len(chunk_results)
+            while pending:
+                done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                refill = len(done)
+                for future in done:
+                    chunk_results = future.result()
+                    result_queue.put(chunk_results)  # Send to writer thread for CSV
+                    if collect_results:
+                        all_results.extend(chunk_results)
+                    else:
+                        self._accumulate_unmapped(unmapped_counts, chunk_results)
+                    processed_count += len(chunk_results)
+                    del chunk_results
 
-                if processed_count % 10000 == 0:
-                    cur_time = time.perf_counter()
-                    self.logger.log(
-                        utils.PROGRESS,
-                        f"Analyzed {processed_count}/{total} clusters. "
-                        f"Last 10000 took {cur_time - last_time:.2f}s. "
-                        f"ETA: {(cur_time - last_time) * (total - processed_count) / 10000 / 60:.1f}min"
-                    )
-                    last_time = cur_time
+                    if processed_count % 10000 == 0:
+                        cur_time = time.perf_counter()
+                        self.logger.log(
+                            utils.PROGRESS,
+                            f"Analyzed {processed_count}/{total} clusters. "
+                            f"Last 10000 took {cur_time - last_time:.2f}s. "
+                            f"ETA: {(cur_time - last_time) * (total - processed_count) / 10000 / 60:.1f}min"
+                        )
+                        last_time = cur_time
+                # Drop the completed futures before submitting more, so their
+                # results are freed rather than held alongside the next window.
+                future = None
+                del done
+                pending |= {executor.submit(_process_cluster_chunk, info)
+                            for info in itertools.islice(queued, refill)}
 
         # Signal writer to stop
         result_queue.put(None)
@@ -2604,19 +2680,19 @@ class JunctionsAnalysis:
 
         self.logger.log(utils.PROGRESS,
                         f"Analysis complete: {processed_count}/{total} clusters")
-        self._log_unmapped_summary(all_results)
+        if collect_results:
+            self._log_unmapped_summary(all_results)
+        else:
+            self._log_unmapped_totals(unmapped_counts)
         return all_results
 
-    def _log_unmapped_summary(self, results):
-        """How much of the input never reached a transcript, per species.
+    @staticmethod
+    def _accumulate_unmapped(per_specie, results):
+        """Fold one chunk's results into the per-species unmapped counters.
 
-        A per-cluster warning scrolls past in a large run; this is one line, and
-        in a two-species comparison the asymmetry between the two is itself the
-        diagnosis - one species at 0% against the other at 48.5% is an input
-        problem, not biology. That asymmetry existed for 1,684 of 3,484 clusters
-        and nothing reported it (see find_matching_junction_indices).
-        """
-        per_specie = {}
+        Kept separate from _log_unmapped_summary() so a run that does not retain
+        its results can still report the same line: the counters are four ints
+        per species, where the results themselves are one object per cluster."""
         for result in results:
             features = len(result.junctions)
             if not features:
@@ -2627,6 +2703,20 @@ class JunctionsAnalysis:
             counts[1] += features
             counts[2] += 1 if unmapped else 0
             counts[3] += 1 if unmapped == features else 0
+        return per_specie
+
+    def _log_unmapped_summary(self, results):
+        """How much of the input never reached a transcript, per species.
+
+        A per-cluster warning scrolls past in a large run; this is one line, and
+        in a two-species comparison the asymmetry between the two is itself the
+        diagnosis - one species at 0% against the other at 48.5% is an input
+        problem, not biology. That asymmetry existed for 1,684 of 3,484 clusters
+        and nothing reported it (see find_matching_junction_indices).
+        """
+        self._log_unmapped_totals(self._accumulate_unmapped({}, results))
+
+    def _log_unmapped_totals(self, per_specie):
         if not per_specie:
             return
 
@@ -2758,6 +2848,7 @@ class JunctionsAnalysis:
     def analyze_junctions(self, df_junctions, output_path='compared.csv',
                           specie=None, filter_transcript_count=0, create_pdf=True, print_genes=None,
                           num_workers=4, use_ensembl_only=False, restrict_pdf_to_comparable=False,
+                          collect_results=True,
                           filter_non_comparable=False,
                           write_all_comparable=False, extra_columns=False,
                           input_source=None):
@@ -2786,6 +2877,12 @@ class JunctionsAnalysis:
                 ensembl id - transcripts with no ensembl id (refseq-only) are
                 filtered out before any exon/domain lookups are built, so they
                 never participate in the analysis at all.
+            collect_results: If False, the per-cluster results are not retained -
+                the writer thread has already put every row on disk, and on a
+                whole-transcriptome run keeping them too cost the parent tens of
+                gigabytes. The unmapped summary is still reported, from counters
+                folded in as chunks arrive. The return value is then empty, so
+                leave it True for any caller that reads it or asks for PDFs.
             restrict_pdf_to_comparable: If True, each generated PDF only draws
                 the canonical transcript and the transcripts that were actually
                 compared to it - every other transcript of the gene is omitted
@@ -2867,6 +2964,7 @@ class JunctionsAnalysis:
             output_path, filter_non_comparable=filter_non_comparable,
             canonical_rank=canonical_rank, write_all_comparable=write_all_comparable,
             extra_columns=extra_columns, summary=summary,
+            collect_results=collect_results,
         )
 
         # Generate PDFs if requested
