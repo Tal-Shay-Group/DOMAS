@@ -41,3 +41,7 @@ alphafold_benchmark/repro_data/
 # run_examples.sh default output directory
 run_examples_output/
 DIAGRAMS_SESSION_CONTEXT.md
+
+# Claude Code's local state - settings.local.json and the worktrees it creates
+# while working in the repo. Per-machine and regenerated, never source.
+.claude/
