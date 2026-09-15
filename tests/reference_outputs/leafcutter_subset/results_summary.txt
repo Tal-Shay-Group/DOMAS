@@ -6,6 +6,8 @@ Input source
     <tests>/leafcutter/leafcutter_ds_cluster_significance.txt
     <tests>/leafcutter/leafcutter_ds_effect_sizes.txt
 
+    transcripts considered: ensembl only
+
 Input clusters          : 126
 Input junctions         : 446
 
@@ -15,34 +17,32 @@ Genes per cluster
 
 Junctions
 ---------
-    matched to a transcript :       337   75.56% of evaluated
-    not matched             :       109   24.44% of evaluated
+    matched to a transcript :       332   74.44% of evaluated
+    not matched             :       114   25.56% of evaluated
     not evaluated           :         0   (cluster ended before matching ran)
 
 Clusters
 --------
-    comparable     :        82   65.08%
-    non-comparable :        44   34.92%
+    comparable     :        78   61.90%
+    non-comparable :        48   38.10%
 
 Why a cluster was not comparable (one reason per cluster+gene)
 -------------------------------------------------------------
-    no_unique_transcript           42   95.45% of non-comparable
-    no_canonical_junctions          2    4.55% of non-comparable
+    no_unique_transcript           46   95.83% of non-comparable
+    no_canonical_junctions          2    4.17% of non-comparable
 
 Comparison events, by row
 -------------------------
-    no_domains_in_region           356   90.82% of rows
-    reduced_domain_number           17    4.34% of rows
-    unchanged_domains               10    2.55% of rows
-    increased_domain_number          6    1.53% of rows
-    shorter_domains                  3    0.77% of rows
+    no_domains_in_region           298   91.13% of rows
+    unchanged_domains               13    3.98% of rows
+    reduced_domain_number           10    3.06% of rows
+    increased_domain_number          6    1.83% of rows
 
 Comparison events, by cluster+gene
 ----------------------------------
     The same event repeated in one cluster and gene counts once.
 
-    no_domains_in_region            75   85.23% of pairs
-    reduced_domain_number            5    5.68% of pairs
-    increased_domain_number          5    5.68% of pairs
-    unchanged_domains                2    2.27% of pairs
-    shorter_domains                  1    1.14% of pairs
+    no_domains_in_region            72   86.75% of pairs
+    increased_domain_number          5    6.02% of pairs
+    reduced_domain_number            4    4.82% of pairs
+    unchanged_domains                2    2.41% of pairs

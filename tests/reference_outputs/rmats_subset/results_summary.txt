@@ -9,6 +9,8 @@ Input source
     <tests>/rmats/MXE.MATS.JC.txt
     <tests>/rmats/RI.MATS.JC.txt
 
+    transcripts considered: ensembl only
+
 Input clusters          : 200
 Input junctions         : 520
 
@@ -18,34 +20,34 @@ Genes per cluster
 
 Junctions
 ---------
-    matched to a transcript :       399   76.73% of evaluated
-    not matched             :       121   23.27% of evaluated
+    matched to a transcript :       394   75.77% of evaluated
+    not matched             :       126   24.23% of evaluated
     not evaluated           :         0   (cluster ended before matching ran)
 
 Clusters
 --------
-    comparable     :       123   61.50%
-    non-comparable :        77   38.50%
+    comparable     :       120   60.00%
+    non-comparable :        80   40.00%
 
 Why a cluster was not comparable (one reason per cluster+gene)
 -------------------------------------------------------------
-    no_unique_transcript           43   55.84% of non-comparable
-    no_canonical_junctions         34   44.16% of non-comparable
+    no_unique_transcript           46   57.50% of non-comparable
+    no_canonical_junctions         34   42.50% of non-comparable
 
 Comparison events, by row
 -------------------------
-    no_domains_in_region           282   82.94% of rows
-    reduced_domain_number           29    8.53% of rows
-    increased_domain_number         21    6.18% of rows
-    unchanged_domains                5    1.47% of rows
-    longer_domains                   3    0.88% of rows
+    no_domains_in_region           222   81.02% of rows
+    reduced_domain_number           23    8.39% of rows
+    increased_domain_number         21    7.66% of rows
+    unchanged_domains                5    1.82% of rows
+    longer_domains                   3    1.09% of rows
 
 Comparison events, by cluster+gene
 ----------------------------------
     The same event repeated in one cluster and gene counts once.
 
-    no_domains_in_region            99   75.00% of pairs
-    reduced_domain_number           15   11.36% of pairs
-    increased_domain_number         14   10.61% of pairs
-    unchanged_domains                3    2.27% of pairs
-    longer_domains                   1    0.76% of pairs
+    no_domains_in_region            95   74.22% of pairs
+    reduced_domain_number           15   11.72% of pairs
+    increased_domain_number         14   10.94% of pairs
+    unchanged_domains                3    2.34% of pairs
+    longer_domains                   1    0.78% of pairs

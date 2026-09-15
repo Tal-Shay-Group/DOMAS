@@ -131,6 +131,16 @@ def parse_args():
                               "picks. By default only that transcript is compared - the one "
                               "most like the canonical, or the longest-CDS one where none "
                               "qualifies - and the two columns are omitted.")
+    parser.add_argument("-non_ensembl_only", action="store_true",
+                         help="Consider every transcript in the DoChaP database, including "
+                              "those annotated only by RefSeq. By default only transcripts "
+                              "carrying an Ensembl id are considered: a RefSeq-only transcript "
+                              "usually has no UniProt accession, so its domain comparison "
+                              "cannot be assessed, and a predicted XM_ model often wins the "
+                              "longest-CDS tie-break over a transcript that could have been. "
+                              "The choice is recorded in the run summary - it changes both the "
+                              "canonical transcript and the pool of comparable transcripts, so "
+                              "results are not comparable across it.")
 
     args = parser.parse_args()
 
@@ -237,6 +247,7 @@ def main():
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
                 extra_columns=args.extra_columns,
+                non_ensembl_only=args.non_ensembl_only,
             )
         elif args.format == "rmats":
             alternative_splicing.analyze_rmats_input(
@@ -244,6 +255,7 @@ def main():
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
                 extra_columns=args.extra_columns,
+                non_ensembl_only=args.non_ensembl_only,
             )
         elif args.format == "majiq":
             alternative_splicing.analyze_voila_input(
@@ -251,6 +263,7 @@ def main():
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
                 extra_columns=args.extra_columns,
+                non_ensembl_only=args.non_ensembl_only,
             )
         elif args.format == "internal2":
             alternative_splicing.analyze_internal2_input(
@@ -259,6 +272,7 @@ def main():
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
                 extra_columns=args.extra_columns,
+                non_ensembl_only=args.non_ensembl_only,
             )
         elif args.format == "internal":
             print_genes = [g.strip() for g in args.gene_ids.split(',')] if args.gene_ids else None
@@ -268,6 +282,7 @@ def main():
                 max_clusters=args.max_clusters, filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
                 extra_columns=args.extra_columns,
+                non_ensembl_only=args.non_ensembl_only,
                 restrict_pdf_to_comparable=args.show_only_compared,
             )
         elif os.path.isdir(args.input):
@@ -277,6 +292,7 @@ def main():
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
                 extra_columns=args.extra_columns,
+                non_ensembl_only=args.non_ensembl_only,
             )
         else:
             alternative_splicing.analyze_ioe_file(
@@ -284,6 +300,7 @@ def main():
                 filter_non_comparable=args.omit_non_comparable,
                 write_all_comparable=args.write_all_comparable,
                 extra_columns=args.extra_columns,
+                non_ensembl_only=args.non_ensembl_only,
             )
     finally:
         con.close()

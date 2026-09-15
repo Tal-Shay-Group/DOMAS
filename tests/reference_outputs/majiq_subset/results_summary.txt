@@ -5,6 +5,8 @@ Input source
 ------------
     <tests>/majiq/NveB_Mono_voila.txt
 
+    transcripts considered: ensembl only
+
 Input clusters          : 28
 Input junctions         : 85
 
@@ -14,28 +16,28 @@ Genes per cluster
 
 Junctions
 ---------
-    matched to a transcript :        69   81.18% of evaluated
-    not matched             :        16   18.82% of evaluated
+    matched to a transcript :        68   80.00% of evaluated
+    not matched             :        17   20.00% of evaluated
     not evaluated           :         0   (cluster ended before matching ran)
 
 Clusters
 --------
-    comparable     :        24   85.71%
-    non-comparable :         4   14.29%
+    comparable     :        23   82.14%
+    non-comparable :         5   17.86%
 
 Why a cluster was not comparable (one reason per cluster+gene)
 -------------------------------------------------------------
-    no_unique_transcript            2   50.00% of non-comparable
-    no_canonical_junctions          2   50.00% of non-comparable
+    no_unique_transcript            3   60.00% of non-comparable
+    no_canonical_junctions          2   40.00% of non-comparable
 
 Comparison events, by row
 -------------------------
-    no_domains_in_region           145   98.64% of rows
-    increased_domain_number          2    1.36% of rows
+    no_domains_in_region           124   98.41% of rows
+    increased_domain_number          2    1.59% of rows
 
 Comparison events, by cluster+gene
 ----------------------------------
     The same event repeated in one cluster and gene counts once.
 
-    no_domains_in_region            24   96.00% of pairs
-    increased_domain_number          1    4.00% of pairs
+    no_domains_in_region            23   95.83% of pairs
+    increased_domain_number          1    4.17% of pairs

@@ -1997,7 +1997,7 @@ class RunSummary:
     commonest outcome.
     """
 
-    def __init__(self, input_source=None):
+    def __init__(self, input_source=None, non_ensembl_only=False):
         # Every file the run read, listed rather than summarised as the directory
         # holding them: which of a format's files were present is part of what
         # the run was, and an rMATS directory missing RI.MATS.JC.txt produces a
@@ -2009,6 +2009,10 @@ class RunSummary:
             self.input_source = [input_source]
         else:
             self.input_source = list(input_source)
+        # Which transcripts the run was allowed to consider. Recorded because it
+        # changes both the canonical choice and the comparable-transcript pool,
+        # and two runs over the same input are not comparable across it.
+        self.non_ensembl_only = non_ensembl_only
         self.input_clusters = 0
         self.input_junctions = 0
         self.genes_per_cluster = Counter()      # distinct genes -> clusters with that many
@@ -2094,6 +2098,10 @@ class RunSummary:
         lines += ([f'    {source}' for source in self.input_source]
                   or ['    (no file - the junctions were passed in as a DataFrame)'])
         lines += [
+            '',
+            '    transcripts considered: '
+            + ('all, including refseq-only (-non_ensembl_only)'
+               if self.non_ensembl_only else 'ensembl only'),
             '',
             f'Input clusters          : {self.input_clusters:,}',
             f'Input junctions         : {self.input_junctions:,}',
@@ -2467,7 +2475,7 @@ class JunctionsAnalysis:
         ].tolist()
         return df_junctions[df_junctions['gene_ensembl_id'].isin(genes_with_count)]
 
-    def _load_database_data(self, gene_ids, use_ensembl_only=False):
+    def _load_database_data(self, gene_ids, non_ensembl_only=False):
         """Load genes, transcripts, domains, and exons from database."""
         clause, params = utils.gene_id_clause(gene_ids)
         df_genes = pd.read_sql_query(
@@ -2479,7 +2487,12 @@ class JunctionsAnalysis:
 
         df_transcripts = utils.get_genes_df_transcripts(self.con, gene_ids)
 
-        if use_ensembl_only:
+        # Ensembl-only is the default: a RefSeq-only transcript usually carries no
+        # UniProt accession, so its comparisons cannot be assessed, and a predicted
+        # XM_ model wins the longest-CDS tie-break often enough to displace a
+        # transcript that could have been. non_ensembl_only restores the old
+        # behaviour of considering every transcript the database holds.
+        if not non_ensembl_only:
             invalid_ids = {'', 'nan', 'None'}
             has_ensembl_id = df_transcripts.transcript_ensembl_id.notna() & \
                 ~df_transcripts.transcript_ensembl_id.isin(invalid_ids)
@@ -2847,7 +2860,7 @@ class JunctionsAnalysis:
 
     def analyze_junctions(self, df_junctions, output_path='compared.csv',
                           specie=None, filter_transcript_count=0, create_pdf=True, print_genes=None,
-                          num_workers=4, use_ensembl_only=False, restrict_pdf_to_comparable=False,
+                          num_workers=4, non_ensembl_only=False, restrict_pdf_to_comparable=False,
                           collect_results=True,
                           filter_non_comparable=False,
                           write_all_comparable=False, extra_columns=False,
@@ -2873,10 +2886,12 @@ class JunctionsAnalysis:
             create_pdf: Whether to generate PDF visualizations
             print_genes: List of gene symbols to generate PDFs for (or all if None)
             num_workers: Number of parallel workers for analysis
-            use_ensembl_only: If True, only consider transcripts that have an
-                ensembl id - transcripts with no ensembl id (refseq-only) are
-                filtered out before any exon/domain lookups are built, so they
-                never participate in the analysis at all.
+            non_ensembl_only: If True, consider every transcript the database
+                holds, including refseq-only ones. Off by default: only
+                transcripts that have an ensembl id are considered, and
+                refseq-only transcripts are filtered out before any exon/domain
+                lookup is built, so they never participate in the analysis at
+                all.
             collect_results: If False, the per-cluster results are not retained -
                 the writer thread has already put every row on disk, and on a
                 whole-transcriptome run keeping them too cost the parent tens of
@@ -2936,7 +2951,7 @@ class JunctionsAnalysis:
 
         # Load data from database
         df_genes, df_transcripts, df_domains, df_exons, gene_strand, gene_specie = self._load_database_data(
-            gene_ids, use_ensembl_only=use_ensembl_only
+            gene_ids, non_ensembl_only=non_ensembl_only
         )
 
         # The database knows the species of every gene it holds, including those
@@ -2954,7 +2969,8 @@ class JunctionsAnalysis:
 
         # Seeded from the input here, where the frame and the clusters are both
         # in hand; the writer thread fills the rest in as results arrive.
-        summary = RunSummary(input_source=input_source)
+        summary = RunSummary(input_source=input_source,
+                             non_ensembl_only=non_ensembl_only)
         summary.seed(df_junctions, cluster_groups)
 
         # Run parallel analysis (with dedicated writer thread for CSV output)

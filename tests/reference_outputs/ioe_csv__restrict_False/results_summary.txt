@@ -5,6 +5,8 @@ Input source
 ------------
     <tests>/ioe_example_junctions.csv
 
+    transcripts considered: ensembl only
+
 Input clusters          : 35
 Input junctions         : 85
 
@@ -14,9 +16,9 @@ Genes per cluster
 
 Junctions
 ---------
-    matched to a transcript :        70   82.35% of evaluated
-    not matched             :        15   17.65% of evaluated
-    not evaluated           :         0   (cluster ended before matching ran)
+    matched to a transcript :        69  100.00% of evaluated
+    not matched             :         0    0.00% of evaluated
+    not evaluated           :        16   (cluster ended before matching ran)
 
 Clusters
 --------
@@ -25,8 +27,7 @@ Clusters
 
 Why a cluster was not comparable (one reason per cluster+gene)
 -------------------------------------------------------------
-    no_canonical_junctions          3   75.00% of non-comparable
-    no_unique_transcript            1   25.00% of non-comparable
+    only_one_transcript          4  100.00% of non-comparable
 
 Comparison events, by row
 -------------------------

@@ -11,6 +11,8 @@ Input source
     <tests>/ioe/output_prefix_RI_strict.ioe
     <tests>/ioe/output_prefix_SE_strict.ioe
 
+    transcripts considered: ensembl only
+
 Input clusters          : 140
 Input junctions         : 340
 
@@ -35,20 +37,20 @@ Why a cluster was not comparable (one reason per cluster+gene)
 
 Comparison events, by row
 -------------------------
-    no_domains_in_region           145   71.43% of rows
-    reduced_domain_number           33   16.26% of rows
-    unchanged_domains               13    6.40% of rows
-    increased_domain_number          6    2.96% of rows
-    shorter_domains                  5    2.46% of rows
-    longer_domains                   1    0.49% of rows
+    no_domains_in_region           101   69.66% of rows
+    reduced_domain_number           21   14.48% of rows
+    unchanged_domains               13    8.97% of rows
+    increased_domain_number          6    4.14% of rows
+    shorter_domains                  3    2.07% of rows
+    longer_domains                   1    0.69% of rows
 
 Comparison events, by cluster+gene
 ----------------------------------
     The same event repeated in one cluster and gene counts once.
 
-    no_domains_in_region            69   60.00% of pairs
-    reduced_domain_number           26   22.61% of pairs
-    unchanged_domains                9    7.83% of pairs
-    shorter_domains                  5    4.35% of pairs
-    increased_domain_number          5    4.35% of pairs
-    longer_domains                   1    0.87% of pairs
+    no_domains_in_region            69   63.89% of pairs
+    reduced_domain_number           19   17.59% of pairs
+    unchanged_domains               11   10.19% of pairs
+    increased_domain_number          5    4.63% of pairs
+    shorter_domains                  3    2.78% of pairs
+    longer_domains                   1    0.93% of pairs

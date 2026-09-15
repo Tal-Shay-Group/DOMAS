@@ -5,6 +5,8 @@ Input source
 ------------
     <tests>/short_H_vs_M_HN6.xlsx
 
+    transcripts considered: ensembl only
+
 Input clusters          : 6
 Input junctions         : 38
 
@@ -29,7 +31,7 @@ Why a cluster was not comparable (one reason per cluster+gene)
 
 Comparison events, by row
 -------------------------
-    no_domains_in_region         29  100.00% of rows
+    no_domains_in_region         22  100.00% of rows
 
 Comparison events, by cluster+gene
 ----------------------------------
