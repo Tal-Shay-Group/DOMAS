@@ -135,6 +135,12 @@ ANALYZED_TYPES = [
     "shorter_domains",
     "increased_domain_number",
     "reduced_domain_number",
+    # The alternative transcript has no annotated protein where the canonical
+    # has one, or the other way round. Analyzed rather than unanalyzable - losing
+    # the protein is the most drastic domain change there is - but carrying no
+    # domain id, lengths or counts, since neither side has a domain to name.
+    "lost_protein",
+    "gained_protein",
 ]
 
 ALL_EVENT_TYPES = UNANALYZABLE_TYPES + ANALYZED_TYPES
@@ -166,7 +172,11 @@ def _warn(message):
 # added) would otherwise make zip() truncate and shift every later color by
 # one, shifting every later colour by one.
 _UNANALYZABLE_COLORS = ["#8C8C8C", "#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2", "#937860", "#CCB974", "#64B5CD", "#B07AA1", "#3E8E8E", "#6B8E23"]
-_ANALYZED_COLORS = ["#70AD47", "#FFC000", "#FF8C00", "#2E8B57", "#C00000"]
+# The last two pair with lost_protein / gained_protein: a deep wine and a
+# deep navy, kept clear of the reds and greens already used for count and
+# length changes so "no protein at all" does not read as just another one.
+_ANALYZED_COLORS = ["#70AD47", "#FFC000", "#FF8C00", "#2E8B57", "#C00000",
+                    "#7B0828", "#1F4E79"]
 assert len(_UNANALYZABLE_COLORS) == len(UNANALYZABLE_TYPES), \
     f"event_color(): {len(_UNANALYZABLE_COLORS)} unanalyzable colors for {len(UNANALYZABLE_TYPES)} UNANALYZABLE_TYPES"
 assert len(_ANALYZED_COLORS) == len(ANALYZED_TYPES), \
@@ -216,6 +226,8 @@ SHORT_LABELS = {
     # concept (this is the row's classified outcome type).
     "reduced_domain_number": "fewer domains",
     "increased_domain_number": "more domains",
+    "lost_protein": "lost protein",
+    "gained_protein": "gained protein",
     "domain swap": "swap",
     "transcript_doesnt_have_junctions": "lacks junctions",
     "transcript_not_chosen": "not chosen",

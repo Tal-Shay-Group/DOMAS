@@ -973,6 +973,30 @@ def classify_domain_change(c_count, t_count, c_length, t_length):
     return classify_length_pair(t_length, c_length) + '_domains'
 
 
+def classify_protein_change(canonical_has_protein, transcript_has_protein):
+    """Name the outcome when an annotated protein is present on one side only,
+    or None when the two sides agree and the domains decide the outcome instead.
+
+    Named from the alternative transcript's side, like every other outcome:
+    'lost_protein' is the alternative lacking the protein the canonical has.
+    Neither side having one is not a change - both are non-coding, and the
+    comparison goes on to find no domains in the region.
+
+    'gained_protein' cannot arise against DoChaP as it stands, and is kept for
+    the symmetry rather than for the rows it produces. It needs a canonical with
+    no protein in a gene where some other transcript has one, and neither route
+    to a canonical can produce that: no gene in the database - keyed either way,
+    0 of 12,141 with a flagged canonical - flags a protein-less transcript while
+    a coding sibling exists, and the fallback in _resolve_canonical() puts
+    protein-coding candidates first by construction. A database or an annotation
+    that stops holding to that starts producing the label instead of quietly
+    comparing a coding transcript against a non-coding canonical.
+    """
+    if canonical_has_protein == transcript_has_protein:
+        return None
+    return 'lost_protein' if canonical_has_protein else 'gained_protein'
+
+
 def choose_domain_display_name(names, prefixes=DOMAIN_NAME_PREFIX_PRIORITY):
     # Sort for a deterministic choice: iteration order over a `set` of names
     # depends on Python's per-process string hash seed, which would otherwise
@@ -1226,6 +1250,11 @@ class ClusterAnalysisResult:
         # gene's Transcripts rows - see _cds_spans_by_transcript(). None until
         # then, and afterwards too when the frame names no CDS columns.
         self.cds_spans = None
+        # {transcript_id: bool} - whether the transcript carries an annotated
+        # protein, filled by _resolve_gene_transcripts(). Empty until then, and a
+        # missing key reads as True: "unknown" is coding, the same default the
+        # CDS spans use.
+        self.coding_by_transcript = {}
         # The canonical transcript's exons, once it is resolved. The reference
         # every rank label and every logged junction is named against.
         self.canonical_exons = None
@@ -1434,6 +1463,10 @@ class ClusterAnalysisResult:
             coding_by_transcript = dict(zip(combined_ids, has_protein))
         else:
             coding_by_transcript = {tid: True for tid in combined_ids}
+
+        # Kept for _compare_transcripts(), which reports a protein present on one
+        # side only as an outcome of its own rather than as a domain change.
+        self.coding_by_transcript = coding_by_transcript
 
         # Where each transcript's coding sequence starts and ends, for the
         # canonical_junction_in_cds / alternative_junction_in_cds columns. Read here because this is
@@ -1822,6 +1855,29 @@ class ClusterAnalysisResult:
             is_longest_cds = transcript_id == longest_cds_transcript_id
             is_most_like_canonical = transcript_id == most_like_canonical_transcript_id
             transcript_in_cds = self._junctions_in_cds(transcript_id, group_features)
+
+            # Whether a protein exists at all is a property of the transcript, not
+            # of any one domain group, so it is settled before the comparison
+            # rather than inside it. With a protein on one side only there is
+            # nothing to group against: every domain would read as dropped (or
+            # added) for a reason that has nothing to do with the junction, which
+            # is what the protein-coding-first selection priority exists to avoid.
+            # Named from the alternative's side, like every other outcome.
+            # Neither side coding is not a change and falls through to the normal
+            # path, where it lands on no_domains_in_region.
+            protein_change = classify_protein_change(
+                self.coding_by_transcript.get(self.canonical_transcript_id, True),
+                self.coding_by_transcript.get(transcript_id, True))
+            if protein_change is not None:
+                self.add_event(protein_change,
+                               alternative_transcript_id=transcript_id,
+                               is_longest_cds=is_longest_cds,
+                               is_most_like_canonical=is_most_like_canonical,
+                               group=group_index, rank=rank_label,
+                               canonical_junction_in_cds=canonical_in_cds,
+                               alternative_junction_in_cds=transcript_in_cds)
+                continue
+
             events = list(compare_domains(
                 domain_lookup, transcript_exons, self.canonical_transcript_id, transcript_id,
                 canonical_junctions, junction_idxs, self.junctions, self.strand, self.cds_spans,
@@ -1905,6 +1961,9 @@ def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None,
 DOMAIN_COMPARISON_EVENTS = frozenset({
     'unchanged_domains', 'longer_domains', 'shorter_domains',
     'increased_domain_number', 'reduced_domain_number',
+    # A protein on one side only. An outcome of the comparison, so compared.csv,
+    # but transcript-level: the domain id, lengths and counts are left empty.
+    'lost_protein', 'gained_protein',
 })
 
 NON_COMPARISON_EVENTS = frozenset({

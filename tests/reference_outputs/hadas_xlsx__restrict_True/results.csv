@@ -1,1 +1,3 @@
 event,group,gene_symbol,specie,event_type,canonical_transcript_id,alternative_transcript_id,canonical_junctions,alternative_junctions,domain_id,domain_name,canonical_domain_length,alternative_domain_length,canonical_domains_number,alternative_domains_number,is_longest_cds,is_most_like_canonical,domain_description
+chr12:clu_12930,2,PFDN5,human,lost_protein,ENST00000334478.9,ENST00000677326.1,53295639-53295839;53295941-53296244;53296275-53297850;53297924-53298045,53295639-53297850,,,,,,,False,False,
+chr10:clu_2356,1,HNRNPH3,human,lost_protein,ENST00000265866.12,ENST00000480987.5,68337333-68337858;68337996-68338503;68338687-68339140,68337333-68338503;68338642-68339140,,,,,,,True,False,

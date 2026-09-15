@@ -37,20 +37,22 @@ Why a cluster was not comparable (one reason per cluster+gene)
 
 Comparison events, by row
 -------------------------
-    no_domains_in_region           101   69.66% of rows
-    reduced_domain_number           21   14.48% of rows
-    unchanged_domains               13    8.97% of rows
-    increased_domain_number          6    4.14% of rows
-    shorter_domains                  3    2.07% of rows
+    no_domains_in_region            79   54.86% of rows
+    lost_protein                    33   22.92% of rows
+    unchanged_domains               11    7.64% of rows
+    reduced_domain_number            9    6.25% of rows
+    increased_domain_number          6    4.17% of rows
+    shorter_domains                  5    3.47% of rows
     longer_domains                   1    0.69% of rows
 
 Comparison events, by cluster+gene
 ----------------------------------
     The same event repeated in one cluster and gene counts once.
 
-    no_domains_in_region            69   63.89% of pairs
-    reduced_domain_number           19   17.59% of pairs
-    unchanged_domains               11   10.19% of pairs
-    increased_domain_number          5    4.63% of pairs
-    shorter_domains                  3    2.78% of pairs
-    longer_domains                   1    0.93% of pairs
+    no_domains_in_region            53   46.90% of pairs
+    lost_protein                    31   27.43% of pairs
+    reduced_domain_number            9    7.96% of pairs
+    unchanged_domains                9    7.96% of pairs
+    shorter_domains                  5    4.42% of pairs
+    increased_domain_number          5    4.42% of pairs
+    longer_domains                   1    0.88% of pairs

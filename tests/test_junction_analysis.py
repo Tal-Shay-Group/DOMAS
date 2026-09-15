@@ -17,7 +17,7 @@ import utils  # noqa: E402
 from junction_analisys import (  # noqa: E402
     _init_worker, _process_cluster_chunk, ClusterAnalysisResult, JunctionsAnalysis,
     find_matching_junction_indices, get_aa_range, find_bp_range_for_domains,
-    classify_domain_change, group_by_shared_names,
+    classify_domain_change, classify_protein_change, group_by_shared_names,
     select_most_like_canonical, DOMAIN_NAME_COLUMNS,
     exon_pair_label, CDS_IN, CDS_PARTIAL, CDS_OUT, CDS_NONE,
 )
@@ -2664,3 +2664,106 @@ def test_no_window_ever_reports_residue_zero(minus):
         for hi in bounds[i:]:
             window = aa_range_for_span(exons, lo, hi, minus, cds_span)
             assert window is None or window[0] >= 1, f'{lo}-{hi} -> {window}'
+
+
+# ---------------------------------------------------------------------------
+# classify_protein_change / the lost_protein + gained_protein outcomes
+# ---------------------------------------------------------------------------
+
+# Named from the alternative's side, like every other outcome: the alternative
+# lacking the protein the canonical has is 'lost_protein'. Both sides agreeing is
+# not a protein change - two non-coding transcripts included, which go on to the
+# domain comparison and land on no_domains_in_region there.
+@pytest.mark.parametrize('canonical_has,alternative_has,expected', [
+    (True, False, 'lost_protein'),
+    (False, True, 'gained_protein'),
+    (True, True, None),
+    (False, False, None),
+])
+def test_classify_protein_change(canonical_has, alternative_has, expected):
+    assert classify_protein_change(canonical_has, alternative_has) == expected
+
+
+def _protein_cluster(coding_by_transcript):
+    """A cluster result carrying nothing but a canonical id and the coding map -
+    enough for _compare_transcripts() to settle a protein change, which it does
+    before it touches exons or domains."""
+    result = ClusterAnalysisResult('cluster_1', 'ENSG_TEST', 'TESTGENE')
+    result.canonical_transcript_id = 'ENST_CANON'
+    result.coding_by_transcript = coding_by_transcript
+    return result
+
+
+def _compare_one(result, alternative_id='ENST_ALT'):
+    # Empty exon/domain lookups on purpose: a protein change is decided before
+    # either is read, so reaching them at all would be the bug.
+    result._compare_transcripts(
+        comparable_transcript_ids=[alternative_id],
+        transcript_junctions={alternative_id: [0]},
+        canonical_junctions=[0],
+        transcript_exons={},
+        domain_lookup={},
+        longest_cds_transcript_id=None,
+        most_like_canonical_transcript_id=None,
+        group_index=0,
+    )
+    return result.events
+
+
+def test_alternative_without_a_protein_reports_lost_protein():
+    """The canonical codes for a protein and the alternative does not, so every
+    domain would otherwise read as dropped for a reason unrelated to the
+    junction."""
+    result = _protein_cluster({'ENST_CANON': True, 'ENST_ALT': False})
+    events = _compare_one(result)
+    assert [(e[0], e[1]) for e in events] == [('lost_protein', 'ENST_ALT')]
+
+
+def test_canonical_without_a_protein_reports_gained_protein():
+    """The mirror case: the canonical is non-coding and the alternative codes."""
+    result = _protein_cluster({'ENST_CANON': False, 'ENST_ALT': True})
+    events = _compare_one(result)
+    assert [(e[0], e[1]) for e in events] == [('gained_protein', 'ENST_ALT')]
+
+
+def test_protein_change_leaves_the_domain_columns_empty():
+    """A transcript-level outcome names no domain, so the id, lengths and counts
+    stay empty rather than being invented."""
+    result = _protein_cluster({'ENST_CANON': True, 'ENST_ALT': False})
+    event = _compare_one(result)[0]
+    # add_event() packs: 0 event, 1 alternative_transcript_id, 2-3 matched-junction
+    # text, 4 group, 5 rank, then 6-12 the domain columns - domain_id, name,
+    # description, the two lengths and the two counts.
+    assert event[0] == 'lost_protein'
+    assert all(value is None for value in event[6:13])
+
+
+def test_an_unknown_transcript_is_treated_as_coding():
+    """Absent protein columns mean "unknown", not "non-coding" - the same default
+    _cds_spans_by_transcript() uses - so a hand-built frame reports no protein
+    change instead of a spurious one."""
+    result = _protein_cluster({})
+    assert classify_protein_change(
+        result.coding_by_transcript.get('ENST_CANON', True),
+        result.coding_by_transcript.get('ENST_ALT', True)) is None
+
+
+def test_protein_changes_are_domain_comparison_events():
+    """They belong in compared.csv: the comparison produced an outcome, even
+    though that outcome is not about a particular domain."""
+    from junction_analisys import DOMAIN_COMPARISON_EVENTS, NON_COMPARISON_EVENTS
+    for event in ('lost_protein', 'gained_protein'):
+        assert event in DOMAIN_COMPARISON_EVENTS
+        assert event not in NON_COMPARISON_EVENTS
+
+
+def test_protein_changes_are_registered_as_analyzed_types():
+    """results_stats must know them, or its unknown-event_type check rejects any
+    run that produces one."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import results_stats
+    for event in ('lost_protein', 'gained_protein'):
+        assert event in results_stats.ANALYZED_TYPES
+        assert event in results_stats.ALL_EVENT_TYPES
+        assert results_stats.display_label(event) != event
