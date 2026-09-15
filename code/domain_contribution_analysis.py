@@ -222,4 +222,4 @@ def main(db_path):
 
 
 if __name__ == '__main__':
-    main('/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite')
+    main('/Users/arielmelchior/projects/DoChaP/DoChaP-web/DB_merged.sqlite')

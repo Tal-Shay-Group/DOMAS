@@ -90,7 +90,7 @@ HADAS_FILE = os.path.join(PROJECT_ROOT, "hadas_results.csv")
 
 # DoChaP merged DB - source of the RepresentativeDomains.description text used
 # for the top-domains description table (matches alternative_splicing.py).
-DEFAULT_DOCHAP_DB_PATH = "/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite"
+DEFAULT_DOCHAP_DB_PATH = "/Users/arielmelchior/projects/DoChaP/DoChaP-web/DB_merged.sqlite"
 
 # ── Event-type taxonomy ────────────────────────────────────────────────────────
 # Mirrors the full set of event_type values ClusterAnalysisResult.add_event()

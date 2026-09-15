@@ -1,6 +1,6 @@
 import pytest
 
-DEFAULT_DB_PATH = '/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite'
+DEFAULT_DB_PATH = '/Users/arielmelchior/projects/DoChaP/DoChaP-web/DB_merged.sqlite'
 
 
 def pytest_addoption(parser):

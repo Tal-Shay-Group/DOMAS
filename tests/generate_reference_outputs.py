@@ -26,7 +26,7 @@ from pdf_text_utils import write_pdf_text_manifest  # noqa: E402
 from summary_utils import make_summary_portable  # noqa: E402
 from junction_analisys import summary_path  # noqa: E402
 
-DB_PATH = '/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite'
+DB_PATH = '/Users/arielmelchior/projects/DoChaP/DoChaP-web/DB_merged.sqlite'
 IOE_CSV = os.path.join(TESTS_DIR, 'ioe_example_junctions.csv')
 HADAS_XLSX = os.path.join(TESTS_DIR, 'short_H_vs_M_HN6.xlsx')
 CATEGORY_EXAMPLES_CSV = os.path.join(TESTS_DIR, 'category_examples_junctions.csv')
