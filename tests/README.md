@@ -39,6 +39,20 @@ cd tests
 python3 -m pytest -v
 ```
 
+pytest is not in `requirements.txt` - that file is the runtime dependencies of
+the pipeline itself, and the tests are the only thing that needs it - so a fresh
+virtualenv has to add it, along with PyPDF2:
+
+```bash
+.venv/bin/pip install pytest PyPDF2
+```
+
+PyPDF2 is what reads the generated PDFs back as text. The PDF comparisons
+`pytest.importorskip` past it, so without it they are reported as *skipped*
+rather than failing - a green run that never checked a PDF. Installing it is
+also what lets `generate_reference_outputs.py` finish, since that script writes
+the text manifests unconditionally.
+
 Runs both `test_flags.py` and `test_junction_analysis.py`. Drop `-v` for
 terse output, or run a subset by name:
 
@@ -47,7 +61,7 @@ python3 -m pytest test_flags.py -v -k "ioe_csv and True"
 ```
 
 By default the tests run against
-`/Users/arielmelchior/Documents/projects/DoChaP/DoChaP-web/DB_merged.sqlite`.
+`/Users/arielmelchior/projects/DoChaP/DoChaP-web/DB_merged.sqlite`.
 Point them at a different database with `--db-path`:
 
 ```bash

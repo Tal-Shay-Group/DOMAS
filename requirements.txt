@@ -17,3 +17,14 @@ openpyxl>=3.1      # reading the hadas .xlsx input
 # Optional: only alphafold_benchmark/ needs this (Shrake-Rupley SASA). It is
 # imported lazily, so the analysis pipeline runs without it.
 # biopython>=1.81
+
+# Tests only, so not installed by the lines above - running the pipeline needs
+# none of it. The suite in tests/ does; see tests/README.md.
+#
+#   .venv/bin/pip install pytest PyPDF2
+#
+# pytest>=7.0
+# PyPDF2>=3.0     # pdf_text_utils.py, for the PDF text manifests. Without it
+#                 # the PDF comparisons pytest.importorskip past and the suite
+#                 # reports them as skipped rather than failing - and
+#                 # generate_reference_outputs.py stops outright.
