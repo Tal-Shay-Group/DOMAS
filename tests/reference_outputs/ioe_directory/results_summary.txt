@@ -39,9 +39,9 @@ Comparison events, by row
 -------------------------
     no_domains_in_region            71   48.63% of rows
     lost_protein                    33   22.60% of rows
-    shorter_domains                 17   11.64% of rows
+    shorter_domains                 19   13.01% of rows
     unchanged_domains               11    7.53% of rows
-    reduced_domain_number           11    7.53% of rows
+    reduced_domain_number            9    6.16% of rows
     longer_domains                   2    1.37% of rows
     increased_domain_number          1    0.68% of rows
 
@@ -51,8 +51,8 @@ Comparison events, by cluster+gene
 
     no_domains_in_region            48   43.24% of pairs
     lost_protein                    31   27.93% of pairs
-    shorter_domains                 12   10.81% of pairs
+    shorter_domains                 13   11.71% of pairs
     unchanged_domains               10    9.01% of pairs
-    reduced_domain_number            8    7.21% of pairs
+    reduced_domain_number            7    6.31% of pairs
     increased_domain_number          1    0.90% of pairs
     longer_domains                   1    0.90% of pairs

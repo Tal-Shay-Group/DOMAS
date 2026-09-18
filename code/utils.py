@@ -1541,6 +1541,30 @@ def _collapse_duplicate_spans(df):
     return df.drop(index=list(dropped))
 
 
+def _pfam_accession(ext_id):
+    """The Pfam accession named in a DomainEvent.ext_id, or None if it names none.
+
+    ext_id is a SET of ids joined with '; ', not an ordered pair: SpeciesDB
+    collapses rows that share coordinates and joins whatever matched, so a row
+    reads 'pfam00536; IPR001660' but equally 'smart00208; IPR001368; pfam00020'.
+    Position therefore carries no meaning. Anchoring at the start instead
+    (ext_id LIKE 'pfam%' with .split(';')[0]) missed 10,121 genuine Pfam hits,
+    and on the 95,419 rows naming both a Pfam and a SMART id it let Python's set
+    iteration order decide - so a rebuild of the database could change which
+    rows the analysis sees, with no change to this code.
+
+    The prefix itself is reliable: InterproCollector rewrites InterPro's own
+    cross-references through sourceDict ({'pfam': 'pf', 'smart': 'sm', ...}), so
+    PF00536 is stored as pfam00536. A token starting 'pfam' is a Pfam accession.
+
+    Where a row names more than one (exactly one row in the current build) the
+    lowest is taken, so the answer does not depend on that order either.
+    """
+    tokens = [token.strip() for token in str(ext_id).split(';') if token.strip()]
+    accessions = sorted(t for t in tokens if t.lower().startswith('pfam'))
+    return accessions[0] if accessions else None
+
+
 def get_pfam_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
     """Domains from DomainEvent/DomainType, restricted to Pfam signatures.
 
@@ -1572,9 +1596,14 @@ def get_pfam_domains_db(con, transcript_ids, df_transcript=None, df_protein=None
         return pd.DataFrame(columns=_PFAM_COLUMNS)
 
     try:
+        # Membership, not position - see _pfam_accession(). Spaces are stripped
+        # and a ';' prepended so the test anchors each token: ';pfam' matches the
+        # id wherever it sits in the set, and never matches a token that merely
+        # ends in one.
         df_event = pd.read_sql_query(
             "SELECT protein_ensembl_id, protein_refseq_id, type_id, AA_start, AA_end, ext_id "
-            "FROM DomainEvent WHERE ext_id LIKE 'pfam%'", con)
+            "FROM DomainEvent "
+            "WHERE ';' || REPLACE(ext_id, ' ', '') LIKE '%;pfam%'", con)
     except (sqlite3.OperationalError, pd.errors.DatabaseError):
         logger.warning('DomainEvent table not found in this DB.')
         return pd.DataFrame(columns=_PFAM_COLUMNS)
@@ -1582,9 +1611,10 @@ def get_pfam_domains_db(con, transcript_ids, df_transcript=None, df_protein=None
     if df_event.empty:
         return pd.DataFrame(columns=_PFAM_COLUMNS)
 
-    # ext_id is "pfam00536; IPR001660" - the signature, then its InterPro parent.
-    df_event['domain_id'] = (df_event['ext_id'].astype(str)
-                             .str.split(';').str[0].str.strip())
+    df_event['domain_id'] = df_event['ext_id'].map(_pfam_accession)
+    df_event = df_event[df_event['domain_id'].notna()]
+    if df_event.empty:
+        return pd.DataFrame(columns=_PFAM_COLUMNS)
     df_event['AA_start'] = df_event['AA_start'].astype(float).astype(int)
     df_event['AA_end'] = df_event['AA_end'].astype(float).astype(int)
 
