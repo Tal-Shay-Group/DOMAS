@@ -121,6 +121,9 @@ UNANALYZABLE_TYPES = [
     # The event-level counterpart of no_unique_junctions: not one transcript of the
     # gene differs from the canonical within the event, so no group forms.
     "no_unique_transcript",
+    # A domain on one side carries coordinates that were never established
+    # against the protein holding them, so the pair was not compared.
+    "unvalidated_domain_coordinates",
 ]
 
 # Five outcomes, because classify_domain_change() stopped treating instance
@@ -171,7 +174,12 @@ def _warn(message):
 # length mismatch (e.g. forgetting to add a color when a new event type is
 # added) would otherwise make zip() truncate and shift every later color by
 # one, shifting every later colour by one.
-_UNANALYZABLE_COLORS = ["#8C8C8C", "#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2", "#937860", "#CCB974", "#64B5CD", "#B07AA1", "#3E8E8E", "#6B8E23"]
+_UNANALYZABLE_COLORS = ["#8C8C8C", "#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2", "#937860", "#CCB974", "#64B5CD", "#B07AA1", "#3E8E8E", "#6B8E23",
+                        # unvalidated_domain_coordinates: a muted indigo,
+                        # kept dark and desaturated so it does not read as
+                        # one of the blues already used for the junction
+                        # and transcript outcomes above.
+                        "#4B4E8C"]
 # The last two pair with lost_protein / gained_protein: a deep wine and a
 # deep navy, kept clear of the reds and greens already used for count and
 # length changes so "no protein at all" does not read as just another one.
@@ -367,6 +375,12 @@ def results_csv_paths(path):
     return [path, companion] if os.path.exists(companion) else [path]
 
 
+# The results CSV spells the species column 'species'; everything in here says
+# 'specie', which is what DoChaP calls it (Genes.specie). Normalising on load
+# means a file from either side of that rename reads the same.
+_INPUT_COLUMN_RENAMES = {'species': 'specie'}
+
+
 def _read_results_csv(path, chunk_rows=1_000_000):
     """Memory-efficient reader for a results.csv of any size. `path` may also be
     a list of them, read as one frame - see results_csv_paths().
@@ -385,10 +399,16 @@ def _read_results_csv(path, chunk_rows=1_000_000):
     # Column selection comes from the first file; the writer gives every file of
     # a run the same header, so reading the rest with it keeps them aligned.
     header_cols = list(pd.read_csv(paths[0], nrows=0).columns)
-    usecols = [c for c in header_cols if c not in _UNUSED_COLS]
-    dtype = {k: v for k, v in RESULTS_CSV_DTYPES.items() if k in usecols}
+    # A results.csv written before the 'specie' -> 'species' rename and one
+    # written after it must load identically, so the file's own spelling decides
+    # what to ask read_csv for (including which dtype applies to it) and the
+    # frame is normalised to the internal name immediately afterwards.
+    # Everything downstream keeps saying 'specie', matching DoChaP's Genes.specie.
+    as_written = {_INPUT_COLUMN_RENAMES.get(c, c): c for c in header_cols}
+    usecols = [c for c in header_cols if _INPUT_COLUMN_RENAMES.get(c, c) not in _UNUSED_COLS]
+    dtype = {as_written[k]: v for k, v in RESULTS_CSV_DTYPES.items() if k in as_written}
 
-    chunks = [chunk for one in paths
+    chunks = [chunk.rename(columns=_INPUT_COLUMN_RENAMES) for one in paths
               for chunk in pd.read_csv(one, usecols=usecols, dtype=dtype, chunksize=chunk_rows)]
     if len(chunks) == 1:
         return chunks[0]

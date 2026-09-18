@@ -1,5 +1,7 @@
 import logging
 import os
+import sqlite3
+from collections import OrderedDict
 
 import numpy as np
 import pandas as pd
@@ -1089,7 +1091,52 @@ REPRESENTATIVE_DOMAINS_COLUMNS = [
     # is NULL in DBs whose RepresentativeDomains lacks the column; the filter
     # then passes the frame through unchanged.
     'domain_id', 'type',
+    # How this row's coordinates were arrived at - see PROJECTION_* below and
+    # _reproject_inherited_domains().
+    'projection_status',
 ]
+
+# How a domain row's amino-acid coordinates were arrived at. Carried per row
+# because a caller cannot otherwise tell a repositioned row from one the
+# projection was unable to validate: both come back holding coordinates.
+PROJECTION_OWN = 'own'                  # the protein owns this accession's domains
+PROJECTION_PROJECTED = 'projected'      # borrowed, re-derived, fully retained in frame
+PROJECTION_TRUNCATED = 'truncated'      # borrowed, re-derived, only partly encoded
+PROJECTION_UNVALIDATED = 'unvalidated'  # borrowed, and NOT re-derived: no owning
+                                        # protein on the accession, or no usable CDS
+                                        # map. The coordinates are still the ones
+                                        # inherited from another isoform.
+PROJECTION_UNKNOWN = 'unknown'          # provenance undetermined: the builder could
+                                        # not establish whether these coordinates
+                                        # belong to this protein. Distinct from
+                                        # 'unvalidated', which knows they do not.
+
+#: Statuses whose coordinates were established against the protein they sit on,
+#: and may therefore be compared. 'truncated' IS included: its coordinates are
+#: established exactly as 'projected' ones are, and the partial encoding they
+#: describe is a finding about the isoform rather than a doubt about the
+#: measurement - excluding it would discard the events this analysis exists to
+#: detect. Only 'unvalidated' (known borrowed, not re-derivable) and 'unknown'
+#: (provenance never established) are outside it.
+#:
+#: There is deliberately no second set for "the domain is whole". Nothing needs
+#: one, and a set of that shape reads as a safety gate, which is how 'truncated'
+#: would quietly get dropped. A caller wanting completeness tests
+#: `status == PROJECTION_PROJECTED` at its own call site, where the intent shows.
+PROJECTION_COMPARABLE = frozenset({PROJECTION_OWN, PROJECTION_PROJECTED,
+                                   PROJECTION_TRUNCATED})
+
+#: get_pfam_domains_db()'s frame: the representative columns minus the InterPro
+#: entry `type`, which a Pfam-sourced set has no value for.
+_PFAM_COLUMNS = [c for c in REPRESENTATIVE_DOMAINS_COLUMNS if c != 'type']
+
+#: Which table get_domains_db() reads. 'pfam' takes Pfam signatures from
+#: DomainEvent, keyed on the protein in BOTH the Ensembl and RefSeq id spaces,
+#: so every row's coordinates were computed on the protein carrying them and no
+#: projection is involved. 'representative' is the older accession-keyed
+#: InterPro source, which needs _reproject_inherited_domains() to be correct.
+#: Override for one run with DOMAS_DOMAIN_SOURCE.
+DEFAULT_DOMAIN_SOURCE = 'pfam'
 
 
 def _route_domain_id_to_column(domain_id):
@@ -1138,6 +1185,229 @@ def _clip_domains_to_protein(df):
     trim = length.notna() & (df['AA_end'] > length)
     df.loc[trim, 'AA_end'] = length[trim].astype(int)
     return df
+
+
+#: How many CdsMaps one connection's cache keeps. Mirrors
+#: junction_analisys._LOOKUP_CACHE_SIZE, which bounds the same kind of cache for
+#: the same reason: a full IOE run touches every transcript in the database, and
+#: an unbounded cache would retain one map per transcript - measured at ~2.2 KB
+#: each, or ~1.2 GB over 545,697 transcripts - for the life of the process.
+_CDS_MAP_CACHE_SIZE = 4096
+
+
+#: Bounded cache of CdsMaps, keyed on (database file, transcript).
+_CDS_MAP_CACHE = OrderedDict()
+
+
+def _database_file(con):
+    """The file this connection is attached to, or None for an in-memory one."""
+    try:
+        for _seq, name, path in con.execute("PRAGMA database_list"):
+            if name == 'main':
+                return path or None
+    except Exception:
+        return None
+    return None
+
+
+def _cds_map_for(con, transcript_key, strand_by_gene):
+    """A CdsMap for one transcript, built from its own Transcript_Exon rows.
+
+    Cached on (database file, transcript): a gene's transcripts are asked for
+    once per domain row, and the exon query is the expensive part.
+
+    The key is the DATABASE, not the connection, because that is what the map is
+    a property of - two connections to one file yield identical maps, and a
+    connection to a different file must not share them. It is deliberately not
+    `id(con)`, which an earlier version used: CPython reuses an address as soon
+    as the object at it is freed (six connections opened and closed in sequence
+    take two distinct ids between them), so a map built against a CLOSED
+    connection could be served to a new one landing on the same address. Within
+    one run that is harmless since the data is the same; across two databases in
+    one process - which is what the test suite does with --db-path - it would
+    silently return coordinates derived from the wrong database.
+
+    An in-memory database has no file to name, and two unrelated ones would
+    collide on the empty string, so those are simply not cached.
+    """
+    from domain_projection import build_cds_map   # local: utils is imported early
+
+    database = _database_file(con)
+    cache_key = (database, transcript_key) if database else None
+    if cache_key is not None and cache_key in _CDS_MAP_CACHE:
+        _CDS_MAP_CACHE.move_to_end(cache_key)
+        return _CDS_MAP_CACHE[cache_key]
+
+    row = con.execute(
+        "SELECT cds_start, cds_end, gene_ensembl_id, gene_GeneID_id FROM Transcripts "
+        "WHERE transcript_ensembl_id = ? OR transcript_refseq_id = ?",
+        (transcript_key, transcript_key)).fetchone()
+    result = None
+    if row is not None:
+        df_exons = pd.read_sql_query(
+            "SELECT * FROM Transcript_Exon "
+            "WHERE transcript_ensembl_id = ? OR transcript_refseq_id = ?",
+            con, params=[transcript_key, transcript_key])
+        # Either gene key: DoChaP identifies a gene by its Ensembl id or by its
+        # GeneID, and a RefSeq-only gene carries no Ensembl id at all. Reading
+        # only the Ensembl column would drop those transcripts as unmappable
+        # even though their gene, and its strand, are recorded.
+        strand = strand_by_gene.get(row[2]) or strand_by_gene.get(row[3])
+        if strand:
+            result = build_cds_map(df_exons, strand, row[0], row[1])
+    if cache_key is not None:
+        _CDS_MAP_CACHE[cache_key] = result
+        while len(_CDS_MAP_CACHE) > _CDS_MAP_CACHE_SIZE:
+            _CDS_MAP_CACHE.popitem(last=False)
+    return result
+
+
+def _strand_by_gene(con):
+    """Strand for every gene, under BOTH of the keys a transcript may name it by."""
+    strands = {}
+    for ensembl_id, geneid, strand in con.execute(
+            "SELECT gene_ensembl_id, gene_GeneID_id, strand FROM Genes"):
+        if strand is None:
+            continue
+        if ensembl_id:
+            strands[ensembl_id] = strand
+        if geneid:
+            strands[geneid] = strand
+    return strands
+
+
+def _reproject_inherited_domains(con, merged_df):
+    """Put each isoform's domains in ITS OWN amino-acid coordinates.
+
+    RepresentativeDomains is keyed on protein_interpro_id and nothing else, so
+    the merge above hands every transcript sharing an accession one identical
+    domain list - measured on whichever sequence UniProt displays for that
+    entry. Where the isoforms are the same protein that is correct. Where they
+    are not, the others inherit coordinates that were never theirs: ARAP1's
+    1205 aa isoform comes back carrying SAM at aa 3-70, encoded by an exon it
+    does not contain, and a PH domain at 1277-1432 that does not fit inside it.
+
+    _clip_domains_to_protein() catches only the part that overruns the far end.
+    A domain sitting comfortably inside the shorter protein but encoded by a
+    missing exon is invisible to a length check - which is exactly the ARAP1
+    case - and one that IS present is left at the wrong offset.
+
+    Proteins.interpro_domains_are_own (written by DoChaP-db's
+    RepresentativeDomainsBuilder from the Swiss-Prot isoform tags) says which
+    rows are borrowed. For each borrowed protein this re-derives the domain's
+    position from the two transcripts' own CDS structures, dropping what the
+    isoform does not encode and shifting what it does.
+
+    The reference is NOT assumed to be the canonical transcript. In 1,205 genes
+    the canonical is itself flagged as borrowing while a non-canonical sibling
+    holds the displayed sequence - RNF216, where UniProt displays isoform 2 and
+    DoChaP's canonical is isoform 1 - so the reference is whichever protein on
+    the accession is marked as owning its domains.
+
+    A database without the column, or an accession with no owning protein, is
+    left exactly as it is: unchanged behaviour, never a guess.
+    """
+    from domain_projection import project_domain, KEPT, TRUNCATED
+
+    # Every exit adds the column, so the frame's shape does not depend on
+    # whether anything needed projecting - a caller can always read it.
+    if merged_df.empty or 'interpro_domains_are_own' not in merged_df.columns:
+        merged_df = merged_df.copy()
+        # A database without the column predates the isoform step, so nothing is
+        # known about any row's provenance. (An empty frame has no rows to label,
+        # so the value only has to keep the column's dtype consistent.)
+        merged_df['projection_status'] = PROJECTION_UNKNOWN
+        return merged_df
+
+    ownership = pd.to_numeric(merged_df['interpro_domains_are_own'],
+                              errors='coerce')
+    borrowed = ownership == 0
+
+    # Every row says how its coordinates were arrived at. Without this a row the
+    # projection could not validate is indistinguishable from one it
+    # repositioned, because both come back carrying coordinates.
+    #
+    # A NULL flag is not a quiet "no". The builder writes it where UniProt cannot
+    # say which sequence the accession's domains were computed on - almost always
+    # a TrEMBL accession, which has no curated isoform model to consult. Such a
+    # row cannot be projected either: projection needs a sibling the builder
+    # marked own=1, and on these accessions there is none. Folding it into 'own'
+    # would claim a verification that never ran.
+    status = pd.Series(PROJECTION_OWN, index=merged_df.index, dtype=object)
+    status[ownership.isna()] = PROJECTION_UNKNOWN
+
+    if not borrowed.any():
+        merged_df = merged_df.copy()
+        merged_df['projection_status'] = status
+        return merged_df
+
+    # The owning protein for each accession, looked up across the WHOLE table:
+    # the reference transcript need not be in this run's transcript set.
+    accessions = merged_df.loc[borrowed, 'protein_interpro_id'].unique().tolist()
+    reference = {}
+    for start in range(0, len(accessions), 500):
+        batch = accessions[start:start + 500]
+        placeholders = ','.join(['?'] * len(batch))
+        for accession, ensembl_tx, refseq_tx in con.execute(
+                f"SELECT protein_interpro_id, transcript_ensembl_id, transcript_refseq_id "
+                f"FROM Proteins WHERE interpro_domains_are_own = 1 "
+                f"  AND protein_interpro_id IN ({placeholders})", batch):
+            reference.setdefault(accession, ensembl_tx or refseq_tx)
+
+    strand_by_gene = _strand_by_gene(con)
+
+    keep = pd.Series(True, index=merged_df.index)
+    new_start = merged_df['AA_start'].copy()
+    new_end = merged_df['AA_end'].copy()
+    counts = {'reprojected': 0, 'dropped': 0, 'no_reference': 0, 'unmappable': 0}
+
+    for index in merged_df.index[borrowed]:
+        row = merged_df.loc[index]
+        reference_tx = reference.get(row['protein_interpro_id'])
+        if reference_tx is None:
+            counts['no_reference'] += 1
+            status.at[index] = PROJECTION_UNVALIDATED
+            continue
+        target_tx = row['transcript_ensembl_id_version']
+        reference_map = _cds_map_for(con, reference_tx, strand_by_gene)
+        target_map = _cds_map_for(con, target_tx, strand_by_gene)
+        if reference_map is None or target_map is None:
+            counts['unmappable'] += 1
+            status.at[index] = PROJECTION_UNVALIDATED
+            continue
+        # Normalised, not passed through: project_domain() clips against this
+        # with int(), and a NaN is truthy while int(NaN) raises - so an absent
+        # length would crash the branch meant to tolerate it. The clip below
+        # (_clip_domains_to_protein) already coerces the same column this way;
+        # doing it here keeps the two from disagreeing about whether a length
+        # can be missing.
+        alt_length = pd.to_numeric(row.get('length'), errors='coerce')
+        alt_length = int(alt_length) if pd.notna(alt_length) else None
+        projected = project_domain(row['AA_start'], row['AA_end'],
+                                   reference_map, target_map, alt_length)
+        if projected.status in (KEPT, TRUNCATED):
+            new_start.at[index] = projected.aa_start
+            new_end.at[index] = projected.aa_end
+            status.at[index] = (PROJECTION_PROJECTED if projected.status == KEPT
+                                else PROJECTION_TRUNCATED)
+            counts['reprojected'] += 1
+        else:
+            # absent (the isoform lacks the encoding exons) or frameshifted
+            # (it reads them in another frame, so the peptide differs).
+            keep.at[index] = False
+            counts['dropped'] += 1
+
+    merged_df = merged_df.copy()
+    merged_df['AA_start'] = new_start
+    merged_df['AA_end'] = new_end
+    merged_df['projection_status'] = status
+    merged_df = merged_df[keep]
+    logger.log(PROGRESS,
+               'Inherited domain rows: %d repositioned, %d dropped as absent, '
+               '%d with no owning protein, %d unmappable',
+               counts['reprojected'], counts['dropped'],
+               counts['no_reference'], counts['unmappable'])
+    return merged_df
 
 
 def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
@@ -1212,10 +1482,180 @@ def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_pr
     })
     merged_df['AA_start'] = merged_df['AA_start'].astype(int)
     merged_df['AA_end'] = merged_df['AA_end'].astype(int)
+    # Before the length clip, not after: reprojection puts each isoform's
+    # domains in its own coordinates, and the clip is only meaningful once they
+    # are. Run the other way round, the clip would trim borrowed coordinates
+    # against the borrower's length - which is what produced the wrong domain
+    # set in the first place.
+    merged_df = _reproject_inherited_domains(con, merged_df)
     merged_df = _clip_domains_to_protein(merged_df)
 
     logger.log(PROGRESS, 'Read %d domain rows from RepresentativeDomains', len(merged_df))
     return merged_df[REPRESENTATIVE_DOMAINS_COLUMNS]
+
+
+#: Mirrors junction_analisys._SAME_ID_OVERLAP. Duplicated rather than imported
+#: because junction_analisys imports this module; the two must stay in step.
+_SAME_ID_OVERLAP = 0.5
+
+
+def _collapse_duplicate_spans(df):
+    """Collapse duplicate hits of the SAME signature on the SAME protein.
+
+    Applies the identical rule to junction_analisys.filter_representative_domains():
+    two entries with the same id whose overlap covers at least _SAME_ID_OVERLAP of
+    the SHORTER one are one domain, and the longer is kept; below that they are two
+    instances (tandem repeats) and both survive. Coordinates are inclusive, and the
+    kept row's own start/end are reported - never a union of the two, which would be
+    a span neither annotation claimed.
+
+    This matters more here than on the representative path: a Pfam frame carries no
+    InterPro `type`, so filter_representative_domains() returns it untouched and this
+    is the only de-duplication that runs.
+    """
+    if df.empty:
+        return df
+    df = df.sort_values(['transcript_ensembl_id_version', 'domain_id', 'AA_start', 'AA_end'])
+    dropped = set()
+    for _, group in df.groupby(['transcript_ensembl_id_version', 'domain_id'], sort=False):
+        rows = list(group.itertuples(index=True))
+        for a in range(len(rows)):
+            ra = rows[a]
+            if ra.Index in dropped:
+                continue
+            for b in range(a + 1, len(rows)):
+                rb = rows[b]
+                if rb.Index in dropped:
+                    continue
+                lo, hi = max(ra.AA_start, rb.AA_start), min(ra.AA_end, rb.AA_end)
+                if hi < lo:
+                    continue
+                shorter = min(ra.AA_end - ra.AA_start + 1, rb.AA_end - rb.AA_start + 1)
+                if shorter <= 0 or (hi - lo + 1) / shorter < _SAME_ID_OVERLAP:
+                    continue
+                len_a = ra.AA_end - ra.AA_start
+                len_b = rb.AA_end - rb.AA_start
+                dropped.add(rb.Index if len_a >= len_b else ra.Index)
+                if ra.Index in dropped:
+                    break
+    return df.drop(index=list(dropped))
+
+
+def get_pfam_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
+    """Domains from DomainEvent/DomainType, restricted to Pfam signatures.
+
+    The point of this source is provenance. DomainEvent is keyed on the PROTEIN,
+    so every row's coordinates were computed on the protein carrying them - no
+    accession is shared between isoforms, nothing is inherited, and no projection
+    is needed or performed. What made DomainEvent unusable as a representative set
+    was cross-source redundancy: one region matched by Pfam, SMART and CDD yields
+    three overlapping rows under one DomainType, and there is no InterPro entry
+    type to rank them by. Keeping only the Pfam hit removes that at a stroke
+    (ARAP1's canonical drops from 24 rows to 7).
+
+    Both id spaces are used. DomainEvent carries protein_ensembl_id and
+    protein_refseq_id, and 224,530 of its Pfam rows are reachable ONLY through the
+    RefSeq key (284,621 proteins have no Ensembl id at all), so matching on the
+    Ensembl column alone would silently drop every RefSeq-only transcript - a fifth
+    of the data - while looking like a coverage property of Pfam.
+
+    Frame shape matches get_representative_domains_db() so it is a drop-in for
+    build_domain_lookup(), except that `type` is deliberately absent - see below.
+    Only the `pfam` id column is populated: the analysis groups domains by shared
+    identifiers, and filling the others would merge distinct Pfam families that
+    happen to share an InterPro parent.
+    """
+    logger.log(PROGRESS, 'Reading domains from DomainEvent/DomainType (Pfam only)')
+    if df_transcript is None or df_protein is None:
+        df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
+    if df_protein.empty:
+        return pd.DataFrame(columns=_PFAM_COLUMNS)
+
+    try:
+        df_event = pd.read_sql_query(
+            "SELECT protein_ensembl_id, protein_refseq_id, type_id, AA_start, AA_end, ext_id "
+            "FROM DomainEvent WHERE ext_id LIKE 'pfam%'", con)
+    except (sqlite3.OperationalError, pd.errors.DatabaseError):
+        logger.warning('DomainEvent table not found in this DB.')
+        return pd.DataFrame(columns=_PFAM_COLUMNS)
+    df_event = df_event.dropna(subset=['AA_start', 'AA_end'])
+    if df_event.empty:
+        return pd.DataFrame(columns=_PFAM_COLUMNS)
+
+    # ext_id is "pfam00536; IPR001660" - the signature, then its InterPro parent.
+    df_event['domain_id'] = (df_event['ext_id'].astype(str)
+                             .str.split(';').str[0].str.strip())
+    df_event['AA_start'] = df_event['AA_start'].astype(float).astype(int)
+    df_event['AA_end'] = df_event['AA_end'].astype(float).astype(int)
+
+    merged_df = pd.merge(
+        df_protein,
+        df_transcript.drop(columns=['protein_ensembl_id', 'protein_refseq_id'],
+                           errors='ignore'),
+        on=TRANSCRIPT_KEY, suffixes=('', '_tx'))
+    merged_df['transcript_ensembl_id'] = merged_df[TRANSCRIPT_KEY]
+
+    # Matched on whichever id each side actually has: a protein or event row
+    # carrying both appears under both keys and the duplicate pair is dropped
+    # after the merge.
+    def _long(frame, prefix_cols):
+        parts = []
+        for tag, col in prefix_cols:
+            if col not in frame.columns:
+                continue
+            # astype(str) renders NULL as 'nan' OR 'None' depending on dtype;
+            # both must go, or every null-keyed row joins to every other one.
+            ids = frame[col].astype(str).str.strip()
+            mask = (frame[col].notna() & (ids != '')
+                    & ~ids.str.lower().isin(['nan', 'none', '<na>']))
+            sub = frame[mask].copy()
+            if sub.empty:
+                continue
+            sub['_join_key'] = tag + '|' + sub[col].astype(str).str.strip()
+            parts.append(sub)
+        return pd.concat(parts, ignore_index=True) if parts else frame.iloc[0:0].assign(_join_key=None)
+
+    KEYS = [('E', 'protein_ensembl_id'), ('R', 'protein_refseq_id')]
+    merged_df = pd.merge(_long(merged_df, KEYS),
+                         _long(df_event, KEYS).drop(
+                             columns=['protein_ensembl_id', 'protein_refseq_id'],
+                             errors='ignore'),
+                         on='_join_key')
+    if merged_df.empty:
+        return pd.DataFrame(columns=_PFAM_COLUMNS)
+    merged_df = merged_df.drop_duplicates(
+        subset=[TRANSCRIPT_KEY, 'domain_id', 'AA_start', 'AA_end'])
+
+    df_type = pd.read_sql_query('SELECT type_id, name, description FROM DomainType', con)
+    merged_df = pd.merge(merged_df, df_type, on='type_id', how='left')
+
+    merged_df = merged_df.rename(columns={
+        'protein_ensembl_id': 'protein_ensembl_id_version',
+        'transcript_ensembl_id': 'transcript_ensembl_id_version',
+        'name': 'short_description',
+        'description_y': 'description',
+    })
+    if 'description' not in merged_df.columns:
+        merged_df['description'] = merged_df.get('description_x')
+    merged_df['pfam'] = merged_df['domain_id']
+    for col in ('CDD_id', 'cdd', 'smart', 'tigr', 'interpro'):
+        merged_df[col] = None
+    # Every row was computed on its own protein; there is nothing to project.
+    merged_df['projection_status'] = PROJECTION_OWN
+    if 'protein_interpro_id' not in merged_df.columns:
+        merged_df['protein_interpro_id'] = None
+
+    merged_df = _collapse_duplicate_spans(merged_df)
+    merged_df = _clip_domains_to_protein(merged_df)
+    logger.log(PROGRESS, 'Read %d Pfam domain rows from DomainEvent', len(merged_df))
+    # The `type` column is deliberately ABSENT, not null. Its values are InterPro
+    # entry types, and filter_representative_domains() keeps only Domain/Repeat -
+    # so a Pfam frame carrying type=None has every row dropped and the run silently
+    # reports no domains anywhere. Omitting the column is the documented signal for
+    # "no entry type to rank by", under which the filter returns its input
+    # untouched. Correct here: a Pfam-only set is already non-redundant (see
+    # _collapse_duplicate_spans) and there is no InterPro curation to rank it with.
+    return merged_df[_PFAM_COLUMNS]
 
 
 def get_domains_db(con, transcript_ids):
@@ -1234,5 +1674,13 @@ def get_domains_db(con, transcript_ids):
     (check_db.py, domain_contribution_analysis.py); it is not part of the analysis.
     """
     df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
-    return get_representative_domains_db(con, transcript_ids, df_transcript=df_transcript,
-                                         df_protein=df_protein)
+    source = (os.environ.get('DOMAS_DOMAIN_SOURCE', '').strip().lower()
+              or DEFAULT_DOMAIN_SOURCE)
+    if source == 'pfam':
+        return get_pfam_domains_db(con, transcript_ids, df_transcript=df_transcript,
+                                   df_protein=df_protein)
+    if source in ('representative', 'interpro'):
+        return get_representative_domains_db(con, transcript_ids, df_transcript=df_transcript,
+                                             df_protein=df_protein)
+    raise ValueError(f"DOMAS_DOMAIN_SOURCE={source!r} is not a domain source "
+                     f"(expected 'pfam' or 'representative')")

@@ -10,9 +10,12 @@ from matplotlib.gridspec import GridSpec
 import matplotlib.patheffects as mpe
 import numpy as np
 import pandas as pd
+import logging
 import sqlite3
 
 import utils
+
+logger = logging.getLogger(__name__)
 
 
 # Color palette from DoChap-web
@@ -136,6 +139,73 @@ def _drawable_domains(df_domains):
     return _keep_primary_entries(_drop_undrawable_domains(df_domains))
 
 
+def _reproject_domains_for_transcript(conn, transcript_id, df_domains):
+    """Put a borrowed transcript's domains in ITS OWN amino-acid coordinates.
+
+    RepresentativeDomains is keyed on protein_interpro_id alone, so every isoform
+    sharing an accession reads back one domain list at one set of coordinates -
+    the displayed sequence's. Drawing that list unchanged is what put a SAM
+    domain on ARAP1's 1205 aa isoform, which does not contain the exon encoding
+    it, and a PH domain at 1277-1432 on a protein 1205 residues long.
+
+    Proteins.interpro_domains_are_own (from DoChaP-db's
+    RepresentativeDomainsBuilder) marks the borrowed rows. This mirrors what
+    utils._reproject_inherited_domains() does for the analysis, so the figure and
+    the results table place domains identically instead of disagreeing.
+
+    Unchanged behaviour on a database without the column, on a transcript that
+    owns its domains, and on an accession with no owning protein: a figure is
+    never guessed at.
+    """
+    if df_domains is None or len(df_domains) == 0:
+        return df_domains
+    try:
+        from domain_projection import project_domain, KEPT, TRUNCATED
+        from utils import _cds_map_for
+    except ImportError:
+        return df_domains
+
+    try:
+        row = conn.execute(
+            "SELECT protein_interpro_id, interpro_domains_are_own, length FROM Proteins "
+            "WHERE transcript_ensembl_id = ? OR transcript_refseq_id = ?",
+            (transcript_id, transcript_id)).fetchone()
+    except sqlite3.OperationalError:
+        return df_domains          # column absent: an older database
+    if not row or row[1] != 0:
+        return df_domains          # owns its domains, or nothing is known
+
+    accession, _own, length = row
+    reference = conn.execute(
+        "SELECT transcript_ensembl_id, transcript_refseq_id FROM Proteins "
+        "WHERE protein_interpro_id = ? AND interpro_domains_are_own = 1",
+        (accession,)).fetchone()
+    if not reference:
+        return df_domains
+    reference_tx = reference[0] or reference[1]
+
+    strand_by_gene = dict(conn.execute(
+        "SELECT gene_ensembl_id, strand FROM Genes WHERE gene_ensembl_id IS NOT NULL"))
+    reference_map = _cds_map_for(conn, reference_tx, strand_by_gene)
+    target_map = _cds_map_for(conn, transcript_id, strand_by_gene)
+    if reference_map is None or target_map is None:
+        return df_domains
+
+    starts, ends, keep = [], [], []
+    for domain in df_domains.itertuples():
+        projected = project_domain(domain.AA_start, domain.AA_end,
+                                   reference_map, target_map, length)
+        kept = projected.status in (KEPT, TRUNCATED)
+        keep.append(kept)
+        starts.append(projected.aa_start if kept else domain.AA_start)
+        ends.append(projected.aa_end if kept else domain.AA_end)
+
+    df_domains = df_domains.copy()
+    df_domains['AA_start'] = starts
+    df_domains['AA_end'] = ends
+    return df_domains[keep].reset_index(drop=True)
+
+
 
 
 def prepare_gene_data_bulk(conn, gene_ensembl_ids):
@@ -224,28 +294,30 @@ def prepare_gene_data_bulk(conn, gene_ensembl_ids):
     proteins_by_transcript = {k: v for k, v in df_proteins_all.groupby('combined_id')} if len(df_proteins_all) else {}
     domains_by_protein = {k: v for k, v in df_domains_all.groupby('protein_ensembl_id')} if len(df_domains_all) else {}
 
-    # RepresentativeDomains and nothing else - a protein absent from that table is
-    # drawn with no domains, so the PDF shows the domain set the analysis compared.
-    domains_by_protein = {}
-
-    if protein_ids and 'protein_interpro_id' in df_proteins_all.columns:
-        df_protein_interpro = df_proteins_all[['protein_ensembl_id', 'protein_interpro_id']].dropna(subset=['protein_interpro_id'])
-        df_protein_interpro = df_protein_interpro[df_protein_interpro.protein_interpro_id.str.strip() != '']
-        interpro_ids = df_protein_interpro['protein_interpro_id'].unique().tolist()
-        if interpro_ids:
-            ip_placeholders = ','.join(['?'] * len(interpro_ids))
-            try:
-                df_rep_all = pd.read_sql_query(
-                    f"SELECT * FROM RepresentativeDomains WHERE protein_interpro_id IN ({ip_placeholders})",
-                    conn, params=interpro_ids,
-                )
-            except (sqlite3.OperationalError, pd.errors.DatabaseError):
-                df_rep_all = pd.DataFrame()
-            if len(df_rep_all):
-                df_rep_all = df_rep_all.merge(df_protein_interpro, on='protein_interpro_id')
-                df_rep_all = _representative_domains_to_domain_columns(df_rep_all)
-                for protein_id, df_rep_protein in df_rep_all.groupby('protein_ensembl_id'):
-                    domains_by_protein[protein_id] = df_rep_protein.reset_index(drop=True)
+    # Whatever source the ANALYSIS uses - utils.get_domains_db() owns that
+    # decision (DOMAS_DOMAIN_SOURCE / DEFAULT_DOMAIN_SOURCE). Asking it here is
+    # what keeps the drawing and the events table from disagreeing about which
+    # domains exist; querying a table directly re-made that decision by hand and
+    # would draw InterPro domains for a Pfam run.
+    #
+    # Keyed per TRANSCRIPT, not per protein: on the representative source the
+    # coordinates depend on which isoform is asking (that is what reprojection
+    # does), and get_domains_db() has already applied it.
+    import utils  # local: junction_analisys imports this module
+    domains_by_transcript = {}
+    transcript_ids_for_domains = (
+        df_proteins_all['combined_id'].dropna().unique().tolist()
+        if len(df_proteins_all) and 'combined_id' in df_proteins_all.columns else [])
+    if transcript_ids_for_domains:
+        try:
+            df_domains_src = utils.get_domains_db(conn, transcript_ids_for_domains)
+        except Exception as exc:                      # a hand-built DB may lack a table
+            logger.warning('Could not read domains for the figure: %s', exc)
+            df_domains_src = pd.DataFrame()
+        if len(df_domains_src):
+            domains_by_transcript = {
+                k: v.reset_index(drop=True)
+                for k, v in df_domains_src.groupby('transcript_ensembl_id_version')}
 
     def get_exons(transcript_id):
         df_exons = exons_by_transcript.get(transcript_id, pd.DataFrame(columns=df_exons_all.columns)).reset_index(drop=True)
@@ -259,14 +331,10 @@ def prepare_gene_data_bulk(conn, gene_ensembl_ids):
             df_exons = df_exons.sort_values('abs_start_CDS').reset_index(drop=True)
         return df_exons
 
-    domains_columns = df_domains_all.columns if len(protein_ids) else []
-
     def get_domains(transcript_id):
-        df_protein = proteins_by_transcript.get(transcript_id)
-        if df_protein is None or len(df_protein) == 0:
+        domains = domains_by_transcript.get(transcript_id)
+        if domains is None or len(domains) == 0:
             return pd.DataFrame()
-        protein_id = df_protein.iloc[0]['protein_ensembl_id']
-        domains = domains_by_protein.get(protein_id, pd.DataFrame(columns=domains_columns)).reset_index(drop=True)
         return _drawable_domains(domains)
 
     transcript_groups = {k: v for k, v in df_transcripts.groupby('gene_ensembl_id', sort=False)} if len(df_transcripts) else {}
@@ -404,37 +472,30 @@ class GeneVisualization:
         return df_exons
 
     def _load_domains(self, transcript_ensembl_id, transcript_refseq_id=None):
-        """Load protein domains for a transcript, matched by either its ensembl or
-        refseq id (a RefSeq-only transcript has no ensembl id).
+        """Domains for one transcript, from the source the ANALYSIS uses.
 
-        Domains come from RepresentativeDomains only; a protein with no entry
-        there has no domains. DomainEvent/DomainType are not read - the analysis
-        does not use them, so drawing from them would show a set no comparison
-        could refer to.
+        utils.get_domains_db() owns which table that is (DOMAS_DOMAIN_SOURCE /
+        DEFAULT_DOMAIN_SOURCE) and, on the representative source, puts a borrowed
+        isoform's domains in its own coordinates first. Reading a table directly
+        here would re-make that decision and could draw a domain set no
+        comparison refers to.
         """
-        # Get protein ID
-        protein_query = """
-            SELECT protein_ensembl_id, protein_interpro_id FROM Proteins
-            WHERE transcript_ensembl_id = ? OR transcript_refseq_id = ?
-        """
-        df_protein = pd.read_sql_query(protein_query, self.conn, params=[transcript_ensembl_id, transcript_refseq_id])
-
-        if len(df_protein) == 0:
+        import utils  # local: junction_analisys imports this module
+        transcript_id = transcript_ensembl_id or transcript_refseq_id
+        if not transcript_id:
             return pd.DataFrame()
-
-        df_rep = pd.DataFrame()
-        protein_interpro_id = df_protein.iloc[0].get('protein_interpro_id')
-        if pd.notna(protein_interpro_id) and str(protein_interpro_id).strip():
-            rep_query = "SELECT * FROM RepresentativeDomains WHERE protein_interpro_id = ?"
-            try:
-                df_rep = pd.read_sql_query(rep_query, self.conn, params=[protein_interpro_id])
-            except (sqlite3.OperationalError, pd.errors.DatabaseError):
-                df_rep = pd.DataFrame()
-            df_rep = _representative_domains_to_domain_columns(df_rep)
-        if len(df_rep) == 0:
+        try:
+            df = utils.get_domains_db(self.conn, [transcript_id])
+        except Exception as exc:
+            logger.warning('Could not read domains for %s: %s', transcript_id, exc)
             return pd.DataFrame()
-        return _drawable_domains(df_rep.reset_index(drop=True))
-    
+        if len(df) == 0:
+            return pd.DataFrame()
+        df = df[df['transcript_ensembl_id_version'].astype(str) == str(transcript_id)]
+        if len(df) == 0:
+            return pd.DataFrame()
+        return _drawable_domains(df.reset_index(drop=True))
+
     def _assign_exon_colors(self):
         """Assign colors to unique exons across all transcripts based on genomic location."""
         seen_exons = {}

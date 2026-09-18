@@ -29,12 +29,20 @@ FLOAT_COLS = ['canonical_domain_length', 'alternative_domain_length',
               'canonical_domains_number', 'alternative_domains_number']
 
 
+# The results CSV spells the species column 'species'; this module's column
+# lists say 'specie'. Normalising on load lets a file from either side of that
+# rename be compared against the other, which is the whole point of this tool.
+_INPUT_COLUMN_RENAMES = {'species': 'specie'}
+
+
 def _read_compact(path, chunk_rows=1_000_000):
     header_cols = list(pd.read_csv(path, nrows=0).columns)
-    dtype = {c: 'category' for c in CATEGORY_COLS if c in header_cols}
-    dtype.update({c: 'float32' for c in FLOAT_COLS if c in header_cols})
+    as_written = {_INPUT_COLUMN_RENAMES.get(c, c): c for c in header_cols}
+    dtype = {as_written[c]: 'category' for c in CATEGORY_COLS if c in as_written}
+    dtype.update({as_written[c]: 'float32' for c in FLOAT_COLS if c in as_written})
 
-    chunks = list(pd.read_csv(path, dtype=dtype, chunksize=chunk_rows))
+    chunks = [chunk.rename(columns=_INPUT_COLUMN_RENAMES)
+              for chunk in pd.read_csv(path, dtype=dtype, chunksize=chunk_rows)]
     if len(chunks) == 1:
         return chunks[0]
 

@@ -17,7 +17,7 @@ from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
 import utils
 from utils import (
     FEATURE_JUNCTION, FEATURE_RETAINED_INTRON, FEATURE_TYPE_COLUMN,
-    find_matching_junction_indices,
+    find_matching_junction_indices, PROJECTION_COMPARABLE,
 )
 from generate_gene_pdf import GeneVisualization, prepare_gene_data_bulk
 
@@ -682,7 +682,14 @@ def filter_representative_domains(df_domains):
         # not a valid index. Previously masked by the `type.isna().all()` guard -
         # vacuously true on an empty frame - which this rule no longer wants.
         return df_domains
-    keep = df.index[tiers == TIER_PRIMARY].tolist()   # InterPro Domain/Repeat
+    if os.environ.get('DOMAS_SKIP_TYPE_FILTER', '').strip() in ('1', 'true', 'yes'):
+        # Evaluation switch: keep every entry regardless of InterPro type, so the
+        # cost of the Domain/Repeat gate can be measured against the cost of the
+        # domain SOURCE. The duplicate collapse below still runs - without it the
+        # frame is not a domain set at all, just raw signature hits.
+        keep = df.index.tolist()
+    else:
+        keep = df.index[tiers == TIER_PRIMARY].tolist()   # InterPro Domain/Repeat
 
     # collapse genuine duplicates (same accession, overlapping by a majority of the
     # shorter entry) -> keep the longer
@@ -1034,6 +1041,31 @@ def _group_text(c_domains, c_idxs, t_domains, t_idxs, column):
     return '; '.join(values) if values else None
 
 
+def domain_coordinates_comparable(domain_lookup, transcript_id):
+    """Whether every domain of `transcript_id` has coordinates that were
+    established against this protein (see utils.PROJECTION_COMPARABLE).
+
+    Asked of the transcript's WHOLE domain frame, deliberately not of the
+    windowed subset find_relevant_domain_windows() returns. A row the projection
+    could not validate still carries the coordinates it inherited from another
+    isoform, so it may sit outside the window, join no identity group, and be
+    dropped from the comparison with nothing recorded - which is the single
+    failure this check exists to prevent. Windowing first would reintroduce it.
+
+    Two frames pass unconditionally: one with no domains (nothing to doubt) and
+    one with no projection_status column, which is what the DomainEvent /
+    DomainType source produces. A NaN status is the same case row-wise, where a
+    run mixes that source with RepresentativeDomains.
+    """
+    domains = domain_lookup(transcript_id)
+    if domains is None or len(domains) == 0:
+        return True
+    if 'projection_status' not in domains.columns:
+        return True
+    status = domains['projection_status']
+    return not bool((status.notna() & ~status.isin(PROJECTION_COMPARABLE)).any())
+
+
 def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, transcript_id,
                      canonical_junctions, transcript_junctions, junctions, strand=None,
                      cds_spans=None):
@@ -1085,8 +1117,20 @@ def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, tr
             'domain_id': choose_domain_display_name(names),
             'domain_name': _group_text(c_domains, c_idxs, t_domains, t_idxs, 'short_description'),
             'domain_description': _group_text(c_domains, c_idxs, t_domains, t_idxs, 'description'),
-            'canonical_domain_length': c_length,
-            'alternative_domain_length': t_length,
+            # A side with no domains in the window covers zero amino acids.
+            # That is a measurement, not a missing value - the companion count
+            # column already reports 0 for it, and a blank beside a 0 reads as
+            # "unknown" when the answer is known. total_covered_length() keeps
+            # returning None (it has no interval to measure, and other callers
+            # rely on telling that apart); the CSV writes the 0.
+            #
+            # Only the two length columns are affected. Rows that never reached
+            # a domain comparison at all - lost_protein / gained_protein, where
+            # the alternative has no protein - leave every domain column blank,
+            # counts included, and stay blank: 0 there would assert a comparison
+            # that was never made.
+            'canonical_domain_length': 0 if c_length is None else c_length,
+            'alternative_domain_length': 0 if t_length is None else t_length,
             'canonical_domains_number': c_count,
             'alternative_domains_number': t_count,
         }
@@ -1118,6 +1162,27 @@ def _assert_specie_matches_database(df_junctions, gene_specie):
         f"{'/'.join(stated)} but their genes are {'/'.join(found)} in the database "
         f"(e.g. {examples}). Re-run with the species the data actually came from."
     )
+
+
+# Columns whose written name differs from the one carried in memory.
+#
+# The analysis spells the species column 'specie' throughout because that is how
+# DoChaP spells it (Genes.specie), and every read of the database, every junction
+# frame and every internal helper agrees with it. The written CSV is a different
+# audience: it is the run's published output, read by people and by other tools,
+# and there the correct English plural belongs.
+#
+# Renaming only at the write boundary keeps those two facts from fighting - the
+# in-memory name still matches the column it came from, and this stays a
+# two-line change instead of a 350-site rename. Readers of the CSV normalise the
+# other way on load (results_stats.load_results_csv, compare_results_csv), so a
+# file written before or after this change loads identically.
+OUTPUT_COLUMN_RENAMES = {'specie': 'species'}
+
+
+def output_column_names(columns):
+    """`columns` as the results CSV spells them."""
+    return [OUTPUT_COLUMN_RENAMES.get(column, column) for column in columns]
 
 
 # Stands in for one side of a rank label when that boundary of the feature falls
@@ -1355,7 +1420,8 @@ class ClusterAnalysisResult:
             gene_transcript_ids, exon_lookup)
 
         if not self._resolve_canonical(gene_transcript_ids, canonical_transcript_ids, canonical_rank,
-                                       coding_by_transcript, cds_length_by_transcript):
+                                       coding_by_transcript, cds_length_by_transcript,
+                                       self.protein_length_by_transcript):
             return
 
         self.canonical_exons = transcript_exons.get(self.canonical_transcript_id)
@@ -1468,6 +1534,18 @@ class ClusterAnalysisResult:
         # side only as an outcome of its own rather than as a domain change.
         self.coding_by_transcript = coding_by_transcript
 
+        # Rule 4 of _resolve_canonical() ranks the fallback by PROTEIN length.
+        # Present only when the frame carries the protein's length; a hand-built
+        # frame need not, and the rule then falls through to CDS length.
+        self.protein_length_by_transcript = {}
+        if 'length' in df_gene_transcripts.columns:
+            lengths = pd.to_numeric(df_gene_transcripts['length'], errors='coerce')
+            self.protein_length_by_transcript = {
+                tid: int(value)
+                for tid, value in zip(combined_ids, lengths)
+                if pd.notna(value) and coding_by_transcript.get(tid, True)
+            }
+
         # Where each transcript's coding sequence starts and ends, for the
         # canonical_junction_in_cds / alternative_junction_in_cds columns. Read here because this is
         # where the frame's protein columns have already been resolved.
@@ -1508,9 +1586,27 @@ class ClusterAnalysisResult:
         return transcript_exons, cds_length_by_transcript
 
     def _resolve_canonical(self, gene_transcript_ids, canonical_transcript_ids, canonical_rank,
-                           coding_by_transcript, cds_length_by_transcript):
+                           coding_by_transcript, cds_length_by_transcript,
+                           protein_length_by_transcript=None):
         """Set self.canonical_transcript_id. False when the gene has none and none
-        can stand in, the cluster being recorded as no_canonical_transcript."""
+        can stand in, the cluster being recorded as no_canonical_transcript.
+
+        The rule, in order:
+
+          1. Ensembl and NCBI both mark the SAME transcript (Ensembl_canonical and
+             MANE Select / RefSeq Select) -> that transcript.  CanonicalEnum.BOTH
+          2. They mark DIFFERENT transcripts -> the Ensembl-marked one.  ENSEMBL
+          3. Only NCBI marks one -> that one.                            REFSEQ
+          4. Neither marks one -> among transcripts with an associated Ensembl or
+             NCBI protein, the one coding the LONGEST PROTEIN.
+          5. No transcript has an associated protein -> the longest CDS.
+
+        1-3 fall out of ranking CanonicalEnum (BOTH=3 > ENSEMBL=2 > REFSEQ=1),
+        which is what canonical_rank carries. 4 and 5 are the fallback below;
+        coding_by_transcript is protein-id presence, not CDS presence, so it is
+        exactly the population rule 4 asks for. Ties break on the lowest id so the
+        choice does not depend on Python's per-process hash seed.
+        """
         gene_canonical_ids = canonical_transcript_ids.intersection(gene_transcript_ids)
         if not gene_canonical_ids:
             # No transcript flagged canonical - common for genes annotated by
@@ -1525,11 +1621,26 @@ class ClusterAnalysisResult:
                 self.add_event('no_canonical_transcript')
                 logger.debug(f"No canonical transcript found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
                 return False
-            self.canonical_transcript_id = select_longest_cds(fallback_candidates, cds_length_by_transcript)
+            # Rule 4 ranks the protein, rule 5 the CDS. They almost always agree
+            # (protein = CDS/3 - 1), but not where the CDS is annotated
+            # incomplete, and the rule names the protein - so use protein length
+            # whenever it is known for the candidates.
+            by_protein = bool(coding_ids) and bool(protein_length_by_transcript) and any(
+                tid in protein_length_by_transcript for tid in coding_ids)
+            if by_protein:
+                self.canonical_transcript_id = max(
+                    coding_ids,
+                    key=lambda tid: (protein_length_by_transcript.get(tid, -1), tid))
+                measure = (f"longest-protein transcript "
+                           f"({protein_length_by_transcript.get(self.canonical_transcript_id, -1)} aa)")
+            else:
+                self.canonical_transcript_id = select_longest_cds(
+                    fallback_candidates, cds_length_by_transcript)
+                measure = (f"longest-CDS transcript "
+                           f"({cds_length_by_transcript.get(self.canonical_transcript_id, -1)} bases)")
             logger.warning(
                 f"No canonical transcript for cluster {self.cluster_name}, specie {self.specie}. "
-                f"Using the longest-CDS transcript {self.canonical_transcript_id} "
-                f"(CDS {cds_length_by_transcript.get(self.canonical_transcript_id, -1)} bases) instead."
+                f"Using the {measure} {self.canonical_transcript_id} instead."
             )
             return True
 
@@ -1878,6 +1989,23 @@ class ClusterAnalysisResult:
                                alternative_junction_in_cds=transcript_in_cds)
                 continue
 
+            # Like protein_change above, a property of the transcripts rather
+            # than of any one domain group, so it is settled before the
+            # comparison. Either side failing invalidates the pair: a canonical
+            # domain at coordinates that are not its own mispositions every
+            # group it joins, and through the shared-name merge can drag in
+            # alternative domains that were fine.
+            if not (domain_coordinates_comparable(domain_lookup, self.canonical_transcript_id)
+                    and domain_coordinates_comparable(domain_lookup, transcript_id)):
+                self.add_event('unvalidated_domain_coordinates',
+                               alternative_transcript_id=transcript_id,
+                               is_longest_cds=is_longest_cds,
+                               is_most_like_canonical=is_most_like_canonical,
+                               group=group_index, rank=rank_label,
+                               canonical_junction_in_cds=canonical_in_cds,
+                               alternative_junction_in_cds=transcript_in_cds)
+                continue
+
             events = list(compare_domains(
                 domain_lookup, transcript_exons, self.canonical_transcript_id, transcript_id,
                 canonical_junctions, junction_idxs, self.junctions, self.strand, self.cds_spans,
@@ -1973,6 +2101,10 @@ NON_COMPARISON_EVENTS = frozenset({
     # Carries its group's junctions and could have been compared, but the
     # selection rule picked another transcript of the same group.
     'transcript_not_chosen',
+    # One side holds a domain whose coordinates were never established against
+    # the protein carrying them, so any comparison would measure the wrong
+    # residues. Per-transcript, not per-group: see domain_coordinates_comparable().
+    'unvalidated_domain_coordinates',
 })
 
 
@@ -2354,6 +2486,12 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
                         if summary is not None:
                             summary.add_frame(df_chunk)
 
+                        # Written-CSV spelling. See OUTPUT_COLUMN_RENAMES: the
+                        # rename happens here, at the write boundary, so the
+                        # in-memory name keeps matching the database column it
+                        # was read from.
+                        df_chunk = df_chunk.rename(columns=OUTPUT_COLUMN_RENAMES)
+
                         # Split on whether a domain comparison produced an
                         # outcome - NOT on filter_non_comparable's predicate,
                         # which asks a different question (did the transcript
@@ -2403,7 +2541,7 @@ def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_ins
                             shutil.copyfileobj(in_f, out_f)
                 log.info(f"[Writer] Final CSV written: {path} ({total_rows[directory]} rows)")
             else:
-                pd.DataFrame(columns=df_results_columns).to_csv(path, index=False)
+                pd.DataFrame(columns=output_column_names(df_results_columns)).to_csv(path, index=False)
                 log.info(f"[Writer] Empty results CSV written: {path}")
 
         if summary is not None:
@@ -2811,7 +2949,7 @@ class JunctionsAnalysis:
     # of the group represented it, so its domains were never even fetched.
     _SKIPPED_TRANSCRIPT_EVENTS = {
         'transcript_doesnt_have_junctions', 'no_unique_junctions', 'subsumed_by_larger_group',
-        'transcript_not_chosen',
+        'transcript_not_chosen', 'unvalidated_domain_coordinates',
     }
 
     def _comparable_transcript_ids(self, cluster_result):
