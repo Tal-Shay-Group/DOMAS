@@ -1,0 +1,50 @@
+DOMAS run summary
+=================
+
+DOMAS version: 1.0.0
+Date: <run time>
+
+3 event-gene pairs have at least one domain change - 50.00% of comparable pairs.
+
+Input source
+------------
+    Species : human, mouse
+    <tests>/short_H_vs_M_HN6.xlsx
+
+
+Alternative splicing events:
+----------------------------
+    Input alternative splicing events : 6
+    1 gene(s) :         6  100.00% of events
+
+
+Each event is analysed for each of the genes it is assigned to: 6 event-gene pairs
+----------------------------------------------------------------------------------
+    Comparable     :         6  100.00%
+    Non-comparable :         0    0.00%
+
+
+Junctions:
+----------
+    Unique junctions                             : 38
+    Junction-gene pairs                          : 38
+    Junction-gene pairs for genes in the database: 38
+
+
+Junction-gene pairing:
+----------------------
+    Matched to a transcript :        35   92.11% of evaluated
+    Not matched             :         3    7.89% of evaluated
+    Not evaluated           :         0
+
+
+Event / transcript-group / domain classification:
+-------------------------------------------------
+    Non-coding alternative :         2    6.90%
+    Domain gain            :         0    0.00%
+    Domain loss            :        11   37.93%
+    Longer domain          :         0    0.00%
+    Shorter domain         :         0    0.00%
+    No domain change       :         0    0.00%
+    No domains in region   :        16   55.17%
+    Total                  :        29  100.00%

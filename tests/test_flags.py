@@ -1,0 +1,1308 @@
+"""
+Tests for the restrict_pdf_to_comparable flag on
+JunctionsAnalysis.analyze_junctions(), and for the is_longest_cds /
+is_most_like_canonical tag columns it always produces, using the real
+fixture files ioe_example_junctions.csv (plain CSV format),
+short_H_vs_M_HN6.xlsx (hadas format), and category_examples_junctions.csv
+(hand-picked manual-review examples, one/two/three per results.csv
+event_type category - see tests/manual_review/category_examples/) against
+the local DoChaP database.
+"""
+import glob
+import json
+import os
+import shutil
+import sqlite3
+import sys
+import warnings
+
+import matplotlib
+matplotlib.use('Agg')  # headless rendering for PDF generation in tests
+
+import pandas as pd
+import pytest
+
+TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+CODE_DIR = os.path.normpath(os.path.join(TESTS_DIR, '..', 'code'))
+sys.path.insert(0, CODE_DIR)
+
+from junction_analisys import (  # noqa: E402
+    JunctionsAnalysis, ClusterAnalysisResult, NON_COMPARISON_EVENTS,
+    OUTPUT_EVENT_ORDER, RunSummary, non_compared_path, sort_output_rows,
+    summary_path,
+)
+from alternative_splicing import (  # noqa: E402
+    hadas_read_input_file, read_junctions_csv, leafcutter_read_input_files,
+)
+from utils import (  # noqa: E402
+    rmats2junctions, rmats_input_files, resolve_gene_symbols, voila2junctions,
+)
+from pdf_text_utils import (  # noqa: E402
+    PDF_TEXT_MANIFEST_FILENAME, build_pdf_text_manifest,
+)
+from summary_utils import portable_summary_lines  # noqa: E402
+
+IOE_CSV = os.path.join(TESTS_DIR, 'ioe_example_junctions.csv')
+HADAS_XLSX = os.path.join(TESTS_DIR, 'short_H_vs_M_HN6.xlsx')
+CATEGORY_EXAMPLES_CSV = os.path.join(TESTS_DIR, 'category_examples_junctions.csv')
+
+LEAFCUTTER_DIR = os.path.join(TESTS_DIR, 'leafcutter')
+LEAFCUTTER_SIG = os.path.join(LEAFCUTTER_DIR, 'leafcutter_ds_cluster_significance.txt')
+LEAFCUTTER_EFFECT = os.path.join(LEAFCUTTER_DIR, 'leafcutter_ds_effect_sizes.txt')
+# The full fixture has ~17k clusters (~15 min end-to-end); the default test runs a
+# fast subset (the leafcutter clusters for the rMATS subset's genes - see
+# _load_leafcutter_junctions), while the full run is available opt-in via
+# @pytest.mark.slow / --run-slow. This value sets the rMATS subset size that
+# selects those genes.
+LEAFCUTTER_SUBSET_CLUSTERS = 200
+
+RMATS_DIR = os.path.join(TESTS_DIR, 'rmats')
+# Same subset size as leafcutter (200 clusters), but spread evenly across the five
+# rMATS event types: a plain sorted-first-N slice would be all A3SS (it sorts first)
+# and would never exercise the SE/A5SS/MXE/RI feature conversion.
+RMATS_SUBSET_CLUSTERS = LEAFCUTTER_SUBSET_CLUSTERS
+
+MAJIQ_TSV = os.path.join(TESTS_DIR, 'majiq', 'NveB_Mono_voila.txt')
+
+# 20 events per SUPPA event type, each on a human gene DoChaP holds with more than
+# one transcript, so they reach a real comparison instead of only_one_transcript.
+IOE_DIR = os.path.join(TESTS_DIR, 'ioe')
+
+# Mirrors JunctionsAnalysis._SKIPPED_TRANSCRIPT_EVENTS plus the cluster-level
+# events that carry no real transcript id.
+_SKIPPED_EVENTS = {
+    'gene_not_in_db', 'no_gene_specified', 'transcript_doesnt_have_junctions', 'no_unique_junctions',
+    'no_canonical_transcript', 'only_one_transcript', 'no_canonical_junctions', 'novel_junction',
+}
+
+# restrict_pdf_to_comparable. The tie-break rules
+# (is_longest_cds/is_most_like_canonical) are tag columns now, not a separate axis.
+FLAG_COMBINATIONS = [False, True]
+
+INPUT_FILES = [
+    ('ioe_csv', IOE_CSV, False),
+    ('hadas_xlsx', HADAS_XLSX, True),
+    ('category_examples', CATEGORY_EXAMPLES_CSV, False),
+]
+
+REFERENCE_OUTPUTS_DIR = os.path.join(TESTS_DIR, 'reference_outputs')
+GENERATED_OUTPUTS_DIR = os.path.join(TESTS_DIR, 'generated_outputs')
+
+
+@pytest.fixture(scope='module')
+def con(db_path):
+    # None where neither DOMAS_TEST_DB nor --dochap named one. Checked before
+    # os.path.exists(), which raises a TypeError on None rather than skipping.
+    if not db_path:
+        pytest.skip("No DoChaP database: set DOMAS_TEST_DB or pass --dochap")
+    if not os.path.exists(db_path):
+        pytest.skip(f"DoChaP database not found at {db_path}")
+    connection = sqlite3.connect(db_path)
+    yield connection
+    connection.close()
+
+
+def _compared_transcript_ids(cluster_result):
+    """Transcript ids that were actually compared to the canonical transcript (not skipped)."""
+    df = cluster_result.get_results_df()
+    if len(df) == 0:
+        return set()
+    mask = ~df['event'].isin(_SKIPPED_EVENTS)
+    return set(df.loc[mask, 'alternative_transcript_id'].dropna())
+
+
+def _assert_tie_break_tags_are_consistent(results):
+    """Each tie-break rule tags at most one compared transcript per event group.
+
+    Per group, not per cluster: a cluster holding several distinct events runs the
+    selection separately for each, so one tagged transcript per group is expected.
+    """
+    for cluster_result in results:
+        df = cluster_result.get_results_df()
+        if len(df) == 0:
+            continue
+        for group, rows in df.groupby('group', dropna=True):
+            for col in ('is_longest_cds', 'is_most_like_canonical'):
+                tagged_transcripts = set(rows.loc[rows[col] == True, 'alternative_transcript_id'].dropna())
+                assert len(tagged_transcripts) <= 1, (
+                    f"Cluster {cluster_result.cluster_name} group {group} has "
+                    f"{len(tagged_transcripts)} transcripts tagged {col}=True "
+                    f"({tagged_transcripts}) - expected at most one."
+                )
+
+
+def _load_junctions(con, junctions_csv, hadas_format):
+    """Read a fixture file into a junctions DataFrame (file-reading is
+    alternative_splicing.py's job; JunctionsAnalysis.analyze_junctions() only takes
+    an already-loaded DataFrame)."""
+    return hadas_read_input_file(con, junctions_csv) if hadas_format else read_junctions_csv(junctions_csv)
+
+
+def _run_analysis(con, tmp_path, junctions_csv, hadas_format, restrict_pdf_to_comparable):
+    """Run analyze_junctions with cwd set to tmp_path (PDFs are written relative to cwd)."""
+    analysis = JunctionsAnalysis(con)
+    df_junctions = _load_junctions(con, junctions_csv, hadas_format)
+    output_path = str(tmp_path / 'results.csv')
+    cwd_before = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        results = analysis.analyze_junctions(
+            df_junctions=df_junctions,
+            output_path=output_path,
+            create_pdf=True,
+            num_workers=1,
+            restrict_pdf_to_comparable=restrict_pdf_to_comparable,
+            input_source=junctions_csv,
+            write_all_comparable=True,
+        )
+    finally:
+        os.chdir(cwd_before)
+    return results, output_path
+
+
+def test_write_all_comparable_off_keeps_one_transcript_and_drops_the_tags(con, tmp_path):
+    """The default (-write_all_comparable not given): each cluster is reduced to the
+    one transcript the selection rule picks, and the two tag columns are not written.
+
+    Every other test in the suite passes write_all_comparable=True, so this is the
+    only place the default path is exercised. Both halves matter: the reduction is
+    now applied before the comparison - the discarded transcripts' domains are never
+    fetched - so a regression there would silently change which rows exist, and the
+    columns would be True on every remaining row if they were still written.
+    """
+    analysis = JunctionsAnalysis(con)
+    df_junctions = _load_junctions(con, IOE_CSV, hadas_format=False)
+    output_path = str(tmp_path / 'results.csv')
+    analysis.analyze_junctions(
+        df_junctions=df_junctions,
+        output_path=output_path,
+        create_pdf=False,
+        num_workers=1,
+    )
+
+    df = pd.read_csv(output_path)
+    assert 'is_longest_cds' not in df.columns
+    assert 'is_most_like_canonical' not in df.columns
+
+    comparisons = df[~df['event_effect_on_domain'].isin(NON_COMPARISON_EVENTS)]
+    assert len(comparisons) > 0, "Expected at least one compared transcript"
+    per_cluster = comparisons.groupby('event')['alternative_transcript_id'].nunique()
+    assert (per_cluster == 1).all(), (
+        f"Clusters with more than one compared transcript: "
+        f"{per_cluster[per_cluster > 1].to_dict()}")
+
+    # The same run with the flag on must compare at least as many transcripts,
+    # and keep the tags - otherwise the reduction above proves nothing.
+    all_path = str(tmp_path / 'results_all.csv')
+    analysis.analyze_junctions(
+        df_junctions=_load_junctions(con, IOE_CSV, hadas_format=False),
+        output_path=all_path,
+        create_pdf=False,
+        num_workers=1,
+        write_all_comparable=True,
+    )
+    df_all = pd.read_csv(all_path)
+    assert 'is_longest_cds' in df_all.columns
+    assert 'is_most_like_canonical' in df_all.columns
+    all_comparisons = df_all[~df_all['event_effect_on_domain'].isin(NON_COMPARISON_EVENTS)]
+    assert all_comparisons['alternative_transcript_id'].nunique() >= comparisons['alternative_transcript_id'].nunique()
+
+
+@pytest.mark.parametrize('restrict_pdf_to_comparable', FLAG_COMBINATIONS)
+def test_ioe_csv_all_flag_combinations(con, tmp_path, restrict_pdf_to_comparable):
+    """analyze_junctions runs end-to-end on ioe_example_junctions.csv for every combination of the flags."""
+    results, output_path = _run_analysis(
+        con, tmp_path, IOE_CSV, hadas_format=False,
+        restrict_pdf_to_comparable=restrict_pdf_to_comparable,
+    )
+
+    assert len(results) > 0, "Expected at least one cluster to be analyzed"
+    assert os.path.exists(output_path), "Results CSV should have been written"
+
+    pdf_files = glob.glob(str(tmp_path / '*_junction_comparison.pdf'))
+    assert len(pdf_files) > 0, "Expected at least one PDF to be generated"
+
+    _assert_tie_break_tags_are_consistent(results)
+
+
+@pytest.mark.parametrize('restrict_pdf_to_comparable', FLAG_COMBINATIONS)
+def test_hadas_xlsx_all_flag_combinations(con, tmp_path, restrict_pdf_to_comparable):
+    """analyze_junctions runs end-to-end on short_H_vs_M_HN6.xlsx for every combination of the flags."""
+    results, output_path = _run_analysis(
+        con, tmp_path, HADAS_XLSX, hadas_format=True,
+        restrict_pdf_to_comparable=restrict_pdf_to_comparable,
+    )
+
+    assert len(results) > 0, "Expected at least one cluster to be analyzed"
+    assert os.path.exists(output_path), "Results CSV should have been written"
+
+    pdf_files = glob.glob(str(tmp_path / '*_junction_comparison.pdf'))
+    assert len(pdf_files) > 0, "Expected at least one PDF to be generated"
+
+    _assert_tie_break_tags_are_consistent(results)
+
+
+# ---------------------------------------------------------------------------
+# Automatic comparison against the committed golden reference outputs
+# ---------------------------------------------------------------------------
+
+def _case_name(label, restrict_pdf_to_comparable):
+    return f"{label}__restrict_{restrict_pdf_to_comparable}"
+
+
+def _run_case_to_dir(con, case_dir, junctions_csv, hadas_format, restrict_pdf_to_comparable):
+    """Run analyze_junctions, writing results.csv + PDFs into a freshly-created case_dir."""
+    if os.path.exists(case_dir):
+        shutil.rmtree(case_dir)
+    os.makedirs(case_dir)
+
+    df_junctions = _load_junctions(con, junctions_csv, hadas_format)
+    output_path = os.path.join(case_dir, 'results.csv')
+    cwd_before = os.getcwd()
+    os.chdir(case_dir)
+    try:
+        analysis = JunctionsAnalysis(con)
+        analysis.analyze_junctions(
+            df_junctions=df_junctions,
+            output_path=output_path,
+            create_pdf=True,
+            num_workers=1,
+            restrict_pdf_to_comparable=restrict_pdf_to_comparable,
+            input_source=junctions_csv,
+            write_all_comparable=True,
+        )
+    finally:
+        os.chdir(cwd_before)
+    return output_path
+
+
+def _compare_one_csv_to_reference(generated_csv, reference_csv):
+    """Assert generated_csv has the same rows as reference_csv, ignoring row order."""
+    df_generated = pd.read_csv(generated_csv).fillna('')
+    df_reference = pd.read_csv(reference_csv).fillna('')
+    sort_columns = list(df_reference.columns)
+    df_generated = df_generated.sort_values(sort_columns).reset_index(drop=True)
+    df_reference = df_reference.sort_values(sort_columns).reset_index(drop=True)
+    pd.testing.assert_frame_equal(df_generated, df_reference, check_dtype=False)
+
+
+def _summary_lines(path):
+    """A summary file's lines, with each input file made checkout-independent.
+
+    A real run records full paths, which differ between checkouts; the committed
+    reference stores them relative to tests/ - see summary_utils. Everything else
+    in the file is a count, and counts are what a golden reference checks.
+    """
+    with open(path) as handle:
+        return portable_summary_lines(handle.read().splitlines(), TESTS_DIR)
+
+
+def _write_reference_summary(generated_csv, reference_csv):
+    """Write a run's summary to its golden reference with the input files stored
+    relative to tests/, so the committed file names the fixtures it read without
+    carrying the absolute path of whichever checkout bootstrapped it."""
+    with open(summary_path(reference_csv), 'w') as handle:
+        handle.write('\n'.join(_summary_lines(summary_path(generated_csv))) + '\n')
+
+
+def _compare_summary_to_reference(generated_csv, reference_csv):
+    """Assert the run's summary matches the committed one, line for line."""
+    generated = summary_path(generated_csv)
+    reference = summary_path(reference_csv)
+    assert os.path.exists(generated), f"The run wrote no {generated}"
+    assert os.path.exists(reference), f"No reference committed at {reference}"
+    assert _summary_lines(generated) == _summary_lines(reference), (
+        f"{generated} does not match {reference}")
+
+
+def _compare_csv_to_reference(generated_csv, reference_csv):
+    """Assert every file the run produced matches the committed one, ignoring row
+    order.
+
+    All three: a run writes the compared rows to the named file, the rest to
+    non_<name>, and its counts to <name>_summary.txt. Checking only the first
+    would leave every non-comparison outcome - most of the rows - uncovered, and
+    the summary is the one place the run's totals are stated, so a miscount there
+    would otherwise go unnoticed. All three are required to exist on both sides,
+    so the split itself is asserted too.
+    """
+    if not os.path.exists(reference_csv):
+        pytest.skip(f"No reference output committed to compare against at {reference_csv}")
+
+    _compare_one_csv_to_reference(generated_csv, reference_csv)
+
+    generated_other = non_compared_path(generated_csv)
+    reference_other = non_compared_path(reference_csv)
+    assert os.path.exists(generated_other), f"The run wrote no {generated_other}"
+    assert os.path.exists(reference_other), f"No reference committed at {reference_other}"
+    _compare_one_csv_to_reference(generated_other, reference_other)
+
+    _compare_summary_to_reference(generated_csv, reference_csv)
+
+
+def _compare_pdf_text_to_reference(output_dir, reference_dir):
+    """Assert every PDF's extracted text in output_dir matches the golden manifest
+    in reference_dir, comparing text content rather than raw PDF bytes (which
+    differ run-to-run due to matplotlib's embedded CreationDate).
+    """
+    pytest.importorskip('PyPDF2')
+    reference_manifest_path = os.path.join(reference_dir, PDF_TEXT_MANIFEST_FILENAME)
+    if not os.path.exists(reference_manifest_path):
+        pytest.skip(f"No PDF text reference committed to compare against at {reference_manifest_path}")
+
+    with open(reference_manifest_path) as f:
+        reference_manifest = json.load(f)
+    generated_manifest = build_pdf_text_manifest(output_dir)
+
+    missing = sorted(set(reference_manifest) - set(generated_manifest))
+    extra = sorted(set(generated_manifest) - set(reference_manifest))
+    mismatched = sorted(
+        name for name in reference_manifest.keys() & generated_manifest.keys()
+        if reference_manifest[name] != generated_manifest[name]
+    )
+    assert not missing and not extra and not mismatched, (
+        f"PDF text mismatch vs {reference_manifest_path}: "
+        f"missing={missing}, extra={extra}, mismatched_content={mismatched}"
+    )
+
+
+@pytest.mark.parametrize('label,junctions_csv,hadas_format', INPUT_FILES)
+@pytest.mark.parametrize('restrict_pdf_to_comparable', FLAG_COMBINATIONS)
+def test_compare_against_reference_outputs(con, keep_test_output, label, junctions_csv, hadas_format,
+                                            restrict_pdf_to_comparable):
+    """Run analyze_junctions for this flag combination, writing its CSV/PDF output to
+    tests/generated_outputs/<case_name>/, then compare the resulting results.csv
+    against the golden reference under tests/reference_outputs/<case_name>/.
+
+    The generated output directory is deleted after a successful comparison by
+    default. Pass --keep-test-output on the pytest command line to keep it
+    (e.g. to inspect the PDFs by hand).
+    """
+    case_name = _case_name(label, restrict_pdf_to_comparable)
+    output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
+    reference_dir = os.path.join(REFERENCE_OUTPUTS_DIR, case_name)
+    reference_csv = os.path.join(reference_dir, 'results.csv')
+
+    generated_csv = _run_case_to_dir(
+        con, output_dir, junctions_csv, hadas_format, restrict_pdf_to_comparable,
+    )
+
+    pdf_files = glob.glob(os.path.join(output_dir, '*_junction_comparison.pdf'))
+    assert len(pdf_files) > 0, f"Expected at least one PDF to be generated in {output_dir}"
+
+    _compare_csv_to_reference(generated_csv, reference_csv)
+    _compare_pdf_text_to_reference(output_dir, reference_dir)
+
+    if not keep_test_output:
+        shutil.rmtree(output_dir)
+
+
+# ---------------------------------------------------------------------------
+# LeafCutter input: golden-reference comparison
+#
+# Reads the pair of leafcutter_ds output files under tests/leafcutter/ via
+# alternative_splicing.leafcutter_read_input_files(), runs the domain analysis
+# with representative domains, and compares results.csv to a committed golden
+# reference. The reference is created on the first run (bootstrap), then
+# compared against on every run after. No PDFs (the leafcutter path never
+# generates them, and there are far too many clusters for that anyway).
+# ---------------------------------------------------------------------------
+
+def _load_leafcutter_junctions(con, subset):
+    """Load the leafcutter fixture into a junctions DataFrame.
+
+    When `subset` is None (the full test) every cluster is kept. Otherwise the
+    subset is the leafcutter clusters whose gene appears in the rMATS subset
+    (`_rmats_subset_df(subset)`): this way the leafcutter and rMATS subset tests
+    analyze the *same genes* - genes that in rMATS span all five event types - so
+    their domain-analysis outputs can be compared tool-to-tool. `subset` sets the
+    size of that rMATS subset."""
+    df = leafcutter_read_input_files(con, LEAFCUTTER_SIG, LEAFCUTTER_EFFECT)
+    if subset is None:
+        return df
+    rmats_genes = set(_rmats_subset_df(subset)['gene_ensembl_id'].dropna().unique())
+    return df[df['gene_ensembl_id'].isin(rmats_genes)].copy()
+
+
+def _run_leafcutter_case_to_dir(con, case_dir, subset):
+    """Run analyze_junctions (representative domains, no PDFs) on the leafcutter
+    fixture, writing results.csv into a freshly-created case_dir."""
+    if os.path.exists(case_dir):
+        shutil.rmtree(case_dir)
+    os.makedirs(case_dir)
+
+    df_junctions = _load_leafcutter_junctions(con, subset)
+    output_path = os.path.join(case_dir, 'results.csv')
+    analysis = JunctionsAnalysis(con)
+    analysis.analyze_junctions(
+        df_junctions=df_junctions,
+        output_path=output_path,
+        create_pdf=False,
+        num_workers=1,
+        input_source=[LEAFCUTTER_SIG, LEAFCUTTER_EFFECT],
+        write_all_comparable=True,
+    )
+    return output_path
+
+
+def _compare_or_create_reference(generated_csv, reference_csv):
+    """Compare the run's result files to the golden references (ignoring row
+    order). On the first run, when no reference exists yet, create them from the
+    generated output and pass, so the references are bootstrapped.
+
+    Both files where the run wrote both - the compared rows under the named path
+    and the rest under non_<name> - plus the <name>_summary.txt beside them. A
+    run with filter_non_comparable writes no non_<name>, and then only the other
+    two are compared.
+    """
+    generated = [generated_csv]
+    reference = [reference_csv]
+    if os.path.exists(non_compared_path(generated_csv)):
+        generated.append(non_compared_path(generated_csv))
+        reference.append(non_compared_path(reference_csv))
+
+    if not os.path.exists(reference_csv):
+        os.makedirs(os.path.dirname(reference_csv), exist_ok=True)
+        for source, target in zip(generated, reference):
+            shutil.copyfile(source, target)
+        _write_reference_summary(generated_csv, reference_csv)
+        warnings.warn(
+            f"Created new golden reference at {reference_csv} (first run); "
+            f"re-run the test to compare against it.")
+        return
+
+    for source, target in zip(generated, reference):
+        assert os.path.exists(target), f"No reference committed at {target}"
+        _compare_one_csv_to_reference(source, target)
+
+    _compare_summary_to_reference(generated_csv, reference_csv)
+
+
+def test_full_scale_ioe_compare_against_reference(con, tmp_path, ioe_input_dir,
+                                                   ioe_output_file, ioe_max_clusters,
+                                                   ioe_specie):
+    """Run a directory of real SUPPA .ioe files and compare the result to a stored
+    CSV. Both live outside the repo - a whole H_sapiens directory is ~200 MB of
+    input and its output runs to millions of rows - so the paths are supplied:
+
+        pytest tests/test_flags.py -k full_scale_ioe \\
+            --dochap /path/DB_merged.sqlite \\
+            --ioe-input-dir  ../domas_extra/external_data/H_sapiens \\
+            --ioe-output-file ../domas_extra/ioe_full_results.csv \\
+            --ioe-max-clusters 200
+
+    Skipped unless both paths are given, so the default suite stays self-contained.
+    The output file is created from the run when absent, matching how the in-repo
+    references bootstrap.
+    """
+    if not ioe_input_dir or not ioe_output_file:
+        pytest.skip("needs --ioe-input-dir and --ioe-output-file")
+    if not os.path.isdir(ioe_input_dir):
+        pytest.skip(f"ioe input directory not found at {ioe_input_dir}")
+
+    import alternative_splicing
+
+    generated_csv = str(tmp_path / 'ioe_results.csv')
+    alternative_splicing.analyze_ioe_files(
+        con, input_path=ioe_input_dir, pattern=r"(output_prefix_|events_).*_strict\.ioe",
+        output_csv=generated_csv, specie=ioe_specie, examples_per_event=0,
+        num_workers=4,
+        max_clusters=ioe_max_clusters, filter_non_comparable=True,
+    )
+
+    assert os.path.exists(generated_csv), "the ioe run produced no output csv"
+    _compare_or_create_reference(generated_csv, ioe_output_file)
+
+
+def test_leafcutter_subset_compare_against_reference(con, keep_test_output):
+    """Default (fast) leafcutter golden test: the leafcutter clusters for the
+    genes in the rMATS subset (so it covers the same genes as the rMATS test,
+    which span all five event types), representative domains. Bootstraps its
+    reference on first run."""
+    case_name = 'leafcutter_subset'
+    output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
+    reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
+
+    generated_csv = _run_leafcutter_case_to_dir(con, output_dir, subset=LEAFCUTTER_SUBSET_CLUSTERS)
+    assert os.path.getsize(generated_csv) > 0, "Results CSV should not be empty"
+
+    _compare_or_create_reference(generated_csv, reference_csv)
+
+    if not keep_test_output:
+        shutil.rmtree(output_dir)
+
+
+@pytest.mark.slow
+def test_leafcutter_full_compare_against_reference(con, keep_test_output):
+    """Full leafcutter golden test over all ~17k clusters (~15 min). Opt in with
+    --run-slow; skipped by default. Bootstraps its reference on first run."""
+    case_name = 'leafcutter_full'
+    output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
+    reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
+
+    generated_csv = _run_leafcutter_case_to_dir(con, output_dir, subset=None)
+    assert os.path.getsize(generated_csv) > 0, "Results CSV should not be empty"
+
+    _compare_or_create_reference(generated_csv, reference_csv)
+
+    if not keep_test_output:
+        shutil.rmtree(output_dir)
+
+
+# ---------------------------------------------------------------------------
+# rMATS input: golden-reference comparison
+#
+# Reads the five [Event].MATS.JC.txt files under tests/rmats/ via
+# utils.rmats2junctions(), runs the domain analysis with representative domains,
+# and compares results.csv to a committed golden reference (bootstrapped on the
+# first run). Same 200-cluster subset size as the leafcutter test, but spread
+# across the five event types for coverage. No PDFs.
+# ---------------------------------------------------------------------------
+
+def _rmats_subset_df(subset):
+    """The deterministic rMATS subset used by the rMATS test: `subset` clusters
+    spread evenly across the five event types (sorted within each type). `subset`
+    None returns every event. Also drives the leafcutter and MAJIQ subsets' gene
+    sets - changing which event types are read therefore changes those tests'
+    gene set too."""
+    df = rmats2junctions(RMATS_DIR)
+    if subset is None:
+        return df
+
+    event_types = sorted(df['event_type'].unique())
+    per_type = max(1, subset // len(event_types))
+    keep = []
+    for event_type in event_types:
+        et_clusters = sorted(df.loc[df['event_type'] == event_type, 'cluster_name'].unique())
+        keep.extend(et_clusters[:per_type])
+    return df[df['cluster_name'].isin(keep)].copy()
+
+
+def _load_rmats_junctions(subset):
+    """Load the rMATS fixture, optionally reduced to the deterministic subset."""
+    return _rmats_subset_df(subset)
+
+
+def _run_rmats_case_to_dir(con, case_dir, subset, filter_non_comparable=False):
+    """Run analyze_junctions (representative domains, no PDFs) on the rMATS
+    fixture, writing results.csv into a freshly-created case_dir."""
+    if os.path.exists(case_dir):
+        shutil.rmtree(case_dir)
+    os.makedirs(case_dir)
+
+    df_junctions = _load_rmats_junctions(subset)
+    output_path = os.path.join(case_dir, 'results.csv')
+    analysis = JunctionsAnalysis(con)
+    analysis.analyze_junctions(
+        df_junctions=df_junctions,
+        output_path=output_path,
+        create_pdf=False,
+        num_workers=1,
+        filter_non_comparable=filter_non_comparable,
+        input_source=rmats_input_files(RMATS_DIR),
+        write_all_comparable=True,
+    )
+    return output_path
+
+
+def test_rmats_subset_compare_against_reference(con, keep_test_output):
+    """Default (fast) rMATS golden test: a deterministic subset of
+    `RMATS_SUBSET_CLUSTERS` clusters spread across the five event types,
+    representative domains. Bootstraps its reference on first run."""
+    case_name = 'rmats_subset'
+    output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
+    reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
+
+    generated_csv = _run_rmats_case_to_dir(con, output_dir, subset=RMATS_SUBSET_CLUSTERS)
+    assert os.path.getsize(generated_csv) > 0, "Results CSV should not be empty"
+
+    _compare_or_create_reference(generated_csv, reference_csv)
+
+    if not keep_test_output:
+        shutil.rmtree(output_dir)
+
+
+# events that mark a transcript/cluster that was NOT compared to canonical -
+# mirrors junction_analisys.NON_COMPARISON_EVENTS; filter_non_comparable drops these.
+_NON_COMPARISON_EVENTS = {
+    'gene_not_in_db', 'no_gene_specified', 'no_canonical_transcript', 'only_one_transcript',
+    'no_canonical_junctions', 'novel_junction',
+    'transcript_doesnt_have_junctions', 'no_unique_junctions',
+}
+
+
+def test_rmats_subset_filter_non_comparable_compare_against_reference(con, keep_test_output):
+    """rMATS subset run with filter_non_comparable=True: the output must contain
+    only transcripts that were actually compared to canonical. Verifies no
+    non-comparison event survives, then compares to a committed golden reference
+    (bootstrapped on first run)."""
+    case_name = 'rmats_subset_filtered'
+    output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
+    reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
+
+    generated_csv = _run_rmats_case_to_dir(
+        con, output_dir, subset=RMATS_SUBSET_CLUSTERS, filter_non_comparable=True)
+    assert os.path.getsize(generated_csv) > 0, "Results CSV should not be empty"
+
+    # the filter's contract: no skip/non-comparison rows remain
+    df = pd.read_csv(generated_csv)
+    leaked = set(df['event_effect_on_domain']) & _NON_COMPARISON_EVENTS
+    assert not leaked, f"filter_non_comparable left non-comparison events in the output: {leaked}"
+
+    _compare_or_create_reference(generated_csv, reference_csv)
+
+    if not keep_test_output:
+        shutil.rmtree(output_dir)
+
+
+# ---------------------------------------------------------------------------
+# MAJIQ input: golden-reference comparison
+#
+# Reads the voila TSV under tests/majiq/ via utils.voila2junctions(), runs the
+# domain analysis with representative domains, and compares results.csv to a
+# committed golden reference (bootstrapped on first run). Like the leafcutter
+# subset, the subset is the LSVs for the genes in the rMATS subset - so the
+# leafcutter, rMATS and MAJIQ subset tests all cover the same genes and their
+# outputs can be compared across all three tools. No PDFs.
+# ---------------------------------------------------------------------------
+
+def _load_majiq_junctions(subset):
+    """Load the MAJIQ voila TSV into a junctions DataFrame. When `subset` is set,
+    keep only the LSVs whose gene appears in the rMATS subset, so this test
+    covers the same genes as the leafcutter and rMATS subset tests."""
+    df = voila2junctions(MAJIQ_TSV)
+    if subset is None:
+        return df
+    rmats_genes = set(_rmats_subset_df(subset)['gene_ensembl_id'].dropna().unique())
+    return df[df['gene_ensembl_id'].isin(rmats_genes)].copy()
+
+
+def _run_majiq_case_to_dir(con, case_dir, subset):
+    """Run analyze_junctions (representative domains, no PDFs) on the MAJIQ
+    fixture, writing results.csv into a freshly-created case_dir."""
+    if os.path.exists(case_dir):
+        shutil.rmtree(case_dir)
+    os.makedirs(case_dir)
+
+    df_junctions = _load_majiq_junctions(subset)
+    output_path = os.path.join(case_dir, 'results.csv')
+    analysis = JunctionsAnalysis(con)
+    analysis.analyze_junctions(
+        df_junctions=df_junctions,
+        output_path=output_path,
+        create_pdf=False,
+        num_workers=1,
+        input_source=MAJIQ_TSV,
+        write_all_comparable=True,
+    )
+    return output_path
+
+
+def test_majiq_subset_compare_against_reference(con, keep_test_output):
+    """Default (fast) MAJIQ golden test: the LSVs for the genes in the rMATS
+    subset (same genes as the leafcutter/rMATS subset tests), representative
+    domains. Bootstraps its reference on first run."""
+    case_name = 'majiq_subset'
+    output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
+    reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
+
+    generated_csv = _run_majiq_case_to_dir(con, output_dir, subset=RMATS_SUBSET_CLUSTERS)
+    assert os.path.getsize(generated_csv) > 0, "Results CSV should not be empty"
+
+    _compare_or_create_reference(generated_csv, reference_csv)
+
+    if not keep_test_output:
+        shutil.rmtree(output_dir)
+
+
+def _run_ioe_case_to_dir(con, case_dir):
+    """Run the SUPPA reader over tests/ioe (representative domains, no PDFs),
+    writing results.csv into a freshly-created case_dir."""
+    if os.path.exists(case_dir):
+        shutil.rmtree(case_dir)
+    os.makedirs(case_dir)
+
+    import alternative_splicing
+
+    output_path = os.path.join(case_dir, 'results.csv')
+    alternative_splicing.analyze_ioe_files(
+        con, input_path=IOE_DIR, pattern=r"output_prefix_.*_strict\.ioe",
+        output_csv=output_path, specie='human', examples_per_event=0,
+        num_workers=1,
+        write_all_comparable=True,
+    )
+    return output_path
+
+
+def test_ioe_directory_compare_against_reference(con, keep_test_output):
+    """Default (fast) SUPPA golden test over tests/ioe: 20 events per event type
+    (A3, A5, AF, AL, MX, RI, SE), each on a gene DoChaP holds with more than one
+    transcript, so the events reach a real domain comparison. Covers the reader's
+    per-type coordinate handling - the constructed SE skipping junction and the
+    RI junction/retained-intron pair among them - which the single-file fixtures
+    do not. Bootstraps its reference on first run."""
+    case_name = 'ioe_directory'
+    output_dir = os.path.join(GENERATED_OUTPUTS_DIR, case_name)
+    reference_csv = os.path.join(REFERENCE_OUTPUTS_DIR, case_name, 'results.csv')
+
+    generated_csv = _run_ioe_case_to_dir(con, output_dir)
+    assert os.path.getsize(generated_csv) > 0, "Results CSV should not be empty"
+
+    df = pd.read_csv(generated_csv)
+    types = {c.split('_', 1)[0] for c in df['event']}
+    assert types == {'A3', 'A5', 'AF', 'AL', 'MX', 'RI', 'SE'}, (
+        f"Expected every SUPPA event type to survive to the output, got {sorted(types)}")
+
+    _compare_or_create_reference(generated_csv, reference_csv)
+
+    if not keep_test_output:
+        shutil.rmtree(output_dir)
+
+
+# ---------------------------------------------------------------------------
+# Focused, DB-independent unit tests for the two new pieces of logic
+# ---------------------------------------------------------------------------
+
+def test_gene_not_in_database():
+    """When a gene is not in the database (empty df_gene_transcripts), the 'gene_not_in_db'
+    event is added and analysis is skipped."""
+    cluster_result = ClusterAnalysisResult('TEST_1', 'ENSG99999999', 'FAKEGENE', specie='H_sapiens')
+    empty_df = pd.DataFrame(columns=['transcript_ensembl_id', 'transcript_refseq_id', 'cds_start', 'cds_end'])
+
+    cluster_result.analyze(
+        df_gene_transcripts=empty_df,
+        canonical_transcript_ids=set(),
+        exon_lookup=lambda x: pd.DataFrame(),
+        domain_lookup=lambda x: pd.DataFrame(),
+    )
+
+    # Should have exactly one event: gene_not_in_db
+    assert len(cluster_result.events) == 1
+    assert cluster_result.events[0][0] == 'gene_not_in_db'
+
+
+def test_no_canonical_transcript_falls_back_instead_of_skipping():
+    """A gene that IS in the database but has no canonical transcript is no longer
+    skipped: the longest-CDS transcript stands in as canonical, so 'no_canonical_transcript'
+    is not what comes back. (Here the exons are empty, so the run stops one step later
+    at 'no_canonical_junctions' - the point is that it got past canonical selection.)"""
+    cluster_result = ClusterAnalysisResult('TEST_1', 'ENSG12345678', 'KNOWNGENE', specie='H_sapiens')
+    # DataFrame with transcripts but no canonical ones (empty canonical_transcript_ids)
+    df_with_transcripts = pd.DataFrame({
+        'transcript_ensembl_id': ['ENST00000001', 'ENST00000002'],
+        'transcript_refseq_id': [None, None],
+        'cds_start': [100, 200],
+        'cds_end': [500, 600]
+    })
+
+    cluster_result.analyze(
+        df_gene_transcripts=df_with_transcripts,
+        canonical_transcript_ids=set(),  # Empty - no canonical transcripts available
+        exon_lookup=lambda x: pd.DataFrame(),
+        domain_lookup=lambda x: pd.DataFrame(),
+    )
+
+    assert cluster_result.canonical_transcript_id in {'ENST00000001', 'ENST00000002'}
+    assert [e[0] for e in cluster_result.events] != ['no_canonical_transcript']
+
+
+def test_no_canonical_transcript_when_no_usable_transcript_id():
+    """The 'no_canonical_transcript' event survives for the one case the fallback
+    cannot cover: a gene row present in the database, but with no usable transcript
+    id to stand in as canonical."""
+    cluster_result = ClusterAnalysisResult('TEST_1', 'ENSG12345678', 'KNOWNGENE', specie='H_sapiens')
+    # Present in the DB, but neither an ensembl nor a refseq id on any row - the
+    # placeholder ids are dropped, leaving nothing to choose between.
+    df_with_transcripts = pd.DataFrame({
+        'transcript_ensembl_id': [None, None],
+        'transcript_refseq_id': [None, None],
+        'cds_start': [100, 200],
+        'cds_end': [500, 600]
+    })
+
+    cluster_result.analyze(
+        df_gene_transcripts=df_with_transcripts,
+        canonical_transcript_ids=set(),
+        exon_lookup=lambda x: pd.DataFrame(),
+        domain_lookup=lambda x: pd.DataFrame(),
+    )
+
+    assert len(cluster_result.events) == 1
+    assert cluster_result.events[0][0] == 'no_canonical_transcript'
+
+
+def test_comparable_transcript_ids_excludes_skipped_events():
+    """JunctionsAnalysis._comparable_transcript_ids keeps the canonical id plus only the
+    transcripts that were actually compared, dropping every skip-event transcript."""
+    analysis = JunctionsAnalysis.__new__(JunctionsAnalysis)  # no real db connection needed
+
+    cluster_result = ClusterAnalysisResult('cluster_1', 'ENSG00001', 'GENE1')
+    cluster_result.canonical_transcript_id = 'ENST_CANON'
+    cluster_result.add_event('domain_gain', alternative_transcript_id='ENST_COMPARED')
+    cluster_result.add_event('no_domains_in_region', alternative_transcript_id='ENST_COMPARED_2')
+    cluster_result.add_event('transcript_doesnt_have_junctions', alternative_transcript_id='ENST_NO_JUNCTIONS')
+    cluster_result.add_event('no_unique_junctions', alternative_transcript_id='ENST_NOT_UNIQUE')
+
+    comparable_ids = analysis._comparable_transcript_ids(cluster_result)
+
+    assert comparable_ids == {'ENST_CANON', 'ENST_COMPARED', 'ENST_COMPARED_2'}
+
+
+def test_comparable_transcript_ids_handles_no_events():
+    """With no events recorded at all, only the canonical transcript id is comparable."""
+    analysis = JunctionsAnalysis.__new__(JunctionsAnalysis)
+    cluster_result = ClusterAnalysisResult('cluster_1', 'ENSG00001', 'GENE1')
+    cluster_result.canonical_transcript_id = 'ENST_CANON'
+
+    assert analysis._comparable_transcript_ids(cluster_result) == {'ENST_CANON'}
+
+
+def test_transcript_matches_ids_checks_both_id_columns():
+    """GeneVisualization._transcript_matches_ids matches on either ensembl or refseq id."""
+    from generate_gene_pdf import GeneVisualization
+
+    viz = GeneVisualization(conn=None, gene_name='GENE1')
+
+    ensembl_only = {'info': pd.Series({'transcript_ensembl_id': 'ENST1', 'transcript_refseq_id': None})}
+    refseq_only = {'info': pd.Series({'transcript_ensembl_id': None, 'transcript_refseq_id': 'NM_1'})}
+    neither = {'info': pd.Series({'transcript_ensembl_id': 'ENST2', 'transcript_refseq_id': 'NM_2'})}
+
+    wanted_ids = {'ENST1', 'NM_1'}
+    assert viz._transcript_matches_ids(ensembl_only, wanted_ids) is True
+    assert viz._transcript_matches_ids(refseq_only, wanted_ids) is True
+    assert viz._transcript_matches_ids(neither, wanted_ids) is False
+
+
+def test_create_pdf_transcript_ids_filters_transcripts(tmp_path, capsys):
+    """create_pdf(transcript_ids=...) with no matching transcripts produces no PDF
+    and a clear message instead of raising."""
+    from generate_gene_pdf import GeneVisualization
+
+    gene_data = pd.Series({
+        'gene_ensembl_id': 'ENSG00001', 'gene_symbol': 'GENE1',
+        'chromosome': '1', 'strand': '+', 'specie': 'H_sapiens',
+    })
+    preloaded = {'gene_data': gene_data, 'transcripts': []}
+    viz = GeneVisualization(conn=None, gene_name='GENE1', preloaded=preloaded)
+    viz.load_gene_data()
+
+    output_file = str(tmp_path / 'no_match.pdf')
+    viz.create_pdf(output_file, transcript_ids={'NOT_A_REAL_TRANSCRIPT'})
+
+    captured = capsys.readouterr()
+    assert 'None of the specified transcripts were found' in captured.out
+    assert not os.path.exists(output_file), "No PDF should be written when there are no valid transcripts"
+
+
+def test_create_pdf_transcript_ids_filters_real_gene(con, tmp_path):
+    """create_pdf(transcript_ids=...) against a real, multi-transcript gene only draws
+    the requested transcript(s) - verified by the resulting PDF's page count.
+    """
+    PyPDF2 = pytest.importorskip('PyPDF2')
+    from generate_gene_pdf import GeneVisualization, prepare_gene_data_bulk
+
+    gene_ensembl_id = 'ENSG00000174456'  # C12orf76 - has 12 ensembl transcripts in the DB
+    one_transcript_id = 'ENST00000615315.2'
+
+    preloaded_all = prepare_gene_data_bulk(con, [gene_ensembl_id])
+    assert gene_ensembl_id in preloaded_all, f"Fixture gene {gene_ensembl_id} not found in the local DB"
+    num_real_transcripts = len(preloaded_all[gene_ensembl_id]['transcripts'])
+    assert num_real_transcripts > 4, (
+        "Fixture gene is expected to have more transcripts than fit on one page "
+        "(transcripts_per_page default is 4); the local DB content may have changed."
+    )
+
+    unrestricted_pdf = str(tmp_path / 'unrestricted.pdf')
+    viz_all = GeneVisualization(con, 'C12orf76', preloaded=preloaded_all[gene_ensembl_id])
+    viz_all.create_pdf(unrestricted_pdf)
+    unrestricted_pages = len(PyPDF2.PdfReader(unrestricted_pdf).pages)
+
+    restricted_pdf = str(tmp_path / 'restricted.pdf')
+    preloaded_again = prepare_gene_data_bulk(con, [gene_ensembl_id])
+    viz_one = GeneVisualization(con, 'C12orf76', preloaded=preloaded_again[gene_ensembl_id])
+    viz_one.create_pdf(restricted_pdf, transcript_ids={one_transcript_id})
+    restricted_pages = len(PyPDF2.PdfReader(restricted_pdf).pages)
+
+    assert unrestricted_pages > 1, "Sanity check: unrestricted PDF should span more than one page"
+    assert restricted_pages == 1, "Restricting to a single transcript should always fit on one page"
+    assert restricted_pages < unrestricted_pages
+
+
+# ---------------------------------------------------------------------------
+# summary.txt: the run-level counters, without touching the database
+# ---------------------------------------------------------------------------
+
+def _summary_cluster(cluster, gene, junctions, events, features_matched):
+    """A ClusterAnalysisResult filled in by hand, standing in for one the
+    analysis produced - RunSummary reads only these few attributes."""
+    result = ClusterAnalysisResult(cluster, gene, gene, specie='human')
+    result.junctions = junctions
+    result.features_matched = features_matched
+    for event, transcript in events:
+        result.add_event(event, alternative_transcript_id=transcript)
+    return result
+
+
+def _genes_db(rows):
+    """An in-memory Genes table, so the symbol resolution is tested against known
+    content rather than whatever the local DoChaP build happens to hold."""
+    con = sqlite3.connect(':memory:')
+    con.execute('CREATE TABLE Genes (gene_ensembl_id TEXT, gene_GeneID_id TEXT, '
+                'gene_symbol TEXT, synonyms TEXT, specie TEXT)')
+    con.executemany('INSERT INTO Genes VALUES (?,?,?,?,?)',
+                    [(e, g, s, syn, 'H_sapiens') for e, g, s, syn in rows])
+    return con
+
+
+def test_symbol_resolution_prefers_the_current_symbol():
+    """A symbol that IS a gene resolves to that gene, even when another gene
+    lists it as a synonym - a rename must never shadow a live symbol."""
+    con = _genes_db([('ENSG1', '1', 'REALGENE', None),
+                     ('ENSG2', '2', 'OTHER', 'REALGENE')])
+    assert resolve_gene_symbols(con, ['REALGENE'], 'H_sapiens') == {'REALGENE': 'ENSG1'}
+
+
+def test_symbol_resolution_falls_back_to_a_synonym():
+    """The case this exists for: the input names a gene by its old symbol."""
+    con = _genes_db([('ENSG1', '1', 'HAPSTR1', 'C16orf72')])
+    assert resolve_gene_symbols(con, ['C16orf72'], 'H_sapiens') == {'C16ORF72': 'ENSG1'}
+    # and both separators are read, since the two builders disagree
+    con2 = _genes_db([('ENSG1', '1', 'NEW', 'OLD1; OLD2'),
+                      ('ENSG2', '2', 'NEW2', 'OLD3,OLD4')])
+    got = resolve_gene_symbols(con2, ['OLD2', 'OLD4'], 'H_sapiens')
+    assert got == {'OLD2': 'ENSG1', 'OLD4': 'ENSG2'}
+
+
+def test_symbol_resolution_leaves_an_ambiguous_synonym_unresolved():
+    """Two genes claiming the same old symbol: picking one would attribute the
+    event to the wrong gene silently, which is worse than not placing it."""
+    con = _genes_db([('ENSG1', '1', 'GENEA', 'SHARED'),
+                     ('ENSG2', '2', 'GENEB', 'SHARED')])
+    assert resolve_gene_symbols(con, ['SHARED'], 'H_sapiens') == {}
+
+
+def test_symbol_resolution_does_not_answer_with_a_readthrough():
+    """BORCS8-MEF2B lists MEF2B as a synonym, but it is a different locus with
+    its own transcripts and protein. Answering MEF2B with it would analyse the
+    wrong gene; gene_not_in_db is the honest outcome."""
+    con = _genes_db([('ENSG1', '1', 'BORCS8-MEF2B', 'MEF2B; LOC729991-MEF2B')])
+    assert resolve_gene_symbols(con, ['MEF2B'], 'H_sapiens') == {}
+    # the readthrough's own symbol still resolves
+    assert resolve_gene_symbols(con, ['BORCS8-MEF2B'], 'H_sapiens') == {
+        'BORCS8-MEF2B': 'ENSG1'}
+
+
+def test_symbol_resolution_uses_the_geneid_when_there_is_no_ensembl_id():
+    """13% of DoChaP genes carry no gene_ensembl_id; resolving to that column
+    alone would yield None and drop the gene before analysis."""
+    con = _genes_db([(None, '4207', 'NEWNAME', 'OLDNAME')])
+    assert resolve_gene_symbols(con, ['OLDNAME'], 'H_sapiens') == {'OLDNAME': '4207'}
+
+
+def test_non_compared_path_prefixes_the_name_not_the_directory():
+    assert non_compared_path('compared.csv') == 'non_compared.csv'
+    assert non_compared_path(os.path.join('out', 'results.csv')) == os.path.join('out', 'non_results.csv')
+
+
+def test_run_summary_lists_every_input_file():
+    """Each file on its own line - an rMATS directory is five of them, and which
+    ones were there is part of what the run was."""
+    files = ['/data/SE.MATS.JC.txt', '/data/RI.MATS.JC.txt']
+    text = RunSummary(input_source=files).text()
+    for one in files:
+        assert f'    {one}' in text.splitlines()
+    assert 'passed in as a DataFrame' in RunSummary().text()
+    # A bare string is one file, not a list of characters.
+    assert RunSummary(input_source='one.csv').input_source == ['one.csv']
+
+
+def test_summary_records_full_paths_but_references_store_them_relative(tmp_path):
+    """A run's own summary carries the full path of every input. What is
+    committed under reference_outputs/ has them relative to tests/, so the same
+    run compares equal from any checkout and still names its fixtures."""
+    def written(sources, name):
+        summary = RunSummary(input_source=sources)
+        summary.input_clusters = 3
+        path = tmp_path / f'{name}_summary.txt'
+        summary.write(str(path))
+        return path
+
+    path = written([os.path.join(RMATS_DIR, 'SE.MATS.JC.txt'), IOE_CSV], 'fixtures')
+    written_lines = path.read_text().splitlines()
+    assert f'    {os.path.join(RMATS_DIR, "SE.MATS.JC.txt")}' in written_lines
+    assert f'    {IOE_CSV}' in written_lines
+
+    reference_lines = _summary_lines(str(path))
+    assert '    <tests>/rmats/SE.MATS.JC.txt' in reference_lines
+    assert '    <tests>/ioe_example_junctions.csv' in reference_lines
+    assert TESTS_DIR not in '\n'.join(reference_lines)
+    # Everything after the block still counts.
+    assert any('Input alternative splicing events' in line for line in reference_lines)
+    # A path outside the tests tree has nothing stable to rewrite against.
+    assert '    /elsewhere/in.csv' in _summary_lines(str(written(['/elsewhere/in.csv'], 'out')))
+
+
+def test_summary_path_is_named_after_the_output_csv():
+    """Named after the CSV so runs sharing an output directory - one per input
+    table - do not overwrite each other's summary."""
+    assert summary_path('compared.csv') == 'compared_summary.txt'
+    assert summary_path(os.path.join('out', 'table05.csv')) == os.path.join('out', 'table05_summary.txt')
+    assert summary_path('table05.csv') != summary_path('table06.csv')
+
+
+def test_run_summary_counts_genes_junctions_and_reasons():
+    """A cluster naming two genes, one naming a symbol with no Ensembl id, and
+    one that ended before its junctions were ever matched."""
+    df = pd.DataFrame({
+        'specie': ['human'] * 5,
+        'cluster_name': ['c1', 'c1', 'c2', 'c3', 'c3'],
+        'gene_ensembl_id': ['ENSG1', 'ENSG2', None, 'ENSG3', 'ENSG3'],
+        'gene_symbol': ['A', 'B', 'UNKNOWNGENE', 'C', 'C'],
+    })
+    groups = list(df.groupby(['specie', 'cluster_name'], dropna=False))
+
+    summary = RunSummary(input_source='fixture.csv')
+    summary.seed(df, groups)
+    assert summary.input_clusters == 3
+    assert summary.input_junctions == 5
+    # c1 names two genes; c2 names one by symbol alone (not "no gene"); c3 one.
+    assert dict(summary.genes_per_cluster) == {2: 1, 1: 2}
+
+    summary.add_cluster(_summary_cluster(
+        'c1', 'ENSG1', [(1, 2), (3, 4)],
+        [('novel_junction', None), ('domain_loss', 'ENST1')],
+        features_matched=1))
+    summary.add_cluster(_summary_cluster(
+        'c2', None, [(5, 6)], [('gene_not_in_db', None)], features_matched=None))
+    summary.add_cluster(_summary_cluster(
+        'c3', 'ENSG3', [(7, 8), (9, 10)],
+        [('transcript_doesnt_have_junctions', 'ENST2'), ('all_known_junctions_are_canonical', None)],
+        features_matched=2))
+
+    assert (summary.junctions_matched, summary.junctions_unmatched,
+            summary.junctions_not_evaluated) == (3, 1, 1)
+    assert (summary.junctions_matched + summary.junctions_unmatched
+            + summary.junctions_not_evaluated) == summary.input_junctions
+    assert (summary.comparable, summary.non_comparable) == (1, 2)
+    assert summary.input_source == ['fixture.csv']
+    # One reason per cluster, and the terminal one - not the per-transcript
+    # transcript_doesnt_have_junctions that c3 also recorded.
+    assert dict(summary.non_comparable_reasons) == {
+        'gene_not_in_db': 1, 'all_known_junctions_are_canonical': 1}
+    assert summary.comparable + summary.non_comparable == summary.input_clusters
+    assert 'fixture.csv' in summary.text()
+
+
+def test_run_summary_counts_events_by_row_and_by_cluster_gene():
+    """Two domain_loss rows for one cluster+gene are two rows but one
+    pair; the same event in another cluster is a second pair."""
+    df_chunk = pd.DataFrame({
+        'event': ['c1', 'c1', 'c1', 'c2', 'c1'],
+        'gene_symbol': ['A', 'A', 'A', 'B', 'A'],
+        'specie': ['human'] * 5,
+        'event_type': ['domain_loss', 'domain_loss',
+                       'domain_gain', 'domain_loss',
+                       'no_unique_junctions'],
+    })
+    summary = RunSummary()
+    summary.add_frame(df_chunk)
+
+    # no_unique_junctions is a non-comparison event and belongs to neither count.
+    assert dict(summary.event_rows) == {'domain_loss': 3,
+                                        'domain_gain': 1}
+    assert dict(summary.event_pairs) == {'domain_loss': 2,
+                                         'domain_gain': 1}
+
+
+def test_run_summary_separates_species_sharing_a_cluster_name():
+    """Two species can use the same cluster name; they are separate clusters
+    everywhere else in the run, so they must be separate pairs here."""
+    df_chunk = pd.DataFrame({
+        'event': ['c1', 'c1'],
+        'gene_symbol': ['A', 'A'],
+        'specie': ['human', 'mouse'],
+        'event_type': ['domain_loss', 'domain_loss'],
+    })
+    summary = RunSummary()
+    summary.add_frame(df_chunk)
+    assert dict(summary.event_pairs) == {'domain_loss': 2}
+
+
+# ---------------------------------------------------------------------------
+# the results CSV's row order, and -keep_input_order
+# ---------------------------------------------------------------------------
+
+# The written spelling of the outcome column; see OUTPUT_COLUMN_RENAMES.
+EVENT_COLUMN = 'event_effect_on_domain'
+
+# NM_/NR_ (curated) and XM_/XR_ (predicted) are RefSeq; an Ensembl transcript is
+# ENST<digits>. Matched as a pattern rather than by naming accessions, so the
+# test survives the database being rebuilt against a newer annotation.
+REFSEQ_PATTERN = r'^[NX][MR]_\d'
+
+
+def _blocks(events):
+    """The outcome labels in the order the file runs through them, one entry per
+    run of equal labels - so a label appearing twice means the file leaves its
+    block and comes back, which is the failure this is here to catch."""
+    return [label for label, previous in zip(events, [None] + list(events[:-1]))
+            if label != previous]
+
+
+def _run_ordered_case(con, case_dir, keep_input_order):
+    """The category-examples fixture - one hand-picked cluster per outcome - run
+    to a CSV, with the ordering either applied or left alone."""
+    if os.path.exists(case_dir):
+        shutil.rmtree(case_dir)
+    os.makedirs(case_dir)
+    output_path = os.path.join(case_dir, 'results.csv')
+    JunctionsAnalysis(con).analyze_junctions(
+        df_junctions=_load_junctions(con, CATEGORY_EXAMPLES_CSV, hadas_format=False),
+        output_path=output_path,
+        create_pdf=False,
+        num_workers=1,
+        input_source=CATEGORY_EXAMPLES_CSV,
+        keep_input_order=keep_input_order,
+    )
+    return pd.read_csv(output_path, dtype=str, keep_default_na=False)
+
+
+def test_results_are_written_in_outcome_order(con, tmp_path):
+    """By default the compared rows run through OUTPUT_EVENT_ORDER once: every
+    row of an outcome together, the outcomes in that sequence, and no label
+    outside it."""
+    df = _run_ordered_case(con, str(tmp_path / 'ordered'), keep_input_order=False)
+    assert len(df) > 0, "the fixture should produce compared rows"
+
+    blocks = _blocks(list(df[EVENT_COLUMN]))
+    assert len(blocks) == len(set(blocks)), \
+        f"an outcome's rows are split across the file: {blocks}"
+    # A subsequence, not an equality: a fixture need not produce every outcome.
+    assert blocks == [label for label in OUTPUT_EVENT_ORDER if label in blocks], \
+        f"blocks out of OUTPUT_EVENT_ORDER: {blocks}"
+
+
+def test_length_change_rows_are_ordered_by_size_of_change(con, tmp_path):
+    """Within longer_domain and shorter_domain, the biggest change against the
+    canonical domain comes first - a magnitude, so both blocks read the same
+    way: most stretched, and most truncated, at the top of their own block."""
+    df = _run_ordered_case(con, str(tmp_path / 'lengths'), keep_input_order=False)
+
+    canonical = pd.to_numeric(df['canonical_domain_length'], errors='coerce')
+    alternative = pd.to_numeric(df['alternative_domain_length'], errors='coerce')
+    change = (alternative - canonical).abs() / canonical
+
+    seen = 0
+    for label in ('longer_domain', 'shorter_domain'):
+        block = change[df[EVENT_COLUMN] == label]
+        if len(block) < 2:
+            continue
+        seen += 1
+        assert (block.diff().dropna() <= 1e-9).all(), \
+            f"{label} is not ordered by size of change: {list(block)}"
+    assert seen, "fixture produced no length-change block to check the order of"
+
+
+def test_keep_input_order_changes_the_order_and_nothing_else(con, tmp_path):
+    """The flag is about arrangement only. The two runs hold the same rows, and
+    ordering the unordered one reproduces the default output exactly - so the
+    default cannot be quietly dropping, duplicating or rewriting a row."""
+    ordered = _run_ordered_case(con, str(tmp_path / 'a'), keep_input_order=False)
+    as_analysed = _run_ordered_case(con, str(tmp_path / 'b'), keep_input_order=True)
+
+    assert list(ordered.columns) == list(as_analysed.columns)
+    assert sorted(ordered.to_csv(index=False).splitlines()) == \
+           sorted(as_analysed.to_csv(index=False).splitlines()), \
+        "the two runs do not hold the same rows"
+
+    assert sort_output_rows(as_analysed).to_csv(index=False) == \
+           ordered.to_csv(index=False), \
+        "sorting the -keep_input_order output does not reproduce the default one"
+
+    # And the flag really did leave the analysis order alone: the fixture has
+    # more than one outcome, so an unordered run would only match by chance.
+    if len(set(ordered[EVENT_COLUMN])) > 1:
+        assert _blocks(list(as_analysed[EVENT_COLUMN])) != \
+               _blocks(list(ordered[EVENT_COLUMN])) or \
+               as_analysed.to_csv(index=False) == ordered.to_csv(index=False)
+
+
+def test_an_outcome_outside_the_order_sorts_last():
+    """gained_protein is not in OUTPUT_EVENT_ORDER - the canonical transcript
+    not coding while an alternative one does is not something the data should
+    produce - so it lands after every named outcome instead of somewhere
+    arbitrary in the middle, where it would go unnoticed."""
+    df = pd.DataFrame({
+        EVENT_COLUMN: ['no_domain_change', 'gained_protein', 'domain_loss'],
+        'canonical_domain_length': ['10', '', '10'],
+        'alternative_domain_length': ['10', '', '0'],
+    })
+    assert list(sort_output_rows(df)[EVENT_COLUMN]) == \
+        ['domain_loss', 'no_domain_change', 'gained_protein']
+
+
+# ---------------------------------------------------------------------------
+# RefSeq/NCBI transcripts take part in the analysis unless -ensembl_only
+# ---------------------------------------------------------------------------
+
+def _run_hadas_case(con, case_dir, ensembl_only):
+    if os.path.exists(case_dir):
+        shutil.rmtree(case_dir)
+    os.makedirs(case_dir)
+    output_path = os.path.join(case_dir, 'results.csv')
+    JunctionsAnalysis(con).analyze_junctions(
+        df_junctions=_load_junctions(con, HADAS_XLSX, hadas_format=True),
+        output_path=output_path,
+        create_pdf=False,
+        num_workers=1,
+        input_source=HADAS_XLSX,
+        ensembl_only=ensembl_only,
+    )
+    return pd.read_csv(output_path, dtype=str, keep_default_na=False)
+
+
+def test_refseq_transcripts_are_analysed_by_default(con, tmp_path):
+    """Transcripts NCBI curates but Ensembl does not carry are part of the
+    analysis, and are not there by accident: turning -ensembl_only on removes
+    them and leaves the Ensembl ones.
+
+    This was not always so. While domains were looked up per UniProt accession,
+    which a RefSeq-only transcript usually lacks, the pool was restricted to
+    Ensembl by default; domains come from Pfam per protein now, so a RefSeq
+    transcript can be assessed like any other.
+    """
+    default = _run_hadas_case(con, str(tmp_path / 'default'), ensembl_only=False)
+    ids = pd.concat([default['canonical_transcript_id'],
+                     default['alternative_transcript_id']])
+    refseq = ids[ids.str.match(REFSEQ_PATTERN, na=False)]
+    assert len(refseq) > 0, (
+        "no RefSeq transcript reached the results - either the default pool has "
+        "been restricted to Ensembl again, or the database no longer carries "
+        f"RefSeq models for this fixture's genes. Ids seen: {sorted(set(ids))[:10]}")
+
+    restricted = _run_hadas_case(con, str(tmp_path / 'ensembl_only'), ensembl_only=True)
+    if len(restricted):
+        restricted_ids = pd.concat([restricted['canonical_transcript_id'],
+                                    restricted['alternative_transcript_id']])
+        assert not restricted_ids.str.match(REFSEQ_PATTERN, na=False).any(), \
+            "-ensembl_only still let a RefSeq transcript through"
+
+
+def test_refseq_transcripts_can_carry_domains(con, tmp_path):
+    """Not just present, but assessed: at least one RefSeq transcript reaches a
+    real domain outcome with a domain named against it. A run where every
+    RefSeq row came back empty-handed would satisfy the test above and still
+    mean the domain lookup does not work for them."""
+    default = _run_hadas_case(con, str(tmp_path / 'domains'), ensembl_only=False)
+    refseq_rows = default[
+        default['alternative_transcript_id'].str.match(REFSEQ_PATTERN, na=False)]
+    assert len(refseq_rows) > 0, "no RefSeq transcript was compared to a canonical one"
+
+    with_domain = refseq_rows[(refseq_rows['domain_id'] != '') &
+                              refseq_rows[EVENT_COLUMN].isin(OUTPUT_EVENT_ORDER)]
+    assert len(with_domain) > 0, (
+        "every RefSeq row came back without a domain - the Pfam lookup is not "
+        f"reaching them. Outcomes seen: {sorted(set(refseq_rows[EVENT_COLUMN]))}")
+
+if __name__ == '__main__':
+    sys.exit(pytest.main([__file__, '-v']))

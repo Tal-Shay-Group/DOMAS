@@ -1,0 +1,55 @@
+DOMAS run summary
+=================
+
+DOMAS version: 1.0.0
+Date: <run time>
+
+56 event-gene pairs have at least one domain change - 68.29% of comparable pairs.
+
+Input source
+------------
+    Species : human
+    <tests>/leafcutter/leafcutter_ds_cluster_significance.txt
+    <tests>/leafcutter/leafcutter_ds_effect_sizes.txt
+
+
+Alternative splicing events:
+----------------------------
+    Input alternative splicing events : 124
+    2 events are assigned to more than one gene:
+    1 gene(s) :       122   98.39% of events
+    2 gene(s) :         2    1.61% of events
+
+
+Each event is analysed for each of the genes it is assigned to: 126 event-gene pairs
+------------------------------------------------------------------------------------
+    Comparable     :        82   65.08%
+    Non-comparable :        44   34.92%
+        All known junctions are canonical : 42
+        No canonical junctions            : 2
+
+
+Junctions:
+----------
+    Unique junctions                             : 441
+    Junction-gene pairs                          : 446
+    Junction-gene pairs for genes in the database: 446
+
+
+Junction-gene pairing:
+----------------------
+    Matched to a transcript :       337   75.56% of evaluated
+    Not matched             :       109   24.44% of evaluated
+    Not evaluated           :         0
+
+
+Event / transcript-group / domain classification:
+-------------------------------------------------
+    Non-coding alternative :        39    8.76%
+    Domain gain            :         2    0.45%
+    Domain loss            :       137   30.79%
+    Longer domain          :         5    1.12%
+    Shorter domain         :        31    6.97%
+    No domain change       :        70   15.73%
+    No domains in region   :       161   36.18%
+    Total                  :       445  100.00%

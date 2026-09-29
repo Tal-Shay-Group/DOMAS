@@ -1,0 +1,3783 @@
+import collections
+from copy import copy
+import itertools
+import logging
+import os
+import queue
+import random
+import shutil
+import tempfile
+import threading
+import time
+from datetime import datetime
+from urllib.parse import quote
+import warnings
+import numpy as np
+import pandas as pd
+from collections import Counter
+from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
+
+import utils
+from utils import (
+    FEATURE_JUNCTION, FEATURE_RETAINED_INTRON, FEATURE_TYPE_COLUMN,
+    find_matching_junction_indices, PROJECTION_COMPARABLE,
+)
+from generate_gene_pdf import GeneVisualization, prepare_gene_data_bulk
+
+# Suppress FutureWarning about DataFrame concatenation behavior
+warnings.filterwarnings('ignore', category=FutureWarning, message='.*DataFrame concatenation.*')
+
+
+logger = logging.getLogger(__name__)
+
+DOMAIN_NAME_COLUMNS = ['interpro', 'pfam', 'cdd', 'smart', 'tigr', 'CDD_id']
+DOMAIN_NAME_PREFIX_PRIORITY = ['IPR', 'pfam', 'cd', 'smart', 'tigr', 'CDD']
+
+
+# ---------------------------------------------------------------------------
+# Utility functions
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: junction <-> exon matching
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Phase 1.5: "most like canonical" transcript selection, an alternative to
+# picking the longest-CDS transcript
+# ---------------------------------------------------------------------------
+
+def _exon_coord_set(df_exons):
+    return set(zip(df_exons['genomic_start_tx'], df_exons['genomic_end_tx']))
+
+
+def _outside_range_exon_set(df_exons, min_bp, max_bp):
+    """Exons of df_exons that fall entirely outside [min_bp, max_bp], as a set of
+    (genomic_start_tx, genomic_end_tx) coordinate pairs."""
+    outside = df_exons[(df_exons['genomic_end_tx'] < min_bp) | (df_exons['genomic_start_tx'] > max_bp)]
+    return _exon_coord_set(outside)
+
+
+def select_longest_cds(candidate_ids, cds_length_by_transcript):
+    """
+    The longest-CDS transcript among `candidate_ids`. Ties fall to the lowest id,
+    so the choice does not depend on Python's per-process string hash seed.
+
+    @param candidate_ids: transcript ids to choose between (must be non-empty)
+    @param cds_length_by_transcript: dict {transcript_id: coding length in bases}
+    @return: the chosen transcript id
+    """
+    return max(candidate_ids, key=lambda tid: (cds_length_by_transcript.get(tid, -1), tid))
+
+
+def select_most_like_canonical(comparable_transcript_ids, canonical_transcript_id, transcript_exons, junctions,
+                                cds_length_by_transcript):
+    """
+    Pick the comparable transcript that is "most like canonical", as an alternative to
+    always taking the longest-CDS one when several transcripts have unique junctions vs
+    canonical.
+
+    A candidate qualifies when ALL of its exons lying *outside* the cluster's junction
+    range (the span from the earliest to the latest coordinate among the cluster's own
+    junctions) exactly match - by genomic start/end, as a set - canonical's exons
+    outside that range. Such a transcript differs from canonical only within the spliced
+    region, so any domain difference it shows is attributable to the event itself.
+
+    Qualifying is a hard filter, not a preference: a single qualifying candidate is
+    taken even if a disqualified one has a longer CDS. Among several qualifying
+    candidates the longest-CDS one is taken, ties broken by transcript id for
+    determinism. `comparable_transcript_ids` is expected to have been reduced to the
+    protein-coding candidates already (step 1 of the priority) - this function
+    implements steps 2 and 3 only.
+
+    Returns None when no candidate qualifies - the flag then goes unset rather than
+    falling back to the longest-CDS candidate, which is_longest_cds already marks in
+    its own right. Callers wanting a single transcript per cluster fall back to that
+    flag themselves (see results_stats.select_representative_transcript()).
+    """
+    # min/max over BOTH coordinates of each pair: normalize_junctions_frame()
+    # orders them, but this is reachable with a hand-built list too.
+    min_bp = min(min(pair) for pair in junctions)
+    max_bp = max(max(pair) for pair in junctions)
+
+    c_exons = transcript_exons[canonical_transcript_id]
+    c_outside_set = _outside_range_exon_set(c_exons, min_bp, max_bp)
+
+    qualifying = [
+        transcript_id for transcript_id in comparable_transcript_ids
+        if _outside_range_exon_set(transcript_exons[transcript_id], min_bp, max_bp) == c_outside_set
+    ]
+
+    if not qualifying:
+        return None
+
+    return max(
+        qualifying,
+        key=lambda tid: (cds_length_by_transcript.get(tid, -1), tid),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: domain boundary determination via coordinate matching
+# ---------------------------------------------------------------------------
+
+def find_boundary_exons(df_exons, min_bp, max_bp):
+    """
+    Return (first_exon, last_exon): the exon whose genomic end is closest to
+    (but not before) min_bp, and the exon whose genomic start is closest to
+    (but not after) max_bp, allowing a 1bp tolerance on both ends.
+
+    This is called several times per compared transcript (Phase 2 window
+    refinement), on the small per-transcript exon slice - implemented with
+    numpy array ops + a single positional .iloc[] instead of pandas boolean
+    filtering + idxmin/idxmax + .loc[], since pandas' per-call overhead
+    dominates at this scale and this runs millions of times over a large
+    junctions file.
+    """
+    ends = df_exons['genomic_end_tx'].to_numpy()
+    starts = df_exons['genomic_start_tx'].to_numpy()
+
+    first_mask = ends >= min_bp - 1
+    if not first_mask.any():
+        raise ValueError("attempt to get argmin of an empty sequence")
+    first_pos = np.where(first_mask, ends, np.inf).argmin()
+
+    last_mask = starts <= max_bp + 1
+    if not last_mask.any():
+        raise ValueError("attempt to get argmax of an empty sequence")
+    last_pos = np.where(last_mask, starts, -np.inf).argmax()
+
+    first_exon = df_exons.iloc[first_pos]
+    last_exon = df_exons.iloc[last_pos]
+    return first_exon, last_exon
+
+
+def _exons_are_minus(df_exons):
+    """Whether a transcript's exons run right-to-left, read off the frame itself.
+
+    The fallback for a caller that has no gene strand to hand. A single-exon
+    transcript cannot be told apart this way and reads as plus - which is why the
+    gene's own strand is threaded through and preferred wherever it is known.
+    """
+    if df_exons is None or len(df_exons) < 2:
+        return False
+    ordered = (df_exons.sort_values('order_in_transcript')
+               if 'order_in_transcript' in df_exons.columns else df_exons)
+    return ordered['genomic_start_tx'].iloc[0] > ordered['genomic_start_tx'].iloc[-1]
+
+
+def _bp_to_cds(exon, bp, minus=False):
+    """Map a genomic bp position within `exon` to its CDS-relative bp offset, clamped
+    to the exon's CDS span.
+
+    CDS offsets run with the transcript, not with the genome: on a minus-strand
+    exon abs_start_CDS sits at the END of the exon and the offset RISES as the
+    genomic coordinate falls. Reading it the plus-strand way there does not merely
+    shift the answer, it runs backwards and then saturates against the clamp -
+    which is how a WIDER pass-2 window came to select FEWER domains for ZNF195,
+    and why 7.2% of minus-strand comparisons picked the wrong domain set.
+
+    The exon's genomic span is HALF-OPEN, [genomic_start_tx, genomic_end_tx), so
+    its last base is genomic_end_tx - 1 - see DoChaP-db recordTypes.exons2abs(),
+    which measures each exon's coding contribution as clipped_end - clipped_start
+    with no +1. The minus branch therefore counts down from genomic_end_tx - 1,
+    not from genomic_end_tx: the transcript-order FIRST coding base of the exon.
+    """
+    if minus:
+        cds = exon['abs_start_CDS'] + (exon['genomic_end_tx'] - 1 - bp)
+    else:
+        cds = exon['abs_start_CDS'] + (bp - exon['genomic_start_tx'])
+    return min(max(cds, exon['abs_start_CDS']), exon['abs_end_CDS'])
+
+
+def get_aa_range(first_exon, last_exon, min_bp=None, max_bp=None, minus=False):
+    """
+    Amino-acid range (inclusive) spanned by the first/last exons of a window.
+
+    If min_bp/max_bp are given, the range is narrowed to the AA positions
+    corresponding to those genomic bp coordinates (clamped within the
+    first/last exon's CDS span) instead of the exons' full CDS span.
+
+    first_exon/last_exon are chosen by genomic position (the exon nearest the
+    window's lower/upper genomic bound, see find_boundary_exons). On a minus
+    strand transcript that does NOT mean first_exon precedes last_exon in CDS
+    order - the exon nearest the genomically-lower bound can be the LATER
+    exon in the transcript. When min_bp/max_bp aren't given we therefore
+    can't just use first_exon's start and last_exon's end (those could be two
+    CDS-adjacent values straddling a single codon instead of spanning the
+    full region); we take the min/max across all four boundary CDS values
+    instead, which is correct regardless of strand.
+    """
+    if min_bp is None and max_bp is None:
+        cds_bounds = [
+            first_exon['abs_start_CDS'], first_exon['abs_end_CDS'],
+            last_exon['abs_start_CDS'], last_exon['abs_end_CDS'],
+        ]
+        start_cds = min(cds_bounds)
+        end_cds = max(cds_bounds)
+    else:
+        start_cds = first_exon['abs_start_CDS'] if min_bp is None else _bp_to_cds(first_exon, min_bp, minus)
+        end_cds = last_exon['abs_end_CDS'] if max_bp is None else _bp_to_cds(last_exon, max_bp, minus)
+    # The residue CONTAINING each base, not the count of whole codons before it -
+    # see aa_range_for_span(), which this shares a convention with.
+    min_aa = (min(start_cds, end_cds) + 2) // 3
+    max_aa = (max(start_cds, end_cds) + 2) // 3
+    return min_aa, max_aa
+
+
+def aa_range_for_span(df_exons, min_bp, max_bp, minus=False, cds_span=None):
+    """The amino-acid interval a genomic span projects to in one transcript, or
+    None where the span covers none of its coding sequence.
+
+    Every exon the span overlaps contributes the CDS of ITS OWN overlap, and the
+    interval is the min/max across all of them. Wholly non-coding exons contribute
+    nothing rather than contributing zero.
+
+    This is what makes the projection MONOTONE: widening the span can only add
+    exons and grow each overlap, so the interval it yields can only grow. Reading
+    only the two bounding exons does not have that property - which exons bound a
+    span changes as it widens, and the coding between them goes unread, so a wider
+    span could land on a pair whose CDS bounds are narrower. Measured over 4,800
+    nested spans on 400 real transcripts: reading the bounding pair violated
+    monotonicity 142 times (528 taking the min/max of their four bounds), this 0.
+
+    The failure that motivated it: a bounding exon that is wholly UTR has
+    abs_start_CDS == abs_end_CDS == 0, so clamping either bound into it returns 0
+    and the interval collapses to a point. TWIST1 and SPIRE2 lost every domain in
+    the window that way - the window did not merely shift, it emptied.
+
+    None is the empty interval, and is NOT the same as (0, 0): a caller must read
+    it as "no coding here", not as "amino acid 0". Conflating the two is exactly
+    what the collapse did.
+
+    `cds_span` is the transcript's coding sequence in genomic coordinates, as
+    (first_coding_base, last_coding_base), both INCLUSIVE - the caller converts
+    from DoChaP's half-open cds_start/cds_end. Given it, each exon's coding part
+    is what the span is measured against, so the UTR half of a partly-coding exon
+    contributes nothing and offsets are counted from the first coding base rather
+    than from the exon's edge.
+
+    Without it the whole exon is assumed to code, which is false for the first and
+    last coding exon of every transcript: a bound landing in the UTR half of one
+    then saturates against the clamp and reports a residue the span does not
+    reach. PCLO's exon 2 is 54 bases carrying 14 coding ones, and a span over its
+    UTR half alone came back as amino acid 46.
+    """
+    starts = df_exons['genomic_start_tx'].to_numpy()
+    # The genomic span is half-open, so an exon's last base is genomic_end_tx - 1.
+    ends = df_exons['genomic_end_tx'].to_numpy() - 1
+    cds_start = df_exons['abs_start_CDS'].to_numpy()
+    cds_end = df_exons['abs_end_CDS'].to_numpy()
+
+    # The coding part of each exon, which is the exon itself except at the two
+    # ends of the coding sequence.
+    if cds_span is None:
+        coding_lo, coding_hi = starts, ends
+    else:
+        coding_lo = np.maximum(starts, cds_span[0])
+        coding_hi = np.minimum(ends, cds_span[1])
+
+    overlap_lo = np.maximum(min_bp, coding_lo)
+    overlap_hi = np.minimum(max_bp, coding_hi)
+    # A wholly non-coding exon carries no CDS to contribute. DoChaP writes 0/0 for
+    # it, which is a real CDS offset for a coding exon, so both bounds must be 0.
+    contributes = (overlap_lo <= overlap_hi) & ((cds_start > 0) | (cds_end > 0))
+    if not contributes.any():
+        return None
+
+    # abs_start_CDS is the offset of the exon's transcript-order FIRST coding
+    # base, which is coding_lo on the plus strand and coding_hi on the minus.
+    if minus:
+        a = cds_start + (coding_hi - overlap_lo)
+        b = cds_start + (coding_hi - overlap_hi)
+    else:
+        a = cds_start + (overlap_lo - coding_lo)
+        b = cds_start + (overlap_hi - coding_lo)
+    a = np.clip(a, cds_start, cds_end)
+    b = np.clip(b, cds_start, cds_end)
+
+    lowest = np.minimum(a, b)[contributes].min()
+    highest = np.maximum(a, b)[contributes].max()
+    # DoChaP's CDS offsets are 1-based bases and InterPro's domain bounds 1-based
+    # RESIDUES, so a base has to be reported as the residue containing it:
+    # residue r covers bases 3r-2 .. 3r, hence (base + 2) // 3.
+    #
+    # base // 3 counts the whole codons BEFORE the base instead, which names a
+    # residue too low at the bottom of the window and too low at the top - so the
+    # window ran a residue generous at one end and a residue short at the other.
+    # CFI's IPR002172 ends at CDS base 771 and its window began at 773, two bases
+    # past it, and was reported unchanged; LGI2's IPR009039 starts at 655, the
+    # window's own last base, and was missed.
+    return (lowest + 2) // 3, (highest + 2) // 3
+
+
+def _snap_span_to_whole_exons(exon_frames, min_bp, max_bp):
+    """Grow a genomic span until it holds every exon it touches, in every frame,
+    whole. Round 1's defining property: it never cuts an exon in half.
+
+    Iterated to a fixed point rather than applied once per transcript, because
+    growing the span for one transcript can bring a further exon of the other
+    within reach, and a single pass would leave that one half-covered. Each round
+    can only grow the span and there are finitely many exons, so it terminates -
+    in practice after one or two rounds, introns being what they are.
+    """
+    while True:
+        grown_min, grown_max = min_bp, max_bp
+        for exons in exon_frames:
+            starts = exons['genomic_start_tx'].to_numpy()
+            ends = exons['genomic_end_tx'].to_numpy()
+            touching = (starts <= grown_max) & (ends - 1 >= grown_min)
+            if touching.any():
+                grown_min = min(grown_min, starts[touching].min())
+                grown_max = max(grown_max, ends[touching].max())
+        if (grown_min, grown_max) == (min_bp, max_bp):
+            return min_bp, max_bp
+        min_bp, max_bp = grown_min, grown_max
+
+
+def _domains_in_span(df_domains, aa_range):
+    """The domains of one transcript inside an aa_range_for_span() result, reading
+    None as the empty interval rather than as amino acid 0."""
+    if aa_range is None:
+        return df_domains.iloc[0:0]
+    return _domains_in_aa_range(df_domains, *aa_range)
+
+
+def _cds_to_bp(exon, cds_bp, minus=False, cds_span=None):
+    """Map a CDS-relative bp position to its genomic position within `exon`'s CDS
+    span. The inverse of the mapping aa_range_for_span() applies, and it has to be
+    read the same way or the two disagree: same orientation rule, same half-open
+    exon, and the same clipping to the exon's CODING part.
+
+    Counting from the exon's edge instead of its first coding base puts a position
+    the length of that exon's UTR too far out. On NDST2's canonical, exon 3 carries
+    1,005 coding bases in 1,346, and amino acid 187 landed 341 bp high - enough to
+    stretch the pass-2 window from AA 187 down to AA 73 and pull in a domain the
+    event does not touch.
+    """
+    cds_bp = min(max(cds_bp, exon['abs_start_CDS']), exon['abs_end_CDS'])
+    if cds_span is None:
+        coding_lo, coding_hi = exon['genomic_start_tx'], exon['genomic_end_tx'] - 1
+    else:
+        coding_lo = max(exon['genomic_start_tx'], cds_span[0])
+        coding_hi = min(exon['genomic_end_tx'] - 1, cds_span[1])
+    if minus:
+        return coding_hi - (cds_bp - exon['abs_start_CDS'])
+    return coding_lo + (cds_bp - exon['abs_start_CDS'])
+
+
+def find_bp_range_for_domains(df_exons, domains_in_region, minus=None, cds_span=None):
+    """
+    Genomic (start, end) bp positions - start <= end - spanning the start of
+    the nearest-starting domain and the end of the furthest-reaching domain in
+    `domains_in_region`, or (None, None) if there are no domains with a
+    defined AA range.
+    """
+    # numpy-array filtering instead of pandas boolean-mask DataFrames - this
+    # runs (conditionally, in Phase 2's window-refinement round) for every
+    # compared transcript, and df_exons/domains_in_region are always tiny
+    # per-transcript slices, so pandas' per-call overhead otherwise dominates.
+    aa_start = domains_in_region['AA_start'].to_numpy()
+    # InterPro numbers residues from 1, so 0 is not a position but a missing one.
+    valid = aa_start > 0
+    if not valid.any():
+        return None, None
+    aa_end = domains_in_region['AA_end'].to_numpy()
+    # A residue's FIRST base is 3r-2 and its last is 3r. Taking 3r for both ends
+    # started the span two bases inside the domain's opening codon, so extending
+    # the window "to whole domains" could still stop a residue short of it.
+    min_domain_bp = aa_start[valid].min() * 3 - 2
+    max_domain_bp = aa_end[valid].max() * 3
+
+    starts = df_exons['abs_start_CDS'].to_numpy()
+    ends = df_exons['abs_end_CDS'].to_numpy()
+    first_mask = (starts <= min_domain_bp) & (ends >= min_domain_bp)
+    last_mask = (starts <= max_domain_bp) & (ends >= max_domain_bp)
+    if not first_mask.any() or not last_mask.any():
+        return None, None
+
+    # argmax on a bool array returns the position of the first True value,
+    # matching the original's `.iloc[0]` of the filtered rows (first match
+    # in df_exons' original order).
+    first_exon = df_exons.iloc[np.argmax(first_mask)]
+    last_exon = df_exons.iloc[np.argmax(last_mask)]
+
+    # On a minus strand the domain's lower CDS bound maps to a higher genomic
+    # position, so the pair can come back reversed. Callers pool it into a
+    # min/max across transcripts, so return it in genomic (low, high) order.
+    if minus is None:
+        minus = _exons_are_minus(df_exons)
+    bp_a = _cds_to_bp(first_exon, min_domain_bp, minus, cds_span)
+    bp_b = _cds_to_bp(last_exon, max_domain_bp, minus, cds_span)
+    return min(bp_a, bp_b), max(bp_a, bp_b)
+
+
+def build_filtered_domain_lookup(domain_lookup):
+    """Wrap a domain lookup so filter_representative_domains() runs once per
+    transcript and its result is kept.
+
+    Returns (lookup, kept), where `lookup(transcript_id)` yields the transcript's
+    domains after the ladder and `kept` accumulates {transcript_id: frame} for
+    every transcript asked about. The comparison and the drawing then share one
+    decision about which entries are domains instead of each reaching it
+    separately - the PDF reads `kept` rather than re-running the filter over its
+    own copy of the rows.
+    """
+    kept = {}
+
+    def lookup(transcript_id):
+        if transcript_id not in kept:
+            kept[transcript_id] = filter_representative_domains(domain_lookup(transcript_id))
+        return kept[transcript_id]
+
+    return lookup, kept
+
+
+# How many materialised lookup results each worker keeps. Bounds the memory the
+# cache can take while still absorbing the access pattern: a gene's transcripts
+# are looked up again for every cluster of that gene, and genes with many
+# clusters are most of the work.
+# Chunks in flight per worker. Caps how many chunks' results the parent holds
+# at once; the writer thread has already persisted them, so this only needs to
+# be deep enough that no worker waits for work.
+_CHUNK_WINDOW = 8
+
+_LOOKUP_CACHE_SIZE = 4096
+
+
+def _row_positions(df, column):
+    """{key: row positions} for one column, as numpy index arrays.
+
+    groupby(...).indices rather than a dict of sub-frames: iterating a groupby
+    yields COPIES, so materialising one frame per transcript stored the whole
+    table again - twice over here, once per id column - and paid a DataFrame's
+    object overhead (BlockManager, Index, per-column arrays) for every one of
+    them. Over a whole-genome run that reached ~7.7 GB per worker, and since
+    every worker builds its own lookups, the default of one worker per core
+    asked more memory than the machine had. The positions point into the single
+    frame the worker already holds.
+    """
+    return df.groupby(column).indices
+
+
+def build_exon_lookup(df_exons):
+    """
+    Precompute, once per analyze_junctions() run, a transcript_id -> exons
+    lookup so per-cluster/per-transcript filtering of the full `df_exons`
+    DataFrame (the dominant cost of analyze()) is replaced by O(1)
+    dict lookups.
+    """
+    by_ensembl = _row_positions(df_exons, 'transcript_ensembl_id')
+    by_refseq = _row_positions(df_exons, 'transcript_refseq_id')
+    empty = df_exons.iloc[0:0]
+    # take() builds the caller's frame per lookup, so the same transcript asked
+    # for once per cluster of its gene would rebuild it every time. Bounded
+    # cache instead of the unbounded materialisation this used to hold: same
+    # hit rate over a gene's clusters, memory that cannot grow with the
+    # transcriptome. A transcript id ambiguous between the two groupings is
+    # merged here too, once, as it was before.
+    cache = collections.OrderedDict()
+
+    def lookup(transcript_id):
+        hit = cache.get(transcript_id)
+        if hit is not None:
+            cache.move_to_end(transcript_id)
+            return hit
+        a = by_ensembl.get(transcript_id)
+        b = by_refseq.get(transcript_id)
+        if a is not None and b is not None:
+            result = pd.concat([df_exons.take(a), df_exons.take(b)]).drop_duplicates()
+        elif a is not None:
+            result = df_exons.take(a)
+        elif b is not None:
+            result = df_exons.take(b)
+        else:
+            return empty
+        cache[transcript_id] = result
+        if len(cache) > _LOOKUP_CACHE_SIZE:
+            cache.popitem(last=False)
+        return result
+
+    return lookup
+
+
+def build_domain_lookup(df_domains):
+    """
+    Precompute, once per analyze_junctions() run, a transcript_id -> domains
+    lookup so per-cluster filtering of the full `df_domains` DataFrame is
+    replaced by O(1) dict lookups.
+    """
+    # Renamed once over the whole frame, not once per transcript: the per-group
+    # rename copied the domain table a transcript at a time, for one column name.
+    renamed = df_domains.rename(columns={'transcript_ensembl_id_version': 'transcript_ensembl_id'})
+    by_transcript = _row_positions(df_domains, 'transcript_ensembl_id_version')
+    empty = renamed.iloc[0:0]
+    cache = collections.OrderedDict()
+
+    def lookup(transcript_id):
+        hit = cache.get(transcript_id)
+        if hit is not None:
+            cache.move_to_end(transcript_id)
+            return hit
+        positions = by_transcript.get(transcript_id)
+        if positions is None:
+            return empty
+        result = renamed.take(positions)
+        cache[transcript_id] = result
+        if len(cache) > _LOOKUP_CACHE_SIZE:
+            cache.popitem(last=False)
+        return result
+
+    return lookup
+
+
+def _domains_in_aa_range(df_domains, min_aa, max_aa):
+    # Boolean-mask indexing already returns a new, independent DataFrame (not
+    # a view), so the extra .copy() here was a redundant allocation on a
+    # function called 4x per compared transcript.
+    return df_domains[(df_domains['AA_end'] >= min_aa) & (df_domains['AA_start'] <= max_aa)]
+
+
+
+
+# The only InterPro entry types DOMAS considers, from RepresentativeDomains.type
+# (sourced from interpro.xml.gz). Domain and Repeat are the curated structural-
+# functional units - the things a splicing event can remove.
+#
+# Everything else is dropped: Family and Homologous_superfamily name what a
+# protein IS rather than delimiting a unit within it; Active_site / Binding_site
+# / Conserved_site / PTM are residue positions rather than regions; and a
+# member-database signature (Pfam, CDD, G3DSA, PANTHER, SUPERFAMILY) is not a
+# curated unit at all - InterPro types many of them as homologous superfamilies
+# in their own right, so keeping them while dropping the InterPro entries that
+# say the same thing would filter by who issued the accession rather than by
+# what the entry is.
+_PRIMARY_ENTRY_TYPES = frozenset({'Domain', 'Repeat'})
+
+# Two entries with the same accession are one physical domain, and the shorter
+# dropped, only when they overlap by at least this fraction of the shorter one.
+# A majority, not any overlap: two tandem copies of a repeat sharing a boundary
+# residue are two domains.
+_SAME_ID_OVERLAP = 0.5
+
+
+# One admitted class, and two labels for what is not admitted, kept apart because
+# they are not-a-domain for different reasons: TIER_MEMBER is an accession
+# InterPro did not issue, TIER_IGNORED an InterPro entry of a type that is not a
+# structural unit. Both are dropped by filter_representative_domains(); the
+# labels exist so a caller looking at an unfiltered frame - the PDF - can say why
+# an entry is not there.
+TIER_PRIMARY, TIER_MEMBER, TIER_IGNORED = '1', '2', '-'
+
+
+def domain_entry_tiers(df_domains):
+    """Each row's tier on the ladder filter_representative_domains() applies, as a
+    Series of TIER_* labels indexed like `df_domains`.
+
+      TIER_PRIMARY : an InterPro Domain or Repeat entry - the only kind kept
+      TIER_MEMBER  : a member-database hit (Pfam, CDD, G3DSA, PANTHER, SUPERFAMILY,
+                     ...), i.e. any accession InterPro did not issue - dropped
+      TIER_IGNORED : every other InterPro entry - Family, Homologous_superfamily,
+                     the residue features, and an IPR of unknown type - dropped
+
+    None when the frame carries no domain_id/type columns at all - the
+    DomainEvent/DomainType tables, which have no entry type to rank by - the same
+    condition under which the filter returns its input untouched. A
+    RepresentativeDomains frame whose rows are ALL untyped is not that case: every
+    one of them is a member-DB signature, and they are ranked (and dropped) as
+    such rather than waved through.
+
+    Shared with the PDF, so a domain is labelled with the tier the analysis judged
+    it on rather than one re-derived alongside it.
+    """
+    if df_domains is None or len(df_domains) == 0:
+        return None
+    if 'domain_id' not in df_domains.columns or 'type' not in df_domains.columns:
+        return None
+
+    is_ipr = df_domains['domain_id'].astype(str).str.startswith('IPR')
+    etype = df_domains['type']
+    tiers = pd.Series(TIER_MEMBER, index=df_domains.index)   # non-IPR by default
+    tiers[is_ipr] = TIER_IGNORED                             # IPR, incl. unknown type
+    tiers[is_ipr & etype.isin(_PRIMARY_ENTRY_TYPES)] = TIER_PRIMARY
+    return tiers
+
+
+def _aa_overlap(s1, e1, s2, e2):
+    """True if [s1,e1] and [s2,e2] overlap by at least one residue."""
+    return s1 <= e2 and s2 <= e1
+
+
+def _aa_overlap_fraction(s1, e1, s2, e2):
+    """Residues shared by [s1,e1] and [s2,e2] as a fraction of the SHORTER of the
+    two - so a short entry sitting inside a long one scores 1.0, not the small
+    fraction of the long one it happens to cover. Coordinates are inclusive.
+    0.0 when they don't overlap."""
+    if not _aa_overlap(s1, e1, s2, e2):
+        return 0.0
+    overlap = min(e1, e2) - max(s1, s2) + 1
+    shorter_length = min(e1 - s1 + 1, e2 - s2 + 1)
+    if shorter_length <= 0:
+        return 0.0
+    return overlap / shorter_length
+
+
+def filter_representative_domains(df_domains):
+    """
+    Reduce a single transcript's representative domains to a clean domain set,
+    ranked by the curated InterPro entry `type`.
+
+    Only the InterPro Domain and Repeat entries survive - the curated structural
+    units. Everything else is dropped outright, and a protein annotated with
+    nothing else has no domains, which is the honest answer rather than a gap
+    papered over with a weaker assignment:
+
+      - Family and Homologous_superfamily say what the protein IS rather than
+        delimiting a unit within it.
+      - Active_site / Binding_site / Conserved_site / PTM are residue positions
+        rather than regions.
+      - Member-database hits (Pfam, CDD, G3DSA, PANTHER, SUPERFAMILY, ...) are
+        signatures, not curated units, and InterPro types many of them as
+        homologous superfamilies itself - G3DSA:3.30.160.60 and
+        G3DSA:1.20.140.150 both come back `homologous_superfamily` with
+        `integrated: null` from its API. Keeping them while dropping the InterPro
+        entries that say the same thing filtered by who issued the accession
+        rather than by what the entry is.
+
+    Dropping them costs coverage: they were ~a fifth of the reported rows, and
+    proteins whose only annotation is a member-DB hit now have no domains at all.
+    That is the intended trade - a reported domain change now always rests on a
+    curated InterPro Domain or Repeat.
+
+    Then collapse genuine duplicates: two kept rows with the SAME domain_id whose
+    overlap covers at least _SAME_ID_OVERLAP of the shorter one -> keep the longer.
+    Same accession at disjoint or barely-touching positions (e.g. two tandem RRM
+    instances) is kept as two domains. Return sorted by AA_start.
+
+    Deliberately NOT handled here: cross-transcript identity when canonical and
+    compared annotate one physical domain under different accessions, and
+    surfacing an event region that carries no InterPro Domain entry at all. Both
+    need a sequence-level model rather than the accessions DoChaP stores.
+
+    Requires 'domain_id' and 'type' columns; a frame without them (the
+    DomainEvent/DomainType tables) is returned unchanged. A frame whose `type` is
+    entirely NULL is NOT waved through - those rows are all member-DB signatures,
+    and a protein annotated with nothing else has no domains. A frame of
+    one row is NOT short-circuited: whether that row is a domain does not depend on
+    what surrounds it, so a lone Family or site entry is dropped like any other.
+    """
+    if 'domain_id' not in df_domains.columns or 'type' not in df_domains.columns:
+        return df_domains
+
+    df = df_domains
+    dom_id = df['domain_id'].astype(str)
+    starts = df['AA_start']
+    ends = df['AA_end']
+
+    # One definition of the tiers, shared with the PDF - see domain_entry_tiers().
+    # Only TIER_PRIMARY is a domain; TIER_MEMBER and TIER_IGNORED rows are not
+    # ranked against it, they are simply dropped.
+    tiers = domain_entry_tiers(df)
+    if tiers is None:
+        # An empty frame: the columns are there but there is nothing to rank, so
+        # `tiers` is None and `None == TIER_PRIMARY` is a plain False, which is
+        # not a valid index. Previously masked by the `type.isna().all()` guard -
+        # vacuously true on an empty frame - which this rule no longer wants.
+        return df_domains
+    if os.environ.get('DOMAS_SKIP_TYPE_FILTER', '').strip() in ('1', 'true', 'yes'):
+        # Evaluation switch: keep every entry regardless of InterPro type, so the
+        # cost of the Domain/Repeat gate can be measured against the cost of the
+        # domain SOURCE. The duplicate collapse below still runs - without it the
+        # frame is not a domain set at all, just raw signature hits.
+        keep = df.index.tolist()
+    else:
+        keep = df.index[tiers == TIER_PRIMARY].tolist()   # InterPro Domain/Repeat
+
+    # collapse genuine duplicates (same accession, overlapping by a majority of the
+    # shorter entry) -> keep the longer
+    keep.sort(key=lambda i: (starts[i], ends[i]))
+    dropped = set()
+    for a in range(len(keep)):
+        ia = keep[a]
+        if ia in dropped:
+            continue
+        for b in range(a + 1, len(keep)):
+            ib = keep[b]
+            if ib in dropped or dom_id[ia] != dom_id[ib]:
+                continue
+            if _aa_overlap_fraction(starts[ia], ends[ia], starts[ib], ends[ib]) >= _SAME_ID_OVERLAP:
+                len_a = ends[ia] - starts[ia]
+                len_b = ends[ib] - starts[ib]
+                dropped.add(ib if len_a >= len_b else ia)
+                if ia in dropped:
+                    break
+
+    keep = [i for i in keep if i not in dropped]
+    return df.loc[keep].sort_values('AA_start')
+
+
+def _min_skip_none(values):
+    present = [v for v in values if v is not None]
+    return min(present) if present else None
+
+
+def _max_skip_none(values):
+    present = [v for v in values if v is not None]
+    return max(present) if present else None
+
+
+def find_relevant_domain_windows(transcript_exons, domain_lookup, canonical_transcript_id, transcript_id,
+                                  canonical_junctions, transcript_junctions, junctions, strand=None,
+                                  cds_spans=None):
+    """
+    Determine the genomic window around the differing junctions and return the
+    domains of the canonical and compared transcript that fall within it.
+
+    Two rounds, not an iteration to convergence: round 1 collects the domains
+    overlapping the boundary exons of the event span - the exons of BOTH
+    transcripts pooled into one genomic span, so neither is windowed over a
+    stretch the other is not; round 2 then REPLACES that window with the union of
+    the event span and those domains' own genomic span - again pooled across both
+    transcripts, so each is windowed identically - and re-collects.
+
+    Round 2 always CONTAINS round 1: round 1's span is pooled in alongside the
+    domains it found, and aa_range_for_span() is monotone, so the containment
+    holds of the AA intervals and not merely of the genomic spans. That
+    containment is free - the flank round 1 snapped out to was already searched by
+    it, so any domain there contributes its own extent to the pool regardless -
+    and without it the two windows can overlap without either containing the
+    other, which takes a paragraph to explain every time they are drawn together.
+
+    Pooling round 1's span in is what made the projection's monotonicity load
+    bearing: it pushes round 2's bounds out onto whole exons, and reading the AA
+    interval off the bounding pair collapsed it to a point wherever one of those
+    exons was wholly UTR, emptying the window instead of widening it.
+    Round 2 is skipped when round 1 found no domains in either transcript.
+    Both rounds select from the already-reduced representative domain set (see
+    filter_representative_domains()).
+
+    Returns (t_domains_in_region, c_domains_in_region), each with a 'length'
+    column added (AA_end - AA_start + 1).
+    """
+    junction_idxs = canonical_junctions | transcript_junctions
+    # min/max over BOTH coordinates, as above: taking min-of-starts and
+    # max-of-ends built a truncated - sometimes inverted - window from a pair
+    # written end-first.
+    min_bp = min(min(junctions[idx]) for idx in junction_idxs)
+    max_bp = max(max(junctions[idx]) for idx in junction_idxs)
+
+    t_exons = transcript_exons[transcript_id]
+    c_exons = transcript_exons[canonical_transcript_id]
+
+    # Orientation for every genomic <-> CDS mapping below. The gene's own strand
+    # where the caller knows it; otherwise read off each transcript's exons,
+    # which is all a direct caller has.
+    if strand is not None:
+        t_minus = c_minus = (strand == '-')
+    else:
+        t_minus, c_minus = _exons_are_minus(t_exons), _exons_are_minus(c_exons)
+
+    # Each transcript's coding sequence in genomic coordinates, as an INCLUSIVE
+    # (first, last) base pair. DoChaP stores cds_end half-open, like every other
+    # end coordinate it writes, so the last coding base is one below it. None for
+    # a transcript with no annotated protein, and for a caller that has no
+    # transcripts frame - the projection then assumes each exon codes throughout,
+    # which is only wrong at the two ends of the coding sequence.
+    t_cds = c_cds = None
+    if cds_spans:
+        t_span, c_span = cds_spans.get(transcript_id), cds_spans.get(canonical_transcript_id)
+        t_cds = (t_span[0], t_span[1] - 1) if t_span else None
+        c_cds = (c_span[0], c_span[1] - 1) if c_span else None
+
+    # Round 1: window spanning the boundary exons of the differing junctions.
+    # The two transcripts bound the event with exons of their own, which need not
+    # line up - one may splice where the other reads through. Taking each
+    # transcript's own pair would window them over different stretches of the
+    # gene and compare domain sets drawn from different regions, so the bounding
+    # exons of both are pooled into one genomic span and each transcript is
+    # windowed by that. The span is then re-snapped to whole exons per transcript,
+    # keeping round 1's defining property: it never cuts an exon in half.
+    t_first_exon, t_last_exon = find_boundary_exons(t_exons, min_bp, max_bp)
+    c_first_exon, c_last_exon = find_boundary_exons(c_exons, min_bp, max_bp)
+
+    # min/max over all four bounding exons, not over a first/last pair: strand is
+    # irrelevant here because find_boundary_exons() works in genomic coordinates
+    # (its "first" is the genomically-leftmost exon on either strand), but an
+    # event span lying wholly inside one transcript's intron makes that
+    # transcript's "first" exon fall to the RIGHT of its "last" one, and pairing
+    # them would invert the span.
+    bounding = (t_first_exon, t_last_exon, c_first_exon, c_last_exon)
+    common_first_bp = min(e['genomic_start_tx'] for e in bounding)
+    common_last_bp = max(e['genomic_end_tx'] for e in bounding)
+
+    # Re-snapping to whole exons happens HERE, on the pooled span, and the result
+    # is folded back into the span itself rather than applied per transcript at
+    # projection time. Round 1 then has one span, whose ends are exon boundaries in
+    # both transcripts, and round 2's pool starts from it - which is what makes the
+    # containment below hold: round 2's span contains round 1's, and the projection
+    # is monotone, so round 2's AA interval contains round 1's.
+    #
+    # Every exon the span touches must end up inside it WHOLE. Snapping each
+    # transcript once against the pooled span is not enough: widening it for one
+    # transcript can bring a further exon of the other within reach, leaving that
+    # one half-covered, and the projection would then read the overlap rather than
+    # the exon - narrowing round 1 instead of leaving it alone.
+    common_first_bp, common_last_bp = _snap_span_to_whole_exons(
+        (t_exons, c_exons), common_first_bp, common_last_bp)
+
+    t_aa_round1 = aa_range_for_span(t_exons, common_first_bp, common_last_bp, t_minus, t_cds)
+    c_aa_round1 = aa_range_for_span(c_exons, common_first_bp, common_last_bp, c_minus, c_cds)
+
+    # The domain set is reduced by curated InterPro entry type, not by the
+    # geometry of the hits.
+    # Already reduced by the ladder - see build_filtered_domain_lookup(). The
+    # domain set is chosen by curated InterPro entry type, not by the geometry of
+    # the hits, so it does not depend on the window computed above.
+    df_t_domains = domain_lookup(transcript_id)
+    df_c_domains = domain_lookup(canonical_transcript_id)
+
+    t_domains_round1 = _domains_in_span(df_t_domains, t_aa_round1)
+    c_domains_round1 = _domains_in_span(df_c_domains, c_aa_round1)
+
+    # Round 2: round 1's window widened to cover the domains it found, so the
+    # second window always CONTAINS the first. Pooling round 1's own span in
+    # costs nothing - the flank it adds was already searched by round 1, so any
+    # domain there is in the pool already - and it buys an invariant that can be
+    # stated in one line instead of a caveat wherever the two are drawn.
+    # Skipped when round 1 found no domains in either transcript.
+    if t_domains_round1.empty and c_domains_round1.empty:
+        t_domains_round2, c_domains_round2 = t_domains_round1, c_domains_round1
+    else:
+        t_min_bp, t_max_bp = find_bp_range_for_domains(t_exons, t_domains_round1, t_minus, t_cds)
+        c_min_bp, c_max_bp = find_bp_range_for_domains(c_exons, c_domains_round1, c_minus, c_cds)
+        common_min_bp = _min_skip_none([common_first_bp, min_bp, t_min_bp, c_min_bp])
+        common_max_bp = _max_skip_none([common_last_bp, max_bp, t_max_bp, c_max_bp])
+
+        if common_min_bp is None or common_max_bp is None:
+            t_domains_round2, c_domains_round2 = t_domains_round1, c_domains_round1
+        else:
+            # No re-snapping here: round 2 is meant to end on a domain boundary, and
+            # aa_range_for_span() reads a bound that falls inside a coding exon as
+            # that interior position.
+            t_domains_round2 = _domains_in_span(
+                df_t_domains, aa_range_for_span(t_exons, common_min_bp, common_max_bp, t_minus, t_cds))
+            c_domains_round2 = _domains_in_span(
+                df_c_domains, aa_range_for_span(c_exons, common_min_bp, common_max_bp, c_minus, c_cds))
+
+    # _domains_in_aa_range() returns a boolean-mask slice: already independent,
+    # but carrying pandas' "copy of a slice" marker, which trips
+    # SettingWithCopyWarning on the ['length'] assignment below. Only the round-2
+    # frames are mutated, so copy here rather than in a helper called 4x per pair.
+    t_domains_round2 = t_domains_round2.copy()
+    c_domains_round2 = c_domains_round2.copy()
+    t_domains_round2['length'] = t_domains_round2['AA_end'] - t_domains_round2['AA_start'] + 1
+    c_domains_round2['length'] = c_domains_round2['AA_end'] - c_domains_round2['AA_start'] + 1
+    return t_domains_round2, c_domains_round2
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: domain comparison and classification
+# ---------------------------------------------------------------------------
+
+
+
+def _domain_name_sets(df_domains, name_cols=DOMAIN_NAME_COLUMNS):
+    """
+    Vectorized replacement for {idx: domain_name_set(row) for idx, row in
+    df_domains.iterrows()}. .iterrows() builds a full (mixed-dtype) Series
+    per row - one of the most expensive ways to iterate a DataFrame. Pulling
+    each column to a numpy array once and indexing by position instead
+    avoids that Series construction; called for every compared transcript in
+    Phase 3, so this matters at scale.
+    """
+    if df_domains.empty:
+        return {}
+    columns = [df_domains[col].to_numpy(dtype=object) for col in name_cols]
+    result = {}
+    for pos, idx in enumerate(df_domains.index):
+        names = set()
+        for col_values in columns:
+            val = col_values[pos]
+            if val is None or pd.isna(val):
+                continue
+            for name in str(val).split(';'):
+                name = name.strip()
+                if name and name not in ('None', 'nan'):
+                    names.add(name)
+        result[idx] = names
+    return result
+
+
+def group_by_shared_names(items_with_names):
+    """
+    items_with_names: iterable of (key, set_of_names).
+    Group keys together if their name-sets overlap (transitively).
+    Returns: list of lists of keys.
+    """
+    groups = []  # list of [keys, names]
+    for key, names in items_with_names:
+        matching = [g for g in groups if g[1] & names]
+        if not matching:
+            groups.append([[key], set(names)])
+            continue
+        merged = matching[0]
+        for other in matching[1:]:
+            merged[0].extend(other[0])
+            merged[1] |= other[1]
+            groups.remove(other)
+        merged[0].append(key)
+        merged[1] |= names
+    return [keys for keys, _ in groups]
+
+
+def total_covered_length(df, idxs, start_col='AA_start', end_col='AA_end'):
+    """
+    Total length covered by the union of [start, end] intervals (inclusive),
+    merging overlapping intervals so overlaps aren't double-counted.
+    """
+    if not idxs:
+        return None
+    # .at[] is a much cheaper scalar accessor than .loc[] (skips the general
+    # multi-axis alignment machinery) - this runs once per matched domain
+    # group in Phase 3, so the per-call savings add up over a large file.
+    intervals = sorted((df.at[i, start_col], df.at[i, end_col]) for i in idxs)
+    total = 0
+    cur_start, cur_end = intervals[0]
+    for start, end in intervals[1:]:
+        if start <= cur_end:  # overlapping interval -> merge
+            cur_end = max(cur_end, end)
+        else:
+            total += cur_end - cur_start + 1
+            cur_start, cur_end = start, end
+    return total + cur_end - cur_start + 1
+
+
+# classify_length_pair()'s three outcomes, as the results CSV names them. Not a
+# suffix rule any more: 'unchanged' becomes no_domain_change rather than taking a
+# '_domain' ending the way the other two do.
+LENGTH_CHANGE_LABELS = {'unchanged': 'no_domain_change',
+                        'longer': 'longer_domain',
+                        'shorter': 'shorter_domain'}
+
+
+def classify_length_pair(t_length, c_length):
+    if t_length == c_length:
+        return 'unchanged'
+    return 'longer' if t_length > c_length else 'shorter'
+
+
+def classify_domain_change(c_count, t_count, c_length, t_length):
+    """
+    Classify a group of matched domains (c_count in canonical, t_count in the
+    compared transcript) into one of the Phase 3 result categories.
+
+    Counts of 0 and 1 are NOT special cases. A group where the two sides hold
+    different numbers of domain instances is a count change whatever those
+    numbers are, so what used to be 'added_domain' (0 -> n) and 'split_domain'
+    (1 -> n) are both 'domain_gain', and 'dropped_domain' (n -> 0) and
+    'merged_domain' (n -> 1) are both 'domain_loss'. Equal counts are a length
+    comparison, single pairs included - 'longer_domain' / 'shorter_domain', or
+    'no_domain_change' where the two lengths agree.
+
+    That leaves five outcomes, and every one of them says the same thing
+    regardless of how many instances are involved:
+
+      C != T  -> 'domain_gain' / 'domain_loss'
+      C == T  -> 'no_domain_change' / 'longer_domain' / 'shorter_domain'
+    """
+    if c_count != t_count:
+        return 'domain_gain' if c_count < t_count else 'domain_loss'
+    return LENGTH_CHANGE_LABELS[classify_length_pair(t_length, c_length)]
+
+
+def classify_protein_change(canonical_has_protein, transcript_has_protein):
+    """Name the outcome when an annotated protein is present on one side only,
+    or None when the two sides agree and the domains decide the outcome instead.
+
+    Named from the alternative transcript's side, like every other outcome:
+    'non_coding_alternative' is the alternative lacking the protein the canonical has.
+    Neither side having one is not a change - both are non-coding, and the
+    comparison goes on to find no domains in the region.
+
+    'gained_protein' cannot arise against DoChaP as it stands, and is kept for
+    the symmetry rather than for the rows it produces. It needs a canonical with
+    no protein in a gene where some other transcript has one, and neither route
+    to a canonical can produce that: no gene in the database - keyed either way,
+    0 of 12,141 with a flagged canonical - flags a protein-less transcript while
+    a coding sibling exists, and the fallback in _resolve_canonical() puts
+    protein-coding candidates first by construction. A database or an annotation
+    that stops holding to that starts producing the label instead of quietly
+    comparing a coding transcript against a non-coding canonical.
+    """
+    if canonical_has_protein == transcript_has_protein:
+        return None
+    return 'non_coding_alternative' if canonical_has_protein else 'gained_protein'
+
+
+def choose_domain_display_name(names, prefixes=DOMAIN_NAME_PREFIX_PRIORITY):
+    # Sort for a deterministic choice: iteration order over a `set` of names
+    # depends on Python's per-process string hash seed, which would otherwise
+    # make the chosen name vary between runs.
+    sorted_names = sorted(names)
+    for prefix in prefixes:
+        for name in sorted_names:
+            if name.lower().startswith(prefix.lower()):
+                return name
+    return sorted_names[0] if sorted_names else None
+
+
+def _group_text(c_domains, c_idxs, t_domains, t_idxs, column):
+    """One identity group's text from `column`, taken from whichever source supplied
+    the domains: RepresentativeDomains under representative domains, DomainType
+    otherwise - both reach here under the same column names, `short_description` for
+    the entry's name and `description` for its prose.
+
+    A group can hold several entries (a repeat present twice, a domain split in
+    two), and a dropped or new domain has entries on one side only. Canonical is
+    read first so the text describes the reference where there is one; distinct
+    values are joined rather than picked between.
+    """
+    values = []
+    for df, idxs in ((c_domains, c_idxs), (t_domains, t_idxs)):
+        if column not in df.columns:
+            continue
+        for i in idxs:
+            value = df.at[i, column]
+            if pd.isna(value):
+                continue
+            text = str(value).strip()
+            if text and text.lower() not in ('nan', 'none') and text not in values:
+                values.append(text)
+    return '; '.join(values) if values else None
+
+
+def domain_coordinates_comparable(domain_lookup, transcript_id):
+    """Whether every domain of `transcript_id` has coordinates that were
+    established against this protein (see utils.PROJECTION_COMPARABLE).
+
+    Asked of the transcript's WHOLE domain frame, deliberately not of the
+    windowed subset find_relevant_domain_windows() returns. A row the projection
+    could not validate still carries the coordinates it inherited from another
+    isoform, so it may sit outside the window, join no identity group, and be
+    dropped from the comparison with nothing recorded - which is the single
+    failure this check exists to prevent. Windowing first would reintroduce it.
+
+    Two frames pass unconditionally: one with no domains (nothing to doubt) and
+    one with no projection_status column, which is what the DomainEvent /
+    DomainType source produces. A NaN status is the same case row-wise, where a
+    run mixes that source with RepresentativeDomains.
+    """
+    domains = domain_lookup(transcript_id)
+    if domains is None or len(domains) == 0:
+        return True
+    if 'projection_status' not in domains.columns:
+        return True
+    status = domains['projection_status']
+    return not bool((status.notna() & ~status.isin(PROJECTION_COMPARABLE)).any())
+
+
+def compare_domains(domain_lookup, transcript_exons, canonical_transcript_id, transcript_id,
+                     canonical_junctions, transcript_junctions, junctions, strand=None,
+                     cds_spans=None):
+    """
+    Compare the domains of `transcript_id` against `canonical_transcript_id`
+    within the Phase 2 window, and classify each group of matched/unmatched
+    domains.
+
+    Domains are grouped into "identity groups": two domains belong to the same
+    group if they share at least one non-empty name (pfam/interpro/smart/etc),
+    transitively.
+
+    Yields one event dict per group, classified as:
+    - C < T             -> 'domain_gain'       (includes C=0, and C=1 splits)
+    - C > T             -> 'domain_loss'       (includes T=0, and T=1 merges)
+    - C == T            -> 'no_domain_change' / 'longer_domain' / 'shorter_domain'
+                           (by total length; includes the single-pair C=T=1 case)
+    """
+    t_domains, c_domains = find_relevant_domain_windows(
+        transcript_exons, domain_lookup, canonical_transcript_id, transcript_id,
+        canonical_junctions, transcript_junctions, junctions, strand, cds_spans,
+    )
+
+    canonical_names = _domain_name_sets(c_domains)
+    transcript_names = _domain_name_sets(t_domains)
+
+    tagged_items = (
+        [(('C', idx), names) for idx, names in canonical_names.items()]
+        + [(('T', idx), names) for idx, names in transcript_names.items()]
+    )
+
+    for members in group_by_shared_names(tagged_items):
+        c_idxs = sorted((idx for kind, idx in members if kind == 'C'), key=lambda i: c_domains.loc[i, 'AA_start'])
+        t_idxs = sorted((idx for kind, idx in members if kind == 'T'), key=lambda i: t_domains.loc[i, 'AA_start'])
+
+        c_count, t_count = len(c_idxs), len(t_idxs)
+        c_length = total_covered_length(c_domains, c_idxs)
+        t_length = total_covered_length(t_domains, t_idxs)
+
+        names = set()
+        for i in c_idxs:
+            names |= canonical_names[i]
+        for i in t_idxs:
+            names |= transcript_names[i]
+
+        yield {
+            'event': classify_domain_change(c_count, t_count, c_length, t_length),
+            'alternative_transcript_id': transcript_id,
+            'domain_id': choose_domain_display_name(names),
+            'domain_name': _group_text(c_domains, c_idxs, t_domains, t_idxs, 'short_description'),
+            'domain_description': _group_text(c_domains, c_idxs, t_domains, t_idxs, 'description'),
+            # A side with no domains in the window covers zero amino acids.
+            # That is a measurement, not a missing value - the companion count
+            # column already reports 0 for it, and a blank beside a 0 reads as
+            # "unknown" when the answer is known. total_covered_length() keeps
+            # returning None (it has no interval to measure, and other callers
+            # rely on telling that apart); the CSV writes the 0.
+            #
+            # Only the two length columns are affected. Rows that never reached
+            # a domain comparison at all - non_coding_alternative / gained_protein, where
+            # the alternative has no protein - leave every domain column blank,
+            # counts included, and stay blank: 0 there would assert a comparison
+            # that was never made.
+            'canonical_domain_length': 0 if c_length is None else c_length,
+            'alternative_domain_length': 0 if t_length is None else t_length,
+            'canonical_domains_number': c_count,
+            'alternative_domains_number': t_count,
+        }
+
+
+def _assert_specie_matches_database(df_junctions, gene_specie):
+    """Abort when the species carried on the junctions contradicts DoChaP.
+
+    Catches a wrong -species for any gene the database holds - unlike the Ensembl
+    prefix check, which is blind to GeneID-keyed genes. Genes absent from the
+    database say nothing and are left to the gene_not_in_db path.
+    """
+    if not gene_specie or 'specie' not in df_junctions.columns:
+        return
+
+    expected = df_junctions['specie'].map(
+        lambda s: utils.SPECIE_DB_NAME.get(s) if isinstance(s, str) else None)
+    actual = df_junctions['gene_ensembl_id'].map(gene_specie)
+    mismatched = df_junctions[expected.notna() & actual.notna() & (expected != actual)]
+    if mismatched.empty:
+        return
+
+    found = sorted({utils.SPECIE_FROM_DB_NAME.get(s, s)
+                    for s in actual[mismatched.index].dropna().unique()})
+    stated = sorted(mismatched['specie'].dropna().unique())
+    examples = ', '.join(str(g) for g in mismatched['gene_ensembl_id'].unique()[:3])
+    raise ValueError(
+        f"Species mismatch: {len(mismatched)} of {len(df_junctions)} rows are stated as "
+        f"{'/'.join(stated)} but their genes are {'/'.join(found)} in the database "
+        f"(e.g. {examples}). Re-run with the species the data actually came from."
+    )
+
+
+# Columns whose written name differs from the one carried in memory.
+#
+# The analysis spells the species column 'specie' throughout because that is how
+# DoChaP spells it (Genes.specie), and every read of the database, every junction
+# frame and every internal helper agrees with it. The written CSV is a different
+# audience: it is the run's published output, read by people and by other tools,
+# and there the correct English plural belongs.
+#
+# Renaming only at the write boundary keeps those two facts from fighting - the
+# in-memory name still matches the column it came from, and this stays a
+# two-line change instead of a 350-site rename. Readers of the CSV normalise the
+# other way on load (results_stats.load_results_csv, compare_results_csv), so a
+# file written before or after this change loads identically.
+OUTPUT_COLUMN_RENAMES = {'specie': 'species',
+                         'group': 'alternative_transcripts_group',
+                         'event_type': 'event_effect_on_domain'}
+
+
+def output_column_names(columns):
+    """`columns` as the results CSV spells them."""
+    return [OUTPUT_COLUMN_RENAMES.get(column, column) for column in columns]
+
+
+# The order the results CSV is written in, most consequential outcome first: a
+# transcript that stops coding, then domains gained or lost outright, then
+# domains merely resized, then the rows where nothing about the domains changed.
+# Reading stops when it stops being interesting, instead of scanning a file
+# ordered by which worker finished first.
+#
+# A label not named here sorts after all of them rather than into some arbitrary
+# position - which is where gained_protein lands, and it should be conspicuous:
+# the canonical transcript not coding while an alternative one does is not
+# something the data should produce.
+OUTPUT_EVENT_ORDER = ('non_coding_alternative', 'domain_gain', 'domain_loss',
+                      'longer_domain', 'shorter_domain', 'no_domain_change',
+                      'no_domains_in_region')
+
+# Within longer_domain and shorter_domain, by how much the domain's length
+# changed against the canonical one, largest change first - so the most
+# stretched domain heads the longer block and the most truncated one heads the
+# shorter block. Every other outcome keeps the order the run produced it in.
+LENGTH_ORDERED_EVENTS = frozenset({'longer_domain', 'shorter_domain'})
+
+# The written column holding that same measurement, so a reader can sort or
+# filter on what the default order already ranks by.
+LENGTH_CHANGE_COLUMN = 'length_change_pct'
+
+# Written as whole numbers. LENGTH_CHANGE_COLUMN is deliberately not among them:
+# it is a percentage, and 43.75 belongs in the same column as 100.0.
+INTEGER_OUTPUT_COLUMNS = ('canonical_domain_length', 'alternative_domain_length',
+                          'canonical_domains_number', 'alternative_domains_number')
+
+# The group column is written as "group/total": which of the cluster's groups of
+# alternative transcripts this row describes, and how many groups the cluster
+# holds. The bare index did not say whether the reader was looking at the only
+# group or at one of nine, which is the first thing you want to know about a
+# group - and answering it meant scanning the rest of the cluster's rows.
+#
+# Text, deliberately, which is why it is not in INTEGER_OUTPUT_COLUMNS: "2/3" is
+# not a number, and a spreadsheet left to guess reads it as a date. Both Excel
+# writers spell it as a string cell.
+GROUP_COLUMN = OUTPUT_COLUMN_RENAMES['group']
+
+# The gene_symbol cells of the workbook link to that gene's DoChaP page, the way
+# the web GUI's table does (domasController.geneHref). The row's two transcripts
+# ride along so the page opens showing only those; DoChaP matches each against
+# both the refseq and the ensembl id.
+#
+# The /results/:specie/:query route filters on the database spelling of the
+# species while the CSV carries the common name; anything not in the map falls
+# back to 'all', which the server reads as "do not filter by species".
+DOCHAP_URL = 'https://dochap.bgu.ac.il'
+
+# Excel refuses to open a worksheet holding more than this many hyperlinks, so a
+# large file is written without them rather than written broken. A genome-wide
+# non_compared sheet runs to millions of rows; linking every one of them would
+# also take longer than the analysis that produced it.
+EXCEL_MAX_HYPERLINKS = 65530
+DOCHAP_DB_SPECIE = {'human': 'H_sapiens', 'mouse': 'M_musculus', 'rat': 'R_norvegicus',
+                    'zebrafish': 'D_rerio', 'frog': 'X_tropicalis'}
+
+#: How a linked gene cell is drawn. Spelled out rather than left to openpyxl's
+#: builtin 'Hyperlink' named style, which writes `<color theme="10"/>` with NO
+#: underline at a size of 12 - so the cell came out blue, a point larger than its
+#: neighbours, and not underlined. Blue alone is a weak cue, the odd size shows
+#: next to the rest of the row, and a theme reference is resolved by whatever
+#: opens the file: Numbers and Google Sheets do not reliably map theme 10 to the
+#: hyperlink colour, which leaves the cell looking like plain text. An explicit
+#: rgb and a real underline read as a link in all of them. 0563C1 is the
+#: hyperlink colour of Excel's own default theme, so Excel itself looks unchanged.
+EXCEL_HYPERLINK_RGB = 'FF0563C1'
+
+
+def dochap_gene_url(gene, specie, canonical=None, alternative=None, base_url=DOCHAP_URL):
+    """The DoChaP page for one results row's gene, or None where there is no gene
+    to link to."""
+    gene = (gene or '').strip()
+    if not gene or gene.lower() in ('nan', 'none'):
+        return None
+    specie = DOCHAP_DB_SPECIE.get((specie or '').strip().lower(), 'all')
+    url = f"{base_url.rstrip('/')}/#!/results/{specie}/{quote(gene, safe='')}"
+    ids = [t.strip() for t in (canonical, alternative)
+           if t and str(t).strip() and str(t).strip().lower() not in ('nan', 'none')]
+    if ids:
+        url += '/' + quote(','.join(ids), safe='')
+    return url
+
+# A cluster is identified by name AND species: the internal cross-species format
+# gives a human/mouse ortholog pair the same cluster name, so counting a
+# cluster's groups by name alone would pool the two and overstate both totals.
+GROUP_CLUSTER_KEYS = ('event', OUTPUT_COLUMN_RENAMES['specie'])
+
+
+def add_group_of_total(df):
+    """Rewrite GROUP_COLUMN from a bare index to "group/total".
+
+    The total is how many groups the row's cluster holds. Applied at the write
+    boundary, on a frame holding whole clusters, and before the compared /
+    non_compared split - so the denominator counts every group of the cluster,
+    not just those that landed in the same file.
+
+    Rows belonging to no group at all - the cluster-level outcomes, which carry
+    an empty index - stay empty rather than becoming "0/0".
+    """
+    if GROUP_COLUMN not in df.columns:
+        return df
+    keys = [key for key in GROUP_CLUSTER_KEYS if key in df.columns]
+    group = pd.to_numeric(df[GROUP_COLUMN], errors='coerce')
+    # nunique() ignores the empty ones, so a cluster whose every row is a
+    # non-comparison totals 0 - and every one of its rows is masked out below.
+    totals = (group.groupby([df[key] for key in keys], dropna=False).transform('nunique')
+              if keys else pd.Series(group.nunique(), index=df.index))
+
+    labelled = (group.astype('Int64').astype(str) + '/'
+                + pd.to_numeric(totals).astype('Int64').astype(str))
+    df = df.copy()
+    df[GROUP_COLUMN] = labelled.where(group.notna(), '')
+    return df
+
+
+def length_change_pct(canonical, alternative):
+    """How much the domain's length changed, as a percentage of the canonical one.
+
+    A magnitude: a domain cut in half and one grown by half are both a 50%
+    change, and the outcome column already says which of the two happened. This
+    is the number the default row order ranks the longer_domain and
+    shorter_domain blocks by, computed once here so the column a reader sorts on
+    and the order they were handed cannot drift apart.
+
+    Empty where the change cannot be measured: a row with no domain lengths at
+    all (every transcript-level outcome), and a canonical domain of zero length
+    - there is no baseline to express a change as a fraction of. That second
+    case is every domain_gain row, the canonical side holding no domain.
+    """
+    canonical = pd.to_numeric(canonical, errors='coerce')
+    alternative = pd.to_numeric(alternative, errors='coerce')
+    # Masked rather than divided by zero: the division would yield inf, which
+    # reads as a real (enormous) change rather than as an unanswerable question.
+    return (alternative - canonical).abs() / canonical.where(canonical != 0) * 100.0
+
+
+def add_length_change_pct(df):
+    """`df` - spelled as the CSV spells it - with LENGTH_CHANGE_COLUMN inserted
+    next to the two lengths it is derived from, rather than appended at the end
+    where it would sit apart from them."""
+    if LENGTH_CHANGE_COLUMN in df.columns or 'alternative_domain_length' not in df.columns:
+        return df
+    values = length_change_pct(df['canonical_domain_length'], df['alternative_domain_length'])
+    df = df.copy()
+    # Two decimals: the number is a percentage of a length in whole amino acids,
+    # and full float precision would print 14 digits of noise per row.
+    df.insert(df.columns.get_loc('alternative_domain_length') + 1,
+              LENGTH_CHANGE_COLUMN, values.round(2))
+    return df
+
+
+def written_column_names(columns):
+    """`columns` as the results CSV spells them, derived columns included."""
+    names = output_column_names(columns)
+    if 'alternative_domain_length' in names:
+        names.insert(names.index('alternative_domain_length') + 1, LENGTH_CHANGE_COLUMN)
+    return names
+
+
+def sort_output_rows(df):
+    """`df` - a results frame spelled as the CSV spells it - in OUTPUT_EVENT_ORDER.
+
+    Stable, so rows that tie keep the order the analysis produced them in, which
+    is what -keep_input_order preserves wholesale.
+    """
+    if df.empty:
+        return df
+
+    event_column = OUTPUT_COLUMN_RENAMES['event_type']
+    events = df[event_column]
+    rank = events.map({name: index for index, name in enumerate(OUTPUT_EVENT_ORDER)})
+    rank = rank.fillna(len(OUTPUT_EVENT_ORDER)).astype(float)
+
+    # The same measurement the LENGTH_CHANGE_COLUMN carries - one definition, so
+    # the order and the column agree by construction. Zero everywhere the order
+    # does not depend on it, so no other outcome's rows are disturbed: rows with
+    # no domain lengths at all, and the blocks ranked by nothing but their event.
+    change = length_change_pct(df['canonical_domain_length'], df['alternative_domain_length'])
+    change = change.where(events.isin(LENGTH_ORDERED_EVENTS)).fillna(0.0)
+
+    order = pd.DataFrame({'event': rank.to_numpy(), 'change': -change.to_numpy()})
+    return df.iloc[order.sort_values(['event', 'change'], kind='stable').index]
+
+
+def sort_output_csv(path):
+    """Rewrite the results CSV at `path` in OUTPUT_EVENT_ORDER.
+
+    Done to the finished file rather than to each chunk as it is written: the
+    order is a property of the whole result, and a chunk only ever holds the
+    clusters one worker happened to finish together. This is the one place the
+    writer reads its own output back, so it is confined to the compared rows -
+    the smaller side, the non-comparisons being about 78% of what a run produces
+    - and skipped entirely under keep_input_order.
+
+    Every field is read and written as text, so the file that comes back differs
+    from the one that went in only in the order of its lines: nothing is parsed
+    into a number and re-formatted on the way out.
+    """
+    if not os.path.exists(path):
+        return
+    df = pd.read_csv(path, dtype=str, keep_default_na=False)
+    if df.empty:
+        return
+    sort_output_rows(df).to_csv(path, index=False)
+
+
+# Stands in for one side of a rank label when that boundary of the feature falls
+# on no exon edge of the reference transcript - an alternative splice site, which
+# is exactly what an event's junction often is.
+UNKNOWN_EXON = '*'
+
+# Marks the reference transcript's final exon, as the internal format's own rank
+# column does ('E13Last'): a junction reaching the end of the transcript rather
+# than an interior exon that happens to be numbered 13.
+LAST_EXON_SUFFIX = 'Last'
+
+
+def exon_pair_label(df_exons, feature):
+    """Name the exons of `df_exons` a feature joins: 'E2_E3', or 'E2_E4' where it
+    skips one, or '*_E5' where its first boundary lands on no exon edge. The
+    reference's final exon carries a 'Last' suffix - 'E11_E13Last'.
+
+    The two sides are named in the order the feature states them - the exon at
+    start_position first, then the one at end_position - which is what the
+    internal format's own rank_h/rank_m do. That order is not always the genomic
+    one: the internal file writes a minus-strand junction high coordinate first,
+    and its label follows suit.
+
+    Each boundary is matched against the exon edge facing the intron, with the
+    same 1bp tolerance find_matching_junction_indices() allows: the lower
+    coordinate meets an exon's genomic_end_tx, the higher one an exon's
+    genomic_start_tx. Strand does not enter into it. A retained intron labels the
+    same way - against a transcript that splices it out, its two ends are that
+    intron's flanking exon edges.
+
+    The reference is a transcript, not the feature's own: the label says where in
+    that transcript's exon numbering the event sits, so a junction absent from it
+    still gets named as long as its ends land on its exon edges.
+
+    None when the reference has no exons at all, and '*_*' when neither end lands
+    on one.
+    """
+    if df_exons is None or df_exons.empty:
+        return None
+
+    exon_orders = df_exons['order_in_transcript'].to_numpy()
+    last_order = exon_orders.max()
+    # The exon below the intron ends where the intron starts; the one above it
+    # starts where the intron ends.
+    lower_edges = df_exons['genomic_end_tx'].to_numpy()
+    upper_edges = df_exons['genomic_start_tx'].to_numpy()
+
+    start_position, end_position = feature
+    low = min(start_position, end_position)
+
+    def _side(bp):
+        edges = lower_edges if bp == low else upper_edges
+        orders = exon_orders[np.abs(edges - bp) <= 1]
+        # Exactly one exon, as in the matcher: a boundary two exons share names
+        # neither of them.
+        if len(orders) != 1:
+            return UNKNOWN_EXON
+        suffix = LAST_EXON_SUFFIX if orders[0] == last_order else ''
+        return f'E{int(orders[0])}{suffix}'
+
+    return f'{_side(start_position)}_{_side(end_position)}'
+
+
+# Values of the canonical_junction_in_cds / alternative_junction_in_cds columns - where a group's
+# junctions sit relative to a transcript's coding sequence.
+CDS_IN = 'yes'            # every junction lies wholly inside the CDS
+CDS_PARTIAL = 'partial'   # a junction straddles a CDS boundary, or the group is mixed
+CDS_OUT = 'no'            # no junction touches the CDS - all of them in a UTR
+CDS_NONE = 'no_cds'       # the transcript has no annotated protein, so no CDS at all
+
+
+def _cds_spans_by_transcript(df_gene_transcripts, transcript_ids, coding_by_transcript):
+    """{transcript_id: (low_bp, high_bp)} - each transcript's coding sequence in
+    genomic coordinates. None when the frame carries no CDS columns at all, which
+    a hand-built one need not.
+
+    A transcript with no annotated protein is left out rather than mapped to a
+    span: DoChaP fills cds_start/cds_end with the transcript's own bounds for
+    those, so keeping them would read every non-coding transcript as coding end
+    to end.
+    """
+    if 'cds_start' not in df_gene_transcripts.columns or 'cds_end' not in df_gene_transcripts.columns:
+        return None
+
+    starts = pd.to_numeric(df_gene_transcripts['cds_start'], errors='coerce')
+    ends = pd.to_numeric(df_gene_transcripts['cds_end'], errors='coerce')
+
+    spans = {}
+    for transcript_id, start, end in zip(transcript_ids, starts, ends):
+        if not coding_by_transcript.get(transcript_id, True):
+            continue
+        if pd.isna(start) or pd.isna(end):
+            continue
+        spans[transcript_id] = (min(int(start), int(end)), max(int(start), int(end)))
+    return spans
+
+
+def _is_missing_gene_id(gene_id):
+    """True when an event names no gene at all. A reader may leave this as None,
+    NaN, or a blank/placeholder string, so all three are treated alike."""
+    if gene_id is None:
+        return True
+    if not isinstance(gene_id, str) and pd.isna(gene_id):
+        return True
+    return str(gene_id).strip().lower() in ('', 'nan', 'none', 'na', '.')
+
+
+class ClusterAnalysisResult:
+    def __init__(self, cluster_name, gene_ensembl_id, gene_symbol, chromosome=None, as_event_type=None, specie=None, strand=None):
+        self.cluster_name = cluster_name
+        self.gene_ensembl_id = gene_ensembl_id
+        self.gene_symbol = gene_symbol
+        self.chromosome = chromosome
+        self.as_event_type = as_event_type
+        self.specie = specie
+        self.strand = strand
+        self.canonical_transcript_id = None
+        self.junctions = []
+        # Per-feature type, parallel to self.junctions (see FEATURE_JUNCTION /
+        # FEATURE_RETAINED_INTRON). None means "every feature is a junction",
+        # which is what a junctions frame without the column yields.
+        self.feature_types = None
+        # Whether to work out the three optional columns - rank,
+        # canonical_junction_in_cds and alternative_junction_in_cds. Off by default: they are
+        # computed per group and per compared transcript, and the writer leaves
+        # them out of the CSV entirely unless the run asked for them.
+        self.extra_columns = False
+        # {transcript_id: (low_bp, high_bp)} genomic CDS spans, filled from the
+        # gene's Transcripts rows - see _cds_spans_by_transcript(). None until
+        # then, and afterwards too when the frame names no CDS columns.
+        self.cds_spans = None
+        # {transcript_id: bool} - whether the transcript carries an annotated
+        # protein, filled by _resolve_gene_transcripts(). Empty until then, and a
+        # missing key reads as True: "unknown" is coding, the same default the
+        # CDS spans use.
+        self.coding_by_transcript = {}
+        # The canonical transcript's exons, once it is resolved. The reference
+        # every rank label and every logged junction is named against.
+        self.canonical_exons = None
+        # What the analysis worked out and the drawing should not work out again:
+        # {transcript_id: [junction indices it carries]} and {transcript_id:
+        # domains left by the ladder}. Filled during analyze(); read by the PDF
+        # (see JunctionsAnalysis._generate_pdfs).
+        self.matched_features = {}
+        self.kept_domains = {}
+        # How many of self.junctions mapped to at least one transcript of the
+        # gene. None while the matching has not run - which is not the same as 0,
+        # and the run summary reports the two apart.
+        self.features_matched = None
+        self.events = []
+
+    def _matched_junction_text(self, transcript_id):
+        """The event's features that one transcript carries, as
+        'low-high;low-high' in ascending order - the canonical_junctions /
+        alternative_junctions columns.
+
+        Read from self.matched_features, which _match_features_to_transcripts()
+        fills as soon as the matching is done, so the rows it records itself
+        (novel_junction, no_canonical_junctions) already carry the canonical's
+        list. Empty for a transcript that carries none of them, and for the rows
+        recorded before any matching happened (gene_not_in_db,
+        no_canonical_transcript, ...) - both mean "no feature to name here", and
+        the event column already says which.
+
+        Identity of a feature is its coordinate pair, which is also what the
+        matching is done on, so a pair repeated in the input is written once.
+        """
+        if not transcript_id:
+            return None
+        matched = self.matched_features.get(transcript_id)
+        if not matched:
+            return None
+        return ';'.join(f'{low}-{high}' for low, high in
+                        sorted({(min(a, b), max(a, b)) for a, b in matched}))
+
+    def add_event(self, event, alternative_transcript_id=None, domain_id=None, domain_name=None, domain_description=None,
+                  canonical_domain_length=None, alternative_domain_length=None,
+                  canonical_domains_number=None, alternative_domains_number=None, is_longest_cds=None,
+                  is_most_like_canonical=None, group=None, rank=None,
+                  canonical_junction_in_cds=None, alternative_junction_in_cds=None,
+                  alternative_junctions=None):
+        # Worked out here rather than passed in by each caller: every event type
+        # wants the same two lists, and they follow from the row's own transcript
+        # ids. A caller that records a row before the matching has run gets empty
+        # ones, which is the honest answer for it.
+        # alternative_junctions overrides the derived list for a row that names no
+        # transcript but does name a feature - novel_junction, which is about one
+        # junction and has no transcript to derive it from.
+        self.events.append((event, alternative_transcript_id,
+                            self._matched_junction_text(self.canonical_transcript_id),
+                            self._matched_junction_text(alternative_transcript_id)
+                            if alternative_junctions is None else alternative_junctions,
+                            group, rank, domain_id, domain_name, domain_description, canonical_domain_length,
+                            alternative_domain_length, canonical_domains_number, alternative_domains_number,
+                            canonical_junction_in_cds, alternative_junction_in_cds,
+                            is_longest_cds, is_most_like_canonical))
+
+    def analyze(self, df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup,
+                canonical_rank=None, write_all_comparable=False):
+        """
+        Run the DOMAS algorithm for this cluster:
+
+        Phase 1 - find the canonical transcript and, for every other transcript
+        of the gene, the junctions (if any) that match its exon structure and
+        the subset of those that are unique compared to the canonical transcript.
+        Where DoChaP flags no canonical transcript for the gene, the longest-CDS
+        transcript stands in for it (protein-coding candidates first), so the
+        cluster is still analyzed rather than dropped.
+
+        Phase 1.5 - split the comparable transcripts into the cluster's distinct
+        events: transcripts adding the same set of features to the canonical form one
+        group, and a group whose set is a subset of another's is dropped as the
+        lesser account of the same region (see _group_by_unique_features()). Each
+        surviving group then gets its own representative, tagged with whether the
+        longest-CDS rule and/or the most-like-canonical rule (see
+        select_most_like_canonical()) picked it. Both rules run over the group's
+        protein-coding candidates where there are any (step 1 of the priority),
+        falling through to all of them where there are none. Exactly one transcript
+        per group is tagged is_longest_cds; is_most_like_canonical is left unset
+        across a group when none of its transcripts qualifies.
+
+        "Longest CDS" means the coding length in bases, not the genomic span from
+        cds_start to cds_end - see _load_exons_and_cds_lengths().
+
+        Phase 2/3 - for each transcript with a unique junction, determine the
+        relevant genomic window and compare its domains against the canonical
+        transcript's, recording one event per domain group.
+
+        Each step below records its own outcome event and reports whether the
+        cluster can go on; the steps run in order and any of the first three can
+        end the analysis.
+        """
+        resolved = self._resolve_gene_transcripts(df_gene_transcripts)
+        if resolved is None:
+            return
+        gene_transcript_ids, coding_by_transcript = resolved
+
+        transcript_exons, cds_length_by_transcript = self._load_exons_and_cds_lengths(
+            gene_transcript_ids, exon_lookup)
+
+        if not self._resolve_canonical(gene_transcript_ids, canonical_transcript_ids, canonical_rank,
+                                       coding_by_transcript, cds_length_by_transcript,
+                                       self.protein_length_by_transcript):
+            return
+
+        self.canonical_exons = transcript_exons.get(self.canonical_transcript_id)
+
+        transcript_junctions, canonical_junctions = self._match_features_to_transcripts(transcript_exons)
+        if canonical_junctions is None:
+            return
+
+        # One pass of the ladder per transcript, shared with the drawing.
+        domain_lookup, self.kept_domains = build_filtered_domain_lookup(domain_lookup)
+
+        unique_by_transcript = self._find_comparable_transcripts(
+            transcript_junctions, canonical_junctions)
+        if not unique_by_transcript:
+            # An event-level outcome, alongside the per-transcript reasons
+            # _find_comparable_transcripts() has already recorded: every transcript
+            # of the gene either carries no feature of the event or carries only
+            # features the canonical one has too, so there is nothing to compare
+            # the canonical against and the cluster yields no group at all.
+            self.add_event('all_known_junctions_are_canonical')
+            logger.debug(
+                f"No transcript with a unique junction for cluster {self.cluster_name}, "
+                f"specie {self.specie}. Skipping analysis."
+            )
+            return
+
+        # One comparison per distinct event in the cluster, not one per cluster.
+        for group_index, group_features, group_transcript_ids in self._group_by_unique_features(unique_by_transcript):
+            longest_cds_transcript_id, most_like_canonical_transcript_id = self._select_representatives(
+                group_transcript_ids, coding_by_transcript, cds_length_by_transcript, transcript_exons)
+
+            # Same priority as selected_comparable_rows() and
+            # results_stats.select_representative_transcript(): most-like-canonical
+            # where one qualifies, else longest-CDS. Applied here rather than at write
+            # time so the domains of the transcripts that would be discarded are never
+            # fetched or compared.
+            compared = group_transcript_ids
+            if not write_all_comparable:
+                selected = most_like_canonical_transcript_id or longest_cds_transcript_id
+                if selected is not None:
+                    compared = [selected]
+
+            rank_label = self._rank_label(group_features)
+            self._log_group(group_index, compared)
+            self._record_not_chosen(group_index, group_features, group_transcript_ids,
+                                    compared, rank_label,
+                                    most_like_canonical_transcript_id is not None)
+
+            self._compare_transcripts(
+                compared, transcript_junctions, canonical_junctions,
+                transcript_exons, domain_lookup,
+                longest_cds_transcript_id, most_like_canonical_transcript_id,
+                group_index, rank_label, group_features)
+
+    def _resolve_gene_transcripts(self, df_gene_transcripts):
+        """The gene's usable transcript ids and which of them are protein-coding,
+        or None when the cluster cannot be analysed at all (the reason is recorded
+        as the cluster's event)."""
+        # No gene named at all, as opposed to one named and not found: LeafCutter
+        # clusters are built annotation-free, so overlapping nothing annotated is
+        # an expected outcome, not a failed lookup. A missing id alone does not
+        # say which it is - a named gene whose symbol did not resolve also arrives
+        # without one - so the symbol decides.
+        if _is_missing_gene_id(self.gene_ensembl_id) and _is_missing_gene_id(self.gene_symbol):
+            self.add_event('no_gene_specified')
+            logger.debug(f"No gene named for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
+            return None
+
+        # Check if gene exists in the database at all. Done before any column is
+        # read, so an absent gene can be signalled with a plain empty frame (or
+        # None) rather than one carrying the DB's columns.
+        if df_gene_transcripts is None or df_gene_transcripts.empty:
+            self.add_event('gene_not_in_db')
+            logger.debug(f"Gene {self.gene_ensembl_id} ({self.gene_symbol}) not found in database for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
+            return None
+
+        # Use an order-preserving dedup (not `set`) so the order in which
+        # transcripts are processed - and therefore the order of the output
+        # rows - doesn't depend on Python's per-process string hash seed.
+        # Invalid placeholder ids (e.g. NaN for transcripts with neither an
+        # ensembl nor a refseq id) are dropped so they can't spuriously match
+        # another gene's similarly-invalid "canonical" id.
+        invalid_ids = {'', 'nan', 'None'}
+        combined_ids = df_gene_transcripts.transcript_ensembl_id.fillna(df_gene_transcripts.transcript_refseq_id)
+        gene_transcript_ids = [
+            tid for tid in dict.fromkeys(combined_ids)
+            if tid is not None and not pd.isna(tid) and tid not in invalid_ids
+        ]
+
+        # Transcripts carrying an annotated protein. The v1 priority puts
+        # protein-coding first, ahead of most-like-canonical and longest CDS: a
+        # transcript with no protein has no domains, so comparing it to the
+        # canonical one trivially "drops" every domain. DoChaP populates
+        # cds_start/cds_end for non-coding transcripts too, so CDS length cannot
+        # stand in - protein-id presence is the signal. Absent columns mean
+        # "unknown", not "non-coding", so a hand-built frame keeps its candidates.
+        protein_columns = [c for c in ('protein_ensembl_id', 'protein_refseq_id')
+                           if c in df_gene_transcripts.columns]
+        if protein_columns:
+            has_protein = pd.Series(False, index=df_gene_transcripts.index)
+            for column in protein_columns:
+                values = df_gene_transcripts[column]
+                has_protein |= values.notna() & ~values.astype(str).str.strip().isin(
+                    ['', 'nan', 'None'])
+            coding_by_transcript = dict(zip(combined_ids, has_protein))
+        else:
+            coding_by_transcript = {tid: True for tid in combined_ids}
+
+        # Kept for _compare_transcripts(), which reports a protein present on one
+        # side only as an outcome of its own rather than as a domain change.
+        self.coding_by_transcript = coding_by_transcript
+
+        # Rule 4 of _resolve_canonical() ranks the fallback by PROTEIN length.
+        # Present only when the frame carries the protein's length; a hand-built
+        # frame need not, and the rule then falls through to CDS length.
+        self.protein_length_by_transcript = {}
+        if 'length' in df_gene_transcripts.columns:
+            lengths = pd.to_numeric(df_gene_transcripts['length'], errors='coerce')
+            self.protein_length_by_transcript = {
+                tid: int(value)
+                for tid, value in zip(combined_ids, lengths)
+                if pd.notna(value) and coding_by_transcript.get(tid, True)
+            }
+
+        # Where each transcript's coding sequence starts and ends, for the
+        # canonical_junction_in_cds / alternative_junction_in_cds columns. Read here because this is
+        # where the frame's protein columns have already been resolved.
+        self.cds_spans = _cds_spans_by_transcript(
+            df_gene_transcripts, combined_ids, coding_by_transcript)
+
+        if len(gene_transcript_ids) == 1:
+            self.add_event('only_one_transcript')
+            logger.debug(f"Only one transcript found for cluster {self.cluster_name}, specie {self.specie}.")
+            return None
+
+        return gene_transcript_ids, coding_by_transcript
+
+    @staticmethod
+    def _load_exons_and_cds_lengths(gene_transcript_ids, exon_lookup):
+        """Each transcript's exons, and its coding length in bases.
+
+        The length is the largest CDS-relative exon offset. Interior coding exons
+        are wholly coding, so that equals the summed exonic CDS (verified on 4,000
+        coding transcripts). NOT cds_end - cds_start, a genomic span that counts
+        the introns between the first and last coding exon - a median ~10x the
+        coding length, ranking transcripts partly by intron content.
+        """
+        transcript_exons = {
+            transcript_id: exon_lookup(transcript_id)
+            for transcript_id in gene_transcript_ids
+        }
+
+        cds_length_by_transcript = {}
+        for transcript_id, exons in transcript_exons.items():
+            length = -1
+            if len(exons) and 'abs_end_CDS' in exons.columns:
+                largest_offset = pd.to_numeric(exons['abs_end_CDS'], errors='coerce').max()
+                if pd.notna(largest_offset):
+                    length = largest_offset
+            cds_length_by_transcript[transcript_id] = length
+
+        return transcript_exons, cds_length_by_transcript
+
+    def _resolve_canonical(self, gene_transcript_ids, canonical_transcript_ids, canonical_rank,
+                           coding_by_transcript, cds_length_by_transcript,
+                           protein_length_by_transcript=None):
+        """Set self.canonical_transcript_id. False when the gene has none and none
+        can stand in, the cluster being recorded as no_canonical_transcript.
+
+        The rule, in order:
+
+          1. Ensembl and NCBI both mark the SAME transcript (Ensembl_canonical and
+             MANE Select / RefSeq Select) -> that transcript.  CanonicalEnum.BOTH
+          2. They mark DIFFERENT transcripts -> the Ensembl-marked one.  ENSEMBL
+          3. Only NCBI marks one -> that one.                            REFSEQ
+          4. Neither marks one -> among transcripts with an associated Ensembl or
+             NCBI protein, the one coding the LONGEST PROTEIN.
+          5. No transcript has an associated protein -> the longest CDS.
+
+        1-3 fall out of ranking CanonicalEnum (BOTH=3 > ENSEMBL=2 > REFSEQ=1),
+        which is what canonical_rank carries. 4 and 5 are the fallback below;
+        coding_by_transcript is protein-id presence, not CDS presence, so it is
+        exactly the population rule 4 asks for. Ties break on the lowest id so the
+        choice does not depend on Python's per-process hash seed.
+        """
+        gene_canonical_ids = canonical_transcript_ids.intersection(gene_transcript_ids)
+        if not gene_canonical_ids:
+            # No transcript flagged canonical - common for genes annotated by
+            # RefSeq alone, where neither MANE Select nor RefSeq Select names a
+            # representative. The longest-CDS transcript stands in, by the rule
+            # used for the comparable transcripts: protein-coding candidates
+            # first, then longest coding sequence, then lowest id. A substitute,
+            # not an annotation: "canonical" here means DOMAS's choice.
+            coding_ids = [tid for tid in gene_transcript_ids if coding_by_transcript.get(tid, True)]
+            fallback_candidates = coding_ids or gene_transcript_ids
+            if not fallback_candidates:
+                self.add_event('no_canonical_transcript')
+                logger.debug(f"No canonical transcript found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
+                return False
+            # Rule 4 ranks the protein, rule 5 the CDS. They almost always agree
+            # (protein = CDS/3 - 1), but not where the CDS is annotated
+            # incomplete, and the rule names the protein - so use protein length
+            # whenever it is known for the candidates.
+            by_protein = bool(coding_ids) and bool(protein_length_by_transcript) and any(
+                tid in protein_length_by_transcript for tid in coding_ids)
+            if by_protein:
+                self.canonical_transcript_id = max(
+                    coding_ids,
+                    key=lambda tid: (protein_length_by_transcript.get(tid, -1), tid))
+                measure = (f"longest-protein transcript "
+                           f"({protein_length_by_transcript.get(self.canonical_transcript_id, -1)} aa)")
+            else:
+                self.canonical_transcript_id = select_longest_cds(
+                    fallback_candidates, cds_length_by_transcript)
+                measure = (f"longest-CDS transcript "
+                           f"({cds_length_by_transcript.get(self.canonical_transcript_id, -1)} bases)")
+            logger.warning(
+                f"No canonical transcript for cluster {self.cluster_name}, specie {self.specie}. "
+                f"Using the {measure} {self.canonical_transcript_id} instead."
+            )
+            return True
+
+        # A gene can carry more than one canonical transcript, common outside
+        # human: ~4,800 mouse and ~7,100 rat genes have one flagged by RefSeq
+        # (canonical=1) and another by Ensembl (2); MANE makes the two agree in
+        # human, merging them into one canonical=3 row. Prefer 3, then 2, then 1 -
+        # CanonicalEnum ranks in that order - with ties on the lowest id.
+        ranked_ids = sorted(gene_canonical_ids)
+        if canonical_rank:
+            self.canonical_transcript_id = max(
+                ranked_ids, key=lambda tid: canonical_rank.get(tid, 0))
+        else:
+            self.canonical_transcript_id = ranked_ids[0]
+        if len(gene_canonical_ids) > 1:
+            logger.warning(
+                f"Multiple canonical transcripts found for cluster {self.cluster_name}, "
+                f"specie {self.specie}: "
+                f"{ {tid: canonical_rank.get(tid) for tid in ranked_ids} if canonical_rank else ranked_ids}. "
+                f"Using {self.canonical_transcript_id} (highest canonical flag, then lowest id)."
+            )
+        return True
+
+    def _match_features_to_transcripts(self, transcript_exons):
+        """Which of the event's features each transcript carries, and which of them
+        the canonical transcript carries. Features matching no transcript at all are
+        recorded as novel_junction. The canonical set is None - ending the
+        analysis - when the canonical transcript carries none of them.
+        """
+        transcript_junctions = {
+            transcript_id: find_matching_junction_indices(exons, self.junctions, strand=self.strand or '+',
+                                                          feature_types=self.feature_types)
+            for transcript_id, exons in transcript_exons.items()
+        }
+        # Recorded whatever happens next: which junctions a transcript carries is
+        # worth drawing even for one that never gets compared, and it is what the
+        # canonical_junctions / alternative_junctions columns are written from.
+        # Filled here rather than by the caller so the rows recorded just below -
+        # novel_junction, no_canonical_junctions - can name them too.
+        self.matched_features = {
+            tid: [self.junctions[i] for i in sorted(idxs) if i < len(self.junctions)]
+            for tid, idxs in transcript_junctions.items()
+        }
+
+        unmapped = 0
+        for idx, junction in enumerate(self.junctions):
+            if not any(idx in junction_idxs for junction_idxs in transcript_junctions.values()):
+                logger.debug(f"Junction {junction} in cluster {self.cluster_name} does not map to any transcript. ")
+                # Named, so the row says WHICH junction was novel. Without it every
+                # unmapped junction of a cluster wrote the same row, and a cluster
+                # with six of them produced six rows indistinguishable from one
+                # another - which read as a duplication bug and lost the only
+                # thing the row had to say.
+                low, high = min(junction), max(junction)
+                self.add_event('novel_junction', None,
+                               alternative_junctions=f'{low}-{high}')
+                unmapped += 1
+        self.features_matched = len(self.junctions) - unmapped
+
+        # One feature of an event failing to map is ordinary - a novel junction is
+        # exactly what a splicing tool reports. EVERY feature failing is not: it
+        # says the coordinates do not fit this gene at all, which is a wrong
+        # build, a wrong orientation or a wrong gene rather than novel biology.
+        # Warned rather than logged at debug because that is a property of the
+        # input worth interrupting for: the whole cluster is about to be dropped.
+        if unmapped and unmapped == len(self.junctions) > 1:
+            logger.warning(
+                "Cluster %s, specie %s: none of its %d features maps to any of %s's "
+                "%d transcripts. Check the coordinates against the gene's build and "
+                "orientation.",
+                self.cluster_name, self.specie, unmapped,
+                self.gene_symbol or self.gene_ensembl_id, len(transcript_junctions),
+            )
+
+        canonical_junctions = transcript_junctions.get(self.canonical_transcript_id, set())
+        if not canonical_junctions:
+            self.add_event('no_canonical_junctions')
+            logger.debug(f"No canonical junctions found for cluster {self.cluster_name}, specie {self.specie}. Skipping analysis.")
+            return transcript_junctions, None
+
+        return transcript_junctions, canonical_junctions
+
+    def _find_comparable_transcripts(self, transcript_junctions, canonical_junctions):
+        """{transcript_id: the features it carries that the canonical one lacks}, for
+        the transcripts that carry at least one. The rest are recorded as carrying no
+        feature of the event, or none unique to them.
+
+        The unique set is returned, not just the id: which features a transcript adds
+        is what separates one event in the cluster from another (see
+        _group_by_unique_features()).
+        """
+        unique_by_transcript = {}
+        for transcript_id, junction_idxs in transcript_junctions.items():
+            if transcript_id == self.canonical_transcript_id:
+                continue
+            if not junction_idxs:
+                logger.debug(f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} does not have any junctions. ")
+                self.add_event('transcript_doesnt_have_junctions', alternative_transcript_id=transcript_id)
+                continue
+
+            unique_junctions = junction_idxs - canonical_junctions
+            if not unique_junctions:
+                logger.debug(
+                    f"Transcript {transcript_id} in cluster {self.cluster_name}, specie {self.specie} does not have any unique junctions "
+                    "compared to the canonical transcript. Skipping this transcript for comparison."
+                )
+                self.add_event('no_unique_junctions', alternative_transcript_id=transcript_id)
+                continue
+
+            unique_by_transcript[transcript_id] = frozenset(unique_junctions)
+        return unique_by_transcript
+
+    def _group_by_unique_features(self, unique_by_transcript):
+        """The cluster's distinct events, as [(group_index, transcript_ids)].
+
+        A LeafCutter cluster is a set of junctions that share a splice site, and it
+        routinely holds more than one event: transcripts that add different features
+        to the canonical are describing different things and cannot be represented by
+        a single comparison. Transcripts are therefore grouped by the exact set of
+        features they add, and each surviving group is compared in its own right.
+
+        A group whose feature set is a proper subset of another group's is dropped:
+        both describe the same region, and the larger set is the fuller account of
+        it, so the smaller one would only report a partial version of the same
+        change. Its transcripts are recorded as subsumed_by_larger_group rather than
+        dropped silently. Subset is transitive, so one pass over the pairs is enough.
+
+        Groups are numbered from 1 in order of their features, which keeps the index
+        stable between runs rather than dependent on dict iteration order.
+        """
+        if not unique_by_transcript:
+            return []
+
+        by_features = {}
+        for transcript_id, features in unique_by_transcript.items():
+            by_features.setdefault(features, []).append(transcript_id)
+
+        kept = [features for features in by_features
+                if not any(features < other for other in by_features)]
+
+        # Numbered before the subsumption pass, not after, so a dropped group can
+        # be reported against the number of the group that displaced it.
+        groups = [(index, features, by_features[features])
+                  for index, features in enumerate(sorted(kept, key=sorted), start=1)]
+        group_number = {features: index for index, features, _ in groups}
+
+        # Logged before the subsumption pass so the log defines a group number
+        # before anything refers to it.
+        for index, features, transcript_ids in groups:
+            logger.info(
+                "Cluster %s, specie %s: group %d is defined by %s; carried by %s.",
+                self.cluster_name, self.specie, index,
+                self._features_text(features), ', '.join(sorted(transcript_ids)),
+            )
+
+        for features, transcript_ids in by_features.items():
+            if features in group_number:
+                continue
+            # Every dropped set is a proper subset of at least one kept set -
+            # subset is transitive, so following the chain up ends at a maximal
+            # one - but it can be a subset of several, and naming them all says
+            # more than picking one would.
+            subsuming = sorted(group_number[other] for other in kept if features < other)
+            for transcript_id in sorted(transcript_ids):
+                logger.info(
+                    "Cluster %s, specie %s: transcript %s adds %s - a subset of group %s, "
+                    "which gives the fuller account of the same region. Not compared "
+                    "(subsumed_by_larger_group).",
+                    self.cluster_name, self.specie, transcript_id,
+                    self._features_text(features),
+                    ' and '.join(str(number) for number in subsuming) or '?',
+                )
+                self.add_event('subsumed_by_larger_group', alternative_transcript_id=transcript_id)
+
+        return groups
+
+    def _select_representatives(self, comparable_transcript_ids, coding_by_transcript,
+                                cds_length_by_transcript, transcript_exons):
+        """(longest_cds, most_like_canonical) - which transcript each rule picks, or
+        None where it picks nothing. Under write_all_comparable these only tag the
+        rows; otherwise they also decide which single transcript is compared at all,
+        so the work for the rest is never done."""
+        if not comparable_transcript_ids:
+            return None, None
+
+        # Step 1 of the priority: prefer protein-coding candidates. A priority,
+        # not a hard filter - where no candidate is coding they all tie here and
+        # selection falls through to the structural and length steps, so a
+        # cluster still resolves to one transcript rather than none.
+        coding_candidates = [tid for tid in comparable_transcript_ids
+                             if coding_by_transcript.get(tid, True)]
+        selection_candidates = coding_candidates or comparable_transcript_ids
+
+        longest_cds_transcript_id = select_longest_cds(
+            selection_candidates, cds_length_by_transcript)
+        most_like_canonical_transcript_id = select_most_like_canonical(
+            selection_candidates, self.canonical_transcript_id, transcript_exons,
+            self.junctions, cds_length_by_transcript,
+        )
+        return longest_cds_transcript_id, most_like_canonical_transcript_id
+
+    def _features_text(self, features):
+        """The junctions of one group, written out for the log: coordinates, each
+        with the canonical transcript's exon pair where its ends land on one.
+
+        Computed from the exon table whatever the run asked for - the rank column
+        is optional, the log is where the reader reconstructs how a cluster was
+        split and should always say which junctions define which group.
+        """
+        parts = []
+        for index in sorted(features):
+            if index >= len(self.junctions):
+                continue
+            start, end = self.junctions[index]
+            label = exon_pair_label(self.canonical_exons, self.junctions[index])
+            parts.append(f"{start}-{end}" + (f" [{label}]" if label else ""))
+        return ', '.join(parts) or 'no junction'
+
+    def _log_group(self, group_index, compared):
+        """Which of a group's transcripts the run actually compares. Separate from
+        the group's definition, logged in _group_by_unique_features(): the choice
+        is only made once the group's representatives have been selected."""
+        logger.info(
+            "Cluster %s, specie %s: group %d is represented by %s.",
+            self.cluster_name, self.specie, group_index, ', '.join(sorted(compared)),
+        )
+
+    def _record_not_chosen(self, group_index, features, group_transcript_ids, compared,
+                           rank_label, most_like_canonical_exists):
+        """Record every transcript of a group that the selection rule passed over.
+
+        Without this they would leave no trace: only one transcript per group is
+        compared by default, and the rest simply never reach the output. The rows
+        are non-comparisons - the transcript carries the group's junctions and
+        could have been compared, it just was not the one picked.
+        """
+        not_chosen = [tid for tid in group_transcript_ids if tid not in set(compared)]
+        if not not_chosen:
+            return
+
+        rule = 'most like the canonical' if most_like_canonical_exists else 'longest CDS'
+        for transcript_id in sorted(not_chosen):
+            logger.info(
+                "Cluster %s, specie %s: transcript %s carries group %d (%s) but %s was "
+                "picked to represent it (%s). Not compared (transcript_not_chosen).",
+                self.cluster_name, self.specie, transcript_id, group_index,
+                self._features_text(features), ', '.join(sorted(compared)), rule,
+            )
+            self.add_event('transcript_not_chosen', alternative_transcript_id=transcript_id,
+                           group=group_index, rank=rank_label,
+                           canonical_junction_in_cds=self._junctions_in_cds(
+                               self.canonical_transcript_id, features),
+                           alternative_junction_in_cds=self._junctions_in_cds(
+                               transcript_id, features))
+
+    def _rank_label(self, features):
+        """The rank labels of the features that define one group, joined.
+
+        Each names the canonical transcript's exons that one junction joins (E2_E3,
+        *_E5 - see exon_pair_label()). A row covers one group, so it carries the
+        ranks of the junctions that separate that group from the cluster's others,
+        not the cluster's whole set. The canonical transcript is the reference for
+        the same reason it is everywhere else here: the event is described as a
+        departure from it.
+        """
+        if not self.extra_columns:
+            return None
+        labels = []
+        for index in sorted(features):
+            if index >= len(self.junctions):
+                continue
+            label = exon_pair_label(self.canonical_exons, self.junctions[index])
+            if label and label not in labels:
+                labels.append(label)
+        return '; '.join(labels) if labels else None
+
+    def _junctions_in_cds(self, transcript_id, features):
+        """Where the junctions defining one group sit relative to a transcript's
+        coding sequence: CDS_IN when every one of them lies wholly between its
+        cds_start and cds_end, CDS_OUT when none does (all in a UTR, or outside the
+        transcript altogether), CDS_PARTIAL when the group is mixed or a single
+        junction straddles a CDS boundary - the start or stop codon falling between
+        its two splice sites. CDS_NONE for a transcript with no annotated protein:
+        there is no coding region for the event to fall in.
+
+        The test is positional, so it answers for the canonical transcript as well
+        as the compared one even though a group's junctions are by definition
+        absent from the canonical: what it asks is whether the region the event
+        changes is coding in that transcript.
+
+        None - and the column is left out of the CSV - unless the run asked for
+        the extra columns, and where the transcripts frame names no CDS at all.
+        """
+        if not self.extra_columns or self.cds_spans is None:
+            return None
+        span = self.cds_spans.get(transcript_id)
+        if span is None:
+            return CDS_NONE
+
+        cds_start, cds_end = span
+        labels = set()
+        for index in sorted(features):
+            if index >= len(self.junctions):
+                continue
+            start, end = self.junctions[index]
+            ends_inside = ((cds_start <= min(start, end) <= cds_end)
+                           + (cds_start <= max(start, end) <= cds_end))
+            labels.add({2: CDS_IN, 1: CDS_PARTIAL, 0: CDS_OUT}[ends_inside])
+
+        if not labels:
+            return None
+        return labels.pop() if len(labels) == 1 else CDS_PARTIAL
+
+    def _compare_transcripts(self, comparable_transcript_ids, transcript_junctions,
+                             canonical_junctions, transcript_exons, domain_lookup,
+                             longest_cds_transcript_id, most_like_canonical_transcript_id,
+                             group_index, rank_label=None, group_features=()):
+        """Compare each transcript's domains against the canonical transcript's,
+        recording one event per domain group - or no_domains_in_region where the
+        comparison happened but neither side has a domain there.
+
+        The tags are per group: with several events in a cluster each one has its own
+        longest-CDS and most-like-canonical transcript."""
+        # Same junctions for both columns - the group's own - measured against a
+        # different transcript's CDS. The canonical one is fixed across the group.
+        canonical_in_cds = self._junctions_in_cds(self.canonical_transcript_id, group_features)
+
+        for transcript_id in comparable_transcript_ids:
+            junction_idxs = transcript_junctions[transcript_id]
+            is_longest_cds = transcript_id == longest_cds_transcript_id
+            is_most_like_canonical = transcript_id == most_like_canonical_transcript_id
+            transcript_in_cds = self._junctions_in_cds(transcript_id, group_features)
+
+            # Whether a protein exists at all is a property of the transcript, not
+            # of any one domain group, so it is settled before the comparison
+            # rather than inside it. With a protein on one side only there is
+            # nothing to group against: every domain would read as dropped (or
+            # added) for a reason that has nothing to do with the junction, which
+            # is what the protein-coding-first selection priority exists to avoid.
+            # Named from the alternative's side, like every other outcome.
+            # Neither side coding is not a change and falls through to the normal
+            # path, where it lands on no_domains_in_region.
+            protein_change = classify_protein_change(
+                self.coding_by_transcript.get(self.canonical_transcript_id, True),
+                self.coding_by_transcript.get(transcript_id, True))
+            if protein_change is not None:
+                self.add_event(protein_change,
+                               alternative_transcript_id=transcript_id,
+                               is_longest_cds=is_longest_cds,
+                               is_most_like_canonical=is_most_like_canonical,
+                               group=group_index, rank=rank_label,
+                               canonical_junction_in_cds=canonical_in_cds,
+                               alternative_junction_in_cds=transcript_in_cds)
+                continue
+
+            # Like protein_change above, a property of the transcripts rather
+            # than of any one domain group, so it is settled before the
+            # comparison. Either side failing invalidates the pair: a canonical
+            # domain at coordinates that are not its own mispositions every
+            # group it joins, and through the shared-name merge can drag in
+            # alternative domains that were fine.
+            if not (domain_coordinates_comparable(domain_lookup, self.canonical_transcript_id)
+                    and domain_coordinates_comparable(domain_lookup, transcript_id)):
+                self.add_event('unvalidated_domain_coordinates',
+                               alternative_transcript_id=transcript_id,
+                               is_longest_cds=is_longest_cds,
+                               is_most_like_canonical=is_most_like_canonical,
+                               group=group_index, rank=rank_label,
+                               canonical_junction_in_cds=canonical_in_cds,
+                               alternative_junction_in_cds=transcript_in_cds)
+                continue
+
+            events = list(compare_domains(
+                domain_lookup, transcript_exons, self.canonical_transcript_id, transcript_id,
+                canonical_junctions, junction_idxs, self.junctions, self.strand, self.cds_spans,
+            ))
+            if events:
+                for event in events:
+                    self.add_event(**event, is_longest_cds=is_longest_cds,
+                                   is_most_like_canonical=is_most_like_canonical,
+                                   group=group_index, rank=rank_label,
+                                   canonical_junction_in_cds=canonical_in_cds,
+                                   alternative_junction_in_cds=transcript_in_cds)
+            else:
+                self.add_event('no_domains_in_region', alternative_transcript_id=transcript_id,
+                                is_longest_cds=is_longest_cds,
+                                is_most_like_canonical=is_most_like_canonical,
+                                group=group_index, rank=rank_label,
+                                canonical_junction_in_cds=canonical_in_cds,
+                                alternative_junction_in_cds=transcript_in_cds)
+
+
+    def get_results_df(self):
+        df = pd.DataFrame(
+            self.events,
+            columns=['event', 'alternative_transcript_id',
+                        'canonical_junctions', 'alternative_junctions',
+                        'group', 'rank', 'domain_id', 'domain_name', 'domain_description',
+                        'canonical_domain_length', 'alternative_domain_length',
+                        'canonical_domains_number', 'alternative_domains_number',
+                        'canonical_junction_in_cds', 'alternative_junction_in_cds',
+                        'is_longest_cds', 'is_most_like_canonical']
+        )
+        # Nullable integer, not float: the rows that belong to no group (the
+        # cluster-level outcomes) leave it empty, and a plain int column holding
+        # NaN would print every group index as "1.0".
+        df['group'] = df['group'].astype('Int64')
+        return df
+        
+
+def _analyze_single_cluster(cluster_tuple, exon_lookup=None, domain_lookup=None, canonical_transcript_ids=None,
+                           gene_strand=None, transcripts_by_gene=None, canonical_rank=None,
+                           write_all_comparable=False, extra_columns=False):
+    """Analyze a single cluster."""
+    _, cluster_df = cluster_tuple
+
+    gene_ensembl_id = cluster_df.gene_ensembl_id.iat[0]
+    gene_symbol = cluster_df.gene_symbol.iat[0]
+    event_type = cluster_df.event_type.iat[0]
+    specie = cluster_df.specie.iat[0]
+    strand = gene_strand.get(gene_ensembl_id)
+
+    cluster_result = ClusterAnalysisResult(
+        cluster_df.cluster_name.iat[0], gene_ensembl_id, gene_symbol,
+        as_event_type=event_type, specie=specie, strand=strand
+    )
+    cluster_result.junctions = list(zip(cluster_df['start_position'], cluster_df['end_position']))
+    cluster_result.feature_types = [
+        FEATURE_JUNCTION if pd.isna(value) else str(value)
+        for value in cluster_df[FEATURE_TYPE_COLUMN]
+    ]
+    cluster_result.extra_columns = extra_columns
+
+    df_gene_transcripts = transcripts_by_gene.get(gene_ensembl_id)
+    cluster_result.analyze(df_gene_transcripts, canonical_transcript_ids, exon_lookup, domain_lookup,
+                           canonical_rank=canonical_rank,
+                           write_all_comparable=write_all_comparable)
+
+    return cluster_result
+
+
+# Events recorded for a transcript/cluster that is NOT a real comparison to the
+# canonical transcript: cluster-level non-comparisons (gene/canonical/junction
+# problems) plus per-transcript skips (no junctions / no unique junction). Rows
+# carrying these events are the "non-comparable" / "not chosen" transcripts that
+# analyze_junctions(filter_non_comparable=True) drops from the output CSV.
+# The outcomes of a comparison that actually ran. The results CSV is split on
+# membership of THIS set, not on NON_COMPARISON_EVENTS: a row belongs in
+# compared.csv when the transcript was compared to the canonical one, whatever
+# the comparison found.
+DOMAIN_COMPARISON_EVENTS = frozenset({
+    'no_domain_change', 'longer_domain', 'shorter_domain',
+    'domain_gain', 'domain_loss',
+    # A protein on one side only. An outcome of the comparison, so compared.csv,
+    # but transcript-level: the domain id, lengths and counts are left empty.
+    'non_coding_alternative', 'gained_protein',
+    # The transcript WAS compared; the window simply held no domain to compare.
+    # It used to sit with the non-comparisons, which read as "not analysed" when
+    # it means "analysed, nothing there" - and split one run's comparable rows
+    # across two files. It is the bulk of the output on a whole-transcriptome run
+    # (about 78% of rows), so compared.csv is correspondingly larger now; sorted
+    # last by OUTPUT_EVENT_ORDER, so it never comes between a reader and a result.
+    'no_domains_in_region',
+})
+
+#: How an event label reads in the summary. The CSV keeps the snake_case value -
+#: it is what code branches on, what results_stats groups by and what a reader
+#: filters a spreadsheet with - and only the prose is capitalised. Most labels
+#: need no entry: the fallback turns 'no_domains_in_region' into 'No domains in
+#: region'. These few read wrong under it.
+SUMMARY_LABEL_OVERRIDES = {
+    'gene_not_in_db': 'Gene not in database',
+    'non_coding_alternative': 'Non-coding alternative',
+    'no_gene_specified': 'No gene named',
+}
+
+
+def summary_label(label):
+    """One event label as the summary spells it."""
+    if label in SUMMARY_LABEL_OVERRIDES:
+        return SUMMARY_LABEL_OVERRIDES[label]
+    text = str(label).replace('_', ' ')
+    return text[:1].upper() + text[1:]
+
+
+# A comparison that found something different about the domains. Excludes the
+# two that ran and found nothing to report: no_domain_change, and
+# no_domains_in_region, where the window held no domain at all.
+DOMAIN_CHANGE_EVENTS = DOMAIN_COMPARISON_EVENTS - {'no_domain_change',
+                                                   'no_domains_in_region'}
+
+# The order the summary lists outcomes in: what happened to the protein first,
+# then the domains gained or lost, then resized, then unchanged - and last the
+# rows where the window held no domain to compare.
+SUMMARY_OUTCOME_ORDER = ('non_coding_alternative', 'gained_protein', 'domain_gain',
+                         'domain_loss', 'longer_domain', 'shorter_domain',
+                         'no_domain_change', 'no_domains_in_region')
+
+NON_COMPARISON_EVENTS = frozenset({
+    'no_gene_specified', 'gene_not_in_db', 'no_canonical_transcript', 'only_one_transcript',
+    'no_canonical_junctions', 'novel_junction', 'all_known_junctions_are_canonical',
+    'transcript_doesnt_have_junctions', 'no_unique_junctions', 'subsumed_by_larger_group',
+    # Carries its group's junctions and could have been compared, but the
+    # selection rule picked another transcript of the same group.
+    'transcript_not_chosen',
+    # One side holds a domain whose coordinates were never established against
+    # the protein carrying them, so any comparison would measure the wrong
+    # residues. Per-transcript, not per-group: see domain_coordinates_comparable().
+    'unvalidated_domain_coordinates',
+})
+
+
+def selected_comparable_rows(df_cluster_results):
+    """One cluster's result rows with the COMPARISON rows of each group reduced to
+    the single transcript the selection rule picks there: the one tagged
+    is_most_like_canonical where any is, otherwise the one tagged is_longest_cds.
+    Same priority as results_stats.select_representative_transcript(), applied
+    before writing. A cluster holding several distinct events keeps one transcript
+    per event, not one overall.
+
+    Non-comparison rows (no junctions, no unique junction, a cluster-level outcome)
+    are left alone - which of those to write is filter_non_comparable's decision. So
+    is a cluster with no tagged row, i.e. no comparable transcript.
+    """
+    if df_cluster_results.empty:
+        return df_cluster_results
+    is_comparison = ~df_cluster_results['event'].isin(NON_COMPARISON_EVENTS)
+    if not is_comparison.any():
+        return df_cluster_results
+
+    comparisons = df_cluster_results[is_comparison]
+    # Per group, not per cluster: a cluster holding several distinct events keeps
+    # one transcript for each of them.
+    keep = pd.Series(False, index=df_cluster_results.index)
+    for group, rows in comparisons.groupby('group', dropna=False):
+        for column in ('is_most_like_canonical', 'is_longest_cds'):
+            tagged = rows.loc[rows[column] == True, 'alternative_transcript_id'].dropna()  # noqa: E712
+            if len(tagged):
+                keep |= is_comparison & (df_cluster_results['group'] == group) \
+                        & (df_cluster_results['alternative_transcript_id'] == tagged.iat[0])
+                break
+        else:
+            keep |= is_comparison & (df_cluster_results['group'] == group)
+    return df_cluster_results[~is_comparison | keep]
+
+
+# The non-comparison events that END a cluster's analysis - exactly one of them
+# is recorded for any cluster that never reached a comparison, each `return`ing
+# from analyze(). The rest of NON_COMPARISON_EVENTS are per-transcript outcomes
+# that can appear many times in a cluster and alongside comparisons, so they are
+# not what "why was this cluster not comparable" means. Ordered for a stable
+# answer if a cluster ever carried two.
+TERMINAL_NON_COMPARISON_EVENTS = (
+    'no_gene_specified', 'gene_not_in_db', 'only_one_transcript',
+    'no_canonical_transcript', 'no_canonical_junctions', 'all_known_junctions_are_canonical',
+)
+
+
+def _distinct_genes(cluster_df):
+    """How many genes one cluster's rows name.
+
+    The Ensembl id where there is one, the symbol where there is not: a symbol
+    DoChaP cannot resolve leaves gene_ensembl_id empty, and counting only the ids
+    would file every such cluster under "names no gene" when it plainly names
+    one. Those clusters are still reported - as gene_not_in_db, in the
+    non-comparable breakdown, which is where that belongs.
+    """
+    columns = [c for c in ('gene_ensembl_id', 'gene_symbol') if c in cluster_df.columns]
+    if not columns:
+        return 0
+    names = cluster_df[columns[0]]
+    for fallback in columns[1:]:
+        names = names.fillna(cluster_df[fallback])
+    return names.nunique(dropna=True)
+
+
+class RunSummary:
+    """The counts behind <output>_summary.txt: what went in, how much of it could be
+    analysed, and what came out.
+
+    Seeded from the junctions frame, then fed one cluster at a time by the writer
+    thread as results arrive. Only counters are kept - a run at IOE scale streams
+    tens of millions of rows past this, so nothing here may grow with them.
+
+    Two units of counting run side by side, because they answer different
+    questions. Rows say how much of the output a category takes up; cluster+gene
+    pairs say how many events it actually describes - a single cluster reporting
+    the same dropped domain against four transcripts is four rows but one
+    finding, and counting only rows makes the busiest clusters look like the
+    commonest outcome.
+    """
+
+    def __init__(self, input_source=None, ensembl_only=False, input_format=None,
+                 hide_paths=False):
+        # Every file the run read, listed rather than summarised as the directory
+        # holding them: which of a format's files were present is part of what
+        # the run was, and an rMATS directory missing RI.MATS.JC.txt produces a
+        # different analysis from one that has it. A bare string is taken as a
+        # single file.
+        if input_source is None:
+            self.input_source = []
+        elif isinstance(input_source, str):
+            self.input_source = [input_source]
+        else:
+            self.input_source = list(input_source)
+        # Which transcripts the run was allowed to consider. Recorded because it
+        # changes both the canonical choice and the comparable-transcript pool,
+        # and two runs over the same input are not comparable across it.
+        self.ensembl_only = ensembl_only
+        # The reader that produced the frame, and whether to name the files it
+        # read: a run driven by the web GUI reads from a temporary directory whose
+        # paths say nothing to the person who uploaded them.
+        self.input_format = input_format
+        self.hide_paths = hide_paths
+        self.species = []
+        self.input_clusters = 0                 # events, as the input named them
+        self.input_pairs = 0                    # cluster+gene pairs actually analysed
+        self.input_junctions = 0
+        # The same feature can arrive on more than one row: a cluster naming
+        # several genes is analysed once per gene, so every junction it holds is
+        # repeated per gene. Both numbers are worth reporting - the row count is
+        # the work the run does, the distinct count is how much of the genome the
+        # input actually describes, and that second one is what a methods section
+        # means by "N junctions".
+        self.input_junctions_distinct = 0
+        self.genes_per_cluster = Counter()      # distinct genes -> clusters with that many
+        # Junctions are counted per cluster, so one coordinate pair reported in
+        # two clusters counts twice - it is matched against a different gene's
+        # transcripts each time and can map in one and not the other.
+        self.junctions_matched = 0
+        self.junctions_unmatched = 0
+        self.junctions_not_evaluated = 0        # clusters that ended before matching ran
+        self.comparable = 0                     # cluster+gene pairs
+        self.non_comparable = 0
+        self.non_comparable_reasons = Counter()
+        self.event_rows = Counter()             # comparison event -> rows written
+        self.event_pairs = Counter()            # comparison event -> cluster+gene pairs
+        # Junctions on pairs whose gene the database does not hold - subtracted to
+        # give the junction-gene pairs that could be looked up at all.
+        self.junctions_gene_not_found = 0
+        # The pairs that reached a comparison AND found a domain difference. A set,
+        # not a count: a pair showing two different changes must not count twice.
+        self.changed_pairs = set()
+
+    # What makes two rows the same feature. Not junction_name, which is
+    # provenance only and which three of the readers never set.
+    FEATURE_IDENTITY = ('chromosome', 'start_position', 'end_position',
+                        FEATURE_TYPE_COLUMN)
+
+    def seed(self, df_junctions, cluster_groups):
+        """What the input holds, before any of it is analysed."""
+        # An event is what the input called one. A cluster naming several genes is
+        # analysed once per gene, so it is several cluster_groups - counting those
+        # as events overstated the input and made the genes-per-event breakdown
+        # say every event named exactly one gene, the split having already
+        # happened.
+        event = utils.SOURCE_CLUSTER_COLUMN
+        keys = [c for c in ('specie', event if event in df_junctions.columns
+                            else 'cluster_name') if c in df_junctions.columns]
+        if event in df_junctions.columns:
+            df_junctions = df_junctions.copy()
+            df_junctions[event] = df_junctions[event].fillna(df_junctions['cluster_name'])
+        events = df_junctions.groupby(keys, dropna=False) if keys else None
+
+        if 'specie' in df_junctions.columns:
+            # Blanks are dropped as well as nulls: a reader that leaves the column
+            # present but empty for some rows otherwise put a nameless species in
+            # the list, which printed as "Species : , human".
+            self.species = sorted({str(v).strip()
+                                   for v in df_junctions['specie'].dropna().unique()
+                                   if str(v).strip()})
+        self.input_clusters = events.ngroups if events is not None else len(cluster_groups)
+        self.input_pairs = len(cluster_groups)
+        self.input_junctions = len(df_junctions)
+        identity = [c for c in self.FEATURE_IDENTITY if c in df_junctions.columns]
+        self.input_junctions_distinct = (len(df_junctions.drop_duplicates(identity))
+                                         if identity else len(df_junctions))
+        if events is not None:
+            for _, event_df in events:
+                self.genes_per_cluster[_distinct_genes(event_df)] += 1
+        else:
+            for _, cluster_df in cluster_groups:
+                self.genes_per_cluster[_distinct_genes(cluster_df)] += 1
+
+    def add_cluster(self, cluster_result):
+        """One analysed cluster: whether it reached a comparison, why not where it
+        did not, and how many of its junctions mapped to a transcript."""
+        matched = cluster_result.features_matched
+        events = {event[0] for event in cluster_result.events}
+        if events & {'gene_not_in_db', 'no_gene_specified'}:
+            self.junctions_gene_not_found += len(cluster_result.junctions)
+        if matched is None:
+            self.junctions_not_evaluated += len(cluster_result.junctions)
+        else:
+            self.junctions_matched += matched
+            self.junctions_unmatched += len(cluster_result.junctions) - matched
+
+        if events - NON_COMPARISON_EVENTS:
+            self.comparable += 1
+            return
+        self.non_comparable += 1
+        reason = next((name for name in TERMINAL_NON_COMPARISON_EVENTS if name in events),
+                      None)
+        # Every path that ends an analysis records one of the terminal events, so
+        # this is defensive rather than expected - but a cluster counted under no
+        # reason at all would leave the breakdown quietly short of the total.
+        self.non_comparable_reasons[reason or 'unknown'] += 1
+
+    def add_frame(self, df_chunk):
+        """The comparison rows of one chunk, as they are about to be written.
+
+        Taken from the frame rather than from the cluster results so the numbers
+        describe the file that was produced: write_all_comparable=False has
+        already reduced each group to its selected transcript by this point.
+        """
+        comparisons = df_chunk[~df_chunk['event_type'].isin(NON_COMPARISON_EVENTS)]
+        if comparisons.empty:
+            return
+        self.event_rows.update(comparisons['event_type'].value_counts().to_dict())
+        # specie is part of the key: two species can use the same cluster name,
+        # and they are separate clusters everywhere else in the run.
+        pairs = comparisons[['event', 'gene_symbol', 'specie', 'event_type']].drop_duplicates()
+        self.event_pairs.update(pairs['event_type'].value_counts().to_dict())
+        changed = pairs[pairs['event_type'].isin(DOMAIN_CHANGE_EVENTS)]
+        self.changed_pairs.update(map(tuple, changed[['event', 'gene_symbol', 'specie']]
+                                      .drop_duplicates().to_numpy()))
+
+    @staticmethod
+    def _table(counter, total, unit):
+        if not counter:
+            return ['    (none)']
+        width = max(len(name) for name in counter)
+        return [f'    {name:<{width}}  {count:>9,}  {count / total:>7.2%} of {unit}'
+                for name, count in counter.most_common()]
+
+    @staticmethod
+    def _heading(title, rule='-'):
+        """A section title and its underline, which is as long as the title -
+        computed rather than typed out, so a reworded heading cannot leave a
+        rule of the old length under it."""
+        return [title, rule * len(title)]
+
+    def text(self):
+        """The summary file's contents."""
+        evaluated = self.junctions_matched + self.junctions_unmatched
+        pairs = self.comparable + self.non_comparable
+        in_database = self.input_junctions - self.junctions_gene_not_found
+
+        def pct(part, whole):
+            return f'{part / whole:.2%}' if whole else '-'
+
+        # The one line most readers want, put where they will see it rather than
+        # after eight sections of accounting. Counted per pair, not per row: a
+        # pair losing two domains has one domain change to report.
+        #
+        # The percentage is dropped where nothing was comparable rather than
+        # printed as pct()'s '-', which left the sentence reading "0 pairs have at
+        # least one domain change - - of comparable pairs". Reachable on a real
+        # input: every gene missing from the database gets there.
+        headline = (f'{len(self.changed_pairs):,} event-gene pairs have at least '
+                    f'one domain change')
+        headline += (f' - {pct(len(self.changed_pairs), self.comparable)} of '
+                     f'comparable pairs.' if self.comparable
+                     else ' - no event-gene pair was comparable.')
+
+        lines = [
+            'DOMAS run summary',
+            '=================',
+            '',
+            f'DOMAS version: {utils.DOMAS_VERSION}',
+            f'Date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
+            '',
+            headline,
+            '',
+            'Input source',
+            '------------',
+        ]
+        if self.input_format:
+            lines.append(f'    Format  : {self.input_format}')
+        if self.species:
+            lines.append(f'    Species : {", ".join(self.species)}')
+        # Under -gui the run read from a temporary upload directory, whose paths
+        # name nothing the reader uploaded and would only puzzle them.
+        if self.hide_paths:
+            lines.append('    Files   : as uploaded')
+        else:
+            # The empty case is only reachable when a caller hands
+            # analyze_junctions() a DataFrame it built itself and names no file -
+            # every reader passes its own. Says that rather than "unknown", which
+            # would read as a bug in the summary.
+            lines += ([f'    {source}' for source in self.input_source]
+                      or ['    (no file - the junctions were passed in as a DataFrame)'])
+        lines += ['', '']
+
+        lines += self._heading('Alternative splicing events:')
+        lines.append(f'    Input alternative splicing events : {self.input_clusters:,}')
+        multi = sum(c for g, c in self.genes_per_cluster.items() if g > 1)
+        if multi:
+            lines.append(f'    {multi:,} events are assigned to more than one gene:')
+        for genes, count in sorted(self.genes_per_cluster.items()):
+            lines.append(f'    {genes} gene(s) : {count:>9,}  '
+                         f'{pct(count, self.input_clusters):>7} of events')
+        lines += ['', '']
+
+        # Named for its unit: one comparable/non-comparable verdict per
+        # cluster-gene pair, so these percentages are over the pair count and not
+        # over the event count - which differ by however many events name several
+        # genes.
+        lines += self._heading(
+            f'Each event is analysed for each of the genes it is assigned to: {pairs:,} event-gene pairs')
+        lines += [
+            f'    Comparable     : {self.comparable:>9,}  {pct(self.comparable, pairs):>7}',
+            f'    Non-comparable : {self.non_comparable:>9,}  {pct(self.non_comparable, pairs):>7}',
+        ]
+        if self.non_comparable_reasons:
+            shown = [(summary_label(name), count)
+                     for name, count in self.non_comparable_reasons.most_common()]
+            width = max(len(name) for name, _ in shown)
+            for name, count in shown:
+                lines.append(f'        {name:<{width}} : {count:,}')
+        lines += ['', '']
+
+        lines += self._heading('Junctions:')
+        # Three counts of the same input, narrowing. A junction reported for a
+        # cluster naming several genes is one junction and several pairs, and only
+        # the pairs whose gene the database holds can be looked up at all.
+        lines += [
+            f'    Unique junctions                             : {self.input_junctions_distinct:,}',
+            f'    Junction-gene pairs                          : {self.input_junctions:,}',
+            f'    Junction-gene pairs for genes in the database: {in_database:,}',
+            '', '',
+        ]
+
+        lines += self._heading('Junction-gene pairing:')
+        lines += [
+            f'    Matched to a transcript : {self.junctions_matched:>9,}  '
+            f'{pct(self.junctions_matched, evaluated):>7} of evaluated',
+            f'    Not matched             : {self.junctions_unmatched:>9,}  '
+            f'{pct(self.junctions_unmatched, evaluated):>7} of evaluated',
+            f'    Not evaluated           : {self.junctions_not_evaluated:>9,}',
+        ]
+        # Worth saying rather than leaving to be asked: a junction is only matched
+        # once the event has a gene, that gene is in the database, it holds more
+        # than one transcript and a canonical one was chosen. These belong to
+        # events that failed one of those first, so they were never held against a
+        # transcript at all - counting them as unmatched would read as novel
+        # junctions, which is a different finding.
+        if self.junctions_not_evaluated:
+            lines.append('    Junctions are not evaluated because their event had no gene named, '
+                         'no gene in the database, or the gene has only one transcript.')
+        lines += ['', '']
+
+        lines += self._heading('Event / transcript-group / domain classification:')
+        total_rows = sum(self.event_rows.values())
+        # A row is one DOMAIN of one group of alternative transcripts, so a group
+        # losing two domains writes two rows and the total is the output file's
+        # row count.
+        # Every outcome, in rank order, including those this run produced none of:
+        # a zero is a finding - no domain was gained anywhere - and a reader
+        # comparing two summaries should not have to notice a missing line.
+        #
+        # gained_protein is the exception. It cannot arise against DoChaP as it
+        # stands (see classify_protein_change) and is kept for the symmetry rather
+        # than for the rows it produces, so listing a zero for it would put a
+        # label in front of every reader that none of them will ever see used.
+        named = [name for name in SUMMARY_OUTCOME_ORDER
+                 if name != 'gained_protein' or self.event_rows.get(name)]
+        named += sorted(set(self.event_rows) - set(SUMMARY_OUTCOME_ORDER))
+        shown = [(summary_label(name), self.event_rows.get(name, 0)) for name in named]
+        width = max([len(name) for name, _ in shown] + [len('Total')])
+        for name, count in shown:
+            lines.append(f'    {name:<{width}} : {count:>9,}  {pct(count, total_rows):>7}')
+        lines.append(f'    {"Total":<{width}} : {total_rows:>9,}  '
+                     f'{"100.00%" if total_rows else "-":>7}')
+        return '\n'.join(lines) + '\n'
+
+    def write(self, path):
+        with open(path, 'w') as handle:
+            handle.write(self.text())
+
+
+def summary_path(output_path):
+    """The run's summary, named after its output CSV: compared.csv gives
+    compared_summary.txt, results.csv gives results_summary.txt.
+
+    Named after the CSV rather than a flat summary.txt so that several runs can
+    share an output directory - which they routinely do, one per input table -
+    without each one silently overwriting the last one's summary.
+    """
+    stem = os.path.splitext(output_path)[0]
+    return stem + '_summary.txt'
+
+
+# Excel's own ceiling: 1,048,576 rows per sheet, the header among them. A
+# genome-wide run's non_compared file is tens of millions of rows, so this is a
+# limit that is actually reached rather than a defensive constant.
+EXCEL_MAX_ROWS = 1048576
+
+
+def excel_path(csv_path):
+    """Where the .xlsx copy of a results CSV goes: the same name and directory."""
+    return os.path.splitext(csv_path)[0] + '.xlsx'
+
+
+def _count_data_rows(path):
+    """Data rows in `path`, counted without parsing it.
+
+    A results CSV can be gigabytes, and the only question here is whether Excel
+    can hold it - asking pandas to read the whole file to find out would defeat
+    the check it is for. Quoted newlines would make this an over-count, which is
+    the safe direction: the file is skipped rather than truncated silently.
+    """
+    with open(path, 'rb') as handle:
+        lines = sum(chunk.count(b'\n') for chunk in iter(lambda: handle.read(1 << 20), b''))
+    return max(lines - 1, 0)
+
+
+def write_excel_copy(csv_path, logger_instance=None):
+    """Write `csv_path` again as .xlsx beside it, and return that path.
+
+    Returns None, having written nothing, when the file will not fit in a sheet
+    or no Excel writer is installed. Neither is an error: those are the cases
+    where the CSV has to stand as the output, and saying so in the log beats
+    failing a finished run or - worse - writing a workbook holding the first
+    million rows of a result with nothing to say the rest were dropped.
+    """
+    def note(message):
+        if logger_instance is not None:
+            logger_instance.info(message)
+
+    if not os.path.exists(csv_path):
+        return None
+    rows = _count_data_rows(csv_path)
+    if rows + 1 > EXCEL_MAX_ROWS:
+        note(f"[Excel] {os.path.basename(csv_path)} has {rows:,} rows, over Excel's "
+             f"limit of {EXCEL_MAX_ROWS - 1:,} - no .xlsx written, the CSV holds it all")
+        return None
+
+    target = excel_path(csv_path)
+    try:
+        # Read as text, exactly as sort_output_csv does: a workbook built from
+        # the file's own characters cannot disagree with the CSV about a value.
+        # Only the two numeric columns a reader sorts on are made numbers.
+        df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
+        # Lengths and counts are whole amino acids and whole domains: a nullable
+        # integer keeps an empty cell empty without turning 200 into 200.0 in
+        # every row. The percentage is the one genuinely fractional column.
+        # GROUP_COLUMN is deliberately absent: it now reads "2/3" and is text.
+        for column in INTEGER_OUTPUT_COLUMNS:
+            if column in df.columns:
+                df[column] = pd.to_numeric(df[column], errors='coerce').astype('Int64')
+        if LENGTH_CHANGE_COLUMN in df.columns:
+            df[LENGTH_CHANGE_COLUMN] = pd.to_numeric(df[LENGTH_CHANGE_COLUMN], errors='coerce')
+        df.to_excel(target, index=False)
+        linked = _link_gene_cells(target, df)
+        if linked is None:
+            note(f"[Excel] {os.path.basename(target)} has over "
+                 f"{EXCEL_MAX_HYPERLINKS:,} rows - gene cells left unlinked, which is "
+                 f"Excel's own ceiling on links in one sheet")
+    except ImportError:
+        note(f"[Excel] no Excel writer installed (pip install openpyxl) - "
+             f"no .xlsx written for {os.path.basename(csv_path)}")
+        return None
+    # len(df), not the line count above: a field holding a newline makes that an
+    # over-count, which is the right bias for the limit check and the wrong
+    # number to report.
+    note(f"[Excel] Written: {target} ({len(df):,} rows)")
+    return target
+
+
+def _link_gene_cells(target, df):
+    """Turn each gene_symbol cell of a written workbook into a link to that gene's
+    DoChaP page - the symbol stays the text, the URL hides behind it, as in the
+    web GUI's results table.
+
+    Applied after to_excel() rather than by writing a HYPERLINK() formula, so the
+    cell still holds the plain symbol: a formula would make every reader of the
+    file parse it back out, and a sort or a copy-paste would carry the formula
+    rather than the gene.
+
+    Returns how many cells were linked, or None where the sheet holds more rows
+    than Excel allows links in one worksheet - the caller says so in the log.
+    """
+    if 'gene_symbol' not in df.columns:
+        return 0
+    if len(df) > EXCEL_MAX_HYPERLINKS:
+        return None
+    from openpyxl import load_workbook
+    from openpyxl.styles import Color
+    column = df.columns.get_loc('gene_symbol') + 1
+    specie_column = 'species' if 'species' in df.columns else None
+    book = load_workbook(target)
+    sheet = book.active
+    linked = 0
+    for offset, (_, row) in enumerate(df.iterrows()):
+        url = dochap_gene_url(row.get('gene_symbol'),
+                              row.get(specie_column) if specie_column else None,
+                              row.get('canonical_transcript_id'),
+                              row.get('alternative_transcript_id'))
+        if not url:
+            continue
+        cell = sheet.cell(row=offset + 2, column=column)   # +2: 1-based, past the header
+        cell.hyperlink = url
+        # copy(), not a shared Font: the cell keeps the name and size the sheet
+        # gave it and gains only the colour and the underline, so a linked cell
+        # lines up with the row it sits in whatever the default font turns out
+        # to be. A Font built from scratch here would silently reset both.
+        font = copy(cell.font)
+        font.color = Color(rgb=EXCEL_HYPERLINK_RGB)
+        font.underline = 'single'
+        cell.font = font
+        linked += 1
+    book.save(target)
+    return linked
+
+
+def results_to_excel(csv_paths, logger_instance=None):
+    """Replace each results CSV with the .xlsx of the same name, and return the
+    paths that are left - a workbook where one could be written, the CSV where
+    it could not.
+
+    The analysis writes CSV throughout and this converts at the end, rather than
+    the writer producing a workbook directly. Two reasons. The rows are written
+    in chunks as the workers finish and the final order is only settled once the
+    whole file exists (see sort_output_csv), which a sheet cannot be built from
+    incrementally. And everything that reads a run's output - results_stats, the
+    reference outputs, compare_results_csv - reads a CSV, so the CSV has to exist
+    while the run is still using it. The conversion is therefore the last thing
+    the command does, after -stats has read what it needs.
+
+    A file that will not fit in a sheet keeps its CSV and says so: a result is
+    never left unreadable because it was too large for the preferred format.
+
+    Nor does a finished run fail here. This is the last thing the command does,
+    long after the analysis is complete, so an error at this point must not take
+    the result down with it - the workbook is already written, and the CSV it
+    replaces is a tidy-up. The realistic case is the CSV being locked by another
+    program: a user on Windows with compared.csv still open in Excel cannot have
+    it deleted, and that is not a reason to exit non-zero on a correct run, nor
+    to leave the second file unconverted.
+    """
+    kept = []
+    for csv_path in csv_paths:
+        if not os.path.exists(csv_path):
+            continue
+        excel = write_excel_copy(csv_path, logger_instance)
+        if excel is None:
+            kept.append(csv_path)
+            continue
+        try:
+            os.remove(csv_path)
+        except OSError as error:
+            if logger_instance is not None:
+                logger_instance.warning(
+                    "[Excel] %s was written, but %s could not be removed (%s) - "
+                    "both files are now on disk and they hold the same rows",
+                    os.path.basename(excel), os.path.basename(csv_path), error)
+        kept.append(excel)
+    return kept
+
+
+def non_compared_path(output_path):
+    """Where the rows without a domain outcome go, given where the ones with a
+    domain outcome go: the same name with 'non_' in front of it, in the same
+    directory. The default output_path is compared.csv, so the pair reads
+    compared.csv / non_compared.csv; -output_csv results.csv gives results.csv /
+    non_results.csv.
+
+    Only the file name is prefixed, never the directory - out/results.csv yields
+    out/non_results.csv rather than non_out/results.csv.
+    """
+    directory, name = os.path.split(output_path)
+    return os.path.join(directory, 'non_' + name)
+
+
+def _csv_writer_worker(result_queue, output_path, df_results_columns, logger_instance=None,
+                       filter_non_comparable=False, write_all_comparable=False,
+                       summary=None):
+    """
+    Dedicated writer thread that processes results from a queue and writes to CSV.
+
+    Runs continuously until it receives a None sentinel value.
+    Writes results incrementally as they arrive from compute workers.
+
+    Two files, not one: output_path takes the rows where a domain comparison
+    produced an outcome (DOMAIN_COMPARISON_EVENTS), and
+    non_compared_path(output_path) takes all the rest - the non-comparisons of
+    NON_COMPARISON_EVENTS, each naming why that transcript or cluster never
+    reached a comparison, plus no_domains_in_region where it did but the window
+    held no domains. They were one file with the
+    two kinds of row interleaved, where the comparisons are what a reader is
+    after and are outnumbered by the others several times over.
+
+    filter_non_comparable: if True, the non-comparison rows are dropped instead
+    of written, and the second file is not created - the flag asks for those rows
+    to be discarded, and splitting them off does not change that.
+    write_all_comparable: if False (the default), the comparison rows of each
+    cluster are reduced to the selected transcript - see selected_comparable_rows().
+    summary: a seeded RunSummary to feed as the results go past, written out as
+    summary_path(output_path) beside the CSVs. This thread is where every result is already in
+    hand one cluster at a time, so counting here costs no second pass.
+    """
+    log = logger_instance or logger
+    output_dir = tempfile.mkdtemp(prefix='domas_csv_')
+    # Chunks of the two files are kept apart by subdirectory, so combining each
+    # one stays the plain sorted-file concatenation it was.
+    compared_dir = os.path.join(output_dir, 'compared')
+    other_dir = os.path.join(output_dir, 'other')
+    os.makedirs(compared_dir)
+    os.makedirs(other_dir)
+
+    try:
+        chunk_num = 0
+        total_rows = {compared_dir: 0, other_dir: 0}
+
+        while True:
+            # Get results from queue (blocks until available)
+            chunk_results = result_queue.get()
+
+            # None is sentinel for end-of-stream
+            if chunk_results is None:
+                break
+
+            # Convert results to DataFrame and write
+            if chunk_results:
+                result_frames = []
+                for cluster_result in chunk_results:
+                    # Before the empty check and before any filtering: the
+                    # summary describes the run, so a cluster that yields no row
+                    # at all still happened and still has to be accounted for.
+                    if summary is not None:
+                        summary.add_cluster(cluster_result)
+
+                    df_cluster_results = cluster_result.get_results_df()
+                    if df_cluster_results.empty:
+                        continue
+
+                    if not write_all_comparable:
+                        df_cluster_results = selected_comparable_rows(df_cluster_results)
+
+                    if filter_non_comparable:
+                        df_cluster_results = df_cluster_results[
+                            ~df_cluster_results['event'].isin(NON_COMPARISON_EVENTS)]
+                        if df_cluster_results.empty:
+                            continue
+
+                    df_transformed = (
+                        df_cluster_results
+                        # The per-cluster frame's own 'event' column holds the
+                        # outcome label and is renamed first, so the assign below
+                        # is free to write the cluster id under that name.
+                        .rename(columns={'event': 'event_type'})
+                        .assign(
+                            event=cluster_result.cluster_name,
+                            gene_symbol=cluster_result.gene_symbol,
+                            canonical_transcript_id=cluster_result.canonical_transcript_id,
+                            specie=cluster_result.specie,
+                        )
+                    )
+                    result_frames.append(df_transformed)
+
+                if result_frames:
+                    # Filter out empty DataFrames before concatenating to avoid FutureWarning
+                    non_empty_frames = [df for df in result_frames if not df.empty]
+                    if non_empty_frames:
+                        df_chunk = pd.concat(non_empty_frames, ignore_index=True)
+
+                        # Validate and select columns
+                        missing_cols = set(df_results_columns) - set(df_chunk.columns)
+                        if missing_cols:
+                            raise ValueError(f"Missing columns in result: {missing_cols}")
+                        df_chunk = df_chunk[df_results_columns]
+
+                        if summary is not None:
+                            summary.add_frame(df_chunk)
+
+                        # Written-CSV spelling. See OUTPUT_COLUMN_RENAMES: the
+                        # rename happens here, at the write boundary, so the
+                        # in-memory name keeps matching the database column it
+                        # was read from.
+                        df_chunk = df_chunk.rename(columns=OUTPUT_COLUMN_RENAMES)
+
+                        # Derived from two columns already on the frame, so it is
+                        # added here at the write boundary rather than carried
+                        # through the analysis: one place, and every chunk of both
+                        # files gets the same column in the same position.
+                        df_chunk = add_length_change_pct(df_chunk)
+
+                        # Lengths and counts are whole amino acids and whole
+                        # domains. They arrive as float only because the rows
+                        # that carry no domain at all leave them empty, and one
+                        # NaN turns the whole column float - which then prints
+                        # every value as "128.0". The nullable integer keeps the
+                        # empty cells empty and the numbers whole, the same way
+                        # the group column already does it.
+                        for column in INTEGER_OUTPUT_COLUMNS:
+                            if column in df_chunk.columns:
+                                df_chunk[column] = pd.to_numeric(
+                                    df_chunk[column], errors='coerce').astype('Int64')
+
+                        # Before the split below, so a group's total counts the
+                        # whole cluster and not just the half of it that reached
+                        # a domain comparison.
+                        df_chunk = add_group_of_total(df_chunk)
+
+                        # Split on whether a domain comparison produced an
+                        # outcome - NOT on filter_non_comparable's predicate,
+                        # which asks a different question (did the transcript
+                        # reach a comparison at all). no_domains_in_region
+                        # answers yes to that and no to this, and belongs with
+                        # the non-comparisons. The two files together are still
+                        # exactly what the single one held, in the same order.
+                        is_comparison = df_chunk[OUTPUT_COLUMN_RENAMES['event_type']].isin(
+                            DOMAIN_COMPARISON_EVENTS)
+                        for directory, part in ((compared_dir, df_chunk[is_comparison]),
+                                                (other_dir, df_chunk[~is_comparison])):
+                            if part.empty:
+                                continue
+                            part.to_csv(os.path.join(directory, f'chunk_{chunk_num:04d}.csv'),
+                                        index=False)
+                            total_rows[directory] += len(part)
+                        log.info(f"[Writer] Wrote chunk {chunk_num} "
+                                 f"({int(is_comparison.sum())} compared, "
+                                 f"{int((~is_comparison).sum())} not)")
+
+                        chunk_num += 1
+
+        # Combine all chunks into final CSV. Each chunk was already written by
+        # pandas with the same header/column order, so this is a plain
+        # file-level concatenation (header from the first chunk, data-only
+        # from the rest) rather than reading every chunk back into pandas
+        # with read_csv, concatenating in memory, and re-serializing with
+        # to_csv - which doubles the I/O and peak memory for no benefit on a
+        # large results file.
+        # The compared rows always get a file, empty or not - it is the run's
+        # output and its absence would read as a failed run. The companion is
+        # skipped entirely under filter_non_comparable, which asked for those
+        # rows to be dropped.
+        targets = [(compared_dir, output_path)]
+        if not filter_non_comparable:
+            targets.append((other_dir, non_compared_path(output_path)))
+
+        for directory, path in targets:
+            chunk_files = sorted(os.path.join(directory, f) for f in os.listdir(directory)
+                                 if f.endswith('.csv'))
+            if chunk_files:
+                log.info(f"[Writer] Combining {len(chunk_files)} chunks into {path}...")
+                with open(path, 'w', newline='') as out_f:
+                    for i, chunk_path in enumerate(chunk_files):
+                        with open(chunk_path, 'r', newline='') as in_f:
+                            if i > 0:
+                                next(in_f)  # skip this chunk's header line
+                            shutil.copyfileobj(in_f, out_f)
+                log.info(f"[Writer] Final CSV written: {path} ({total_rows[directory]} rows)")
+            else:
+                pd.DataFrame(columns=written_column_names(df_results_columns)).to_csv(path, index=False)
+                log.info(f"[Writer] Empty results CSV written: {path}")
+
+        if summary is not None:
+            path = summary_path(output_path)
+            summary.write(path)
+            log.info(f"[Writer] Run summary written: {path}")
+
+    finally:
+        # Drop the temporary chunk files.
+        shutil.rmtree(output_dir, ignore_errors=True)
+
+
+# Per-worker state, populated once by _init_worker(): df_exons/df_domains can be
+# large, and submit() args would re-pickle them for every chunk.
+_worker_state = {}
+
+
+def _init_worker(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene,
+                 canonical_rank=None, write_all_comparable=False, extra_columns=False):
+    """ProcessPoolExecutor initializer - runs once when each worker process starts."""
+    # A spawned worker starts with no logging configuration, so its records would
+    # otherwise reach logging's last-resort handler and the console. domas.py
+    # names the run's log file in the environment; append to it.
+    log_file = os.environ.get('DOMAS_LOG_FILE')
+    if log_file:
+        logging.basicConfig(
+            filename=log_file, filemode='a', level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s %(message)s", force=True,
+        )
+    _worker_state['exon_lookup'] = build_exon_lookup(df_exons)
+    _worker_state['domain_lookup'] = build_domain_lookup(df_domains)
+    _worker_state['canonical_transcript_ids'] = canonical_transcript_ids
+    _worker_state['canonical_rank'] = canonical_rank
+    _worker_state['gene_strand'] = gene_strand
+    _worker_state['transcripts_by_gene'] = transcripts_by_gene
+    _worker_state['write_all_comparable'] = write_all_comparable
+    _worker_state['extra_columns'] = extra_columns
+
+
+def _process_cluster_chunk(chunk_info):
+    """Process a chunk of clusters sequentially (worker function for ProcessPoolExecutor).
+
+    Reads shared, read-only state populated once per worker by _init_worker().
+
+    Args:
+        chunk_info: tuple of (worker_id, chunk_index, total_chunks, chunk)
+    """
+    worker_id, chunk_index, total_chunks, chunk = chunk_info
+    chunk_size = len(chunk)
+
+    exon_lookup = _worker_state['exon_lookup']
+    domain_lookup = _worker_state['domain_lookup']
+    canonical_transcript_ids = _worker_state['canonical_transcript_ids']
+    canonical_rank = _worker_state.get('canonical_rank')
+    gene_strand = _worker_state['gene_strand']
+    transcripts_by_gene = _worker_state['transcripts_by_gene']
+    write_all_comparable = _worker_state.get('write_all_comparable', False)
+    extra_columns = _worker_state.get('extra_columns', False)
+
+    chunk_results = []
+    processed_in_chunk = 0
+
+    for cluster_tuple in chunk:
+        try:
+            result = _analyze_single_cluster(
+                cluster_tuple,
+                exon_lookup=exon_lookup,
+                domain_lookup=domain_lookup,
+                canonical_transcript_ids=canonical_transcript_ids,
+                gene_strand=gene_strand,
+                transcripts_by_gene=transcripts_by_gene,
+                canonical_rank=canonical_rank,
+                write_all_comparable=write_all_comparable,
+                extra_columns=extra_columns,
+            )
+            chunk_results.append(result)
+        except (KeyError, ValueError, AttributeError, TypeError) as e:
+            # Handle expected data issues (malformed input, missing fields, etc.)
+            cluster_name = cluster_tuple[1].cluster_name.iat[0] if len(cluster_tuple) > 1 else "unknown"
+            logger.error(f"[Worker {worker_id}] Error processing cluster {cluster_name}: {type(e).__name__}: {e}")
+            # Continue processing other clusters instead of crashing
+            continue
+
+        processed_in_chunk += 1
+
+        # Progress logging every 10000 clusters within the chunk
+        if processed_in_chunk % 10000 == 0:
+            logger.info(f"[Worker {worker_id}] Chunk {chunk_index + 1}/{total_chunks}: processed {processed_in_chunk}/{chunk_size}")
+
+    return chunk_results
+
+
+class JunctionsAnalysis:
+    def __init__(self, con, logger_instance=None, gene_visualization_cls=GeneVisualization):
+        self.con = con
+        self.logger = logger_instance or logger
+        self.gene_visualization_cls = gene_visualization_cls
+
+    def _load_junctions_data(self, df_junctions, specie=None):
+        """Validate the junctions DataFrame. Reading junctions from a file (plain CSV,
+        hadas-format Excel, IOE, ...) is alternative_splicing.py's responsibility -
+        callers pass an already-loaded DataFrame here."""
+        df_junctions = df_junctions.copy()
+
+        if 'cluster_name' not in df_junctions.columns and 'cluster' in df_junctions.columns:
+            df_junctions = df_junctions.rename(columns={'cluster': 'cluster_name'})
+
+        # One contract for every reader: required columns validated, optional ones
+        # filled with their declared default, specie derived where a reader left it
+        # blank. Past this point the columns are simply there, so downstream code
+        # does not each carry its own "if 'x' in df.columns" default.
+        return utils.normalize_junctions_frame(df_junctions, specie=specie)
+
+    def _filter_junctions_by_transcript_count(self, df_junctions, filter_transcript_count):
+        """Filter junctions to genes with exactly filter_transcript_count transcripts."""
+        if filter_transcript_count <= 0:
+            return df_junctions.copy()
+
+        # Push the per-gene transcript count into SQL instead of pulling the
+        # entire transcripts table (`select *`) into pandas just to compute a
+        # value_counts() over one column.
+        df_gene_counts = pd.read_sql_query(
+            'select gene_GeneID_id, count(*) as gene_count from transcripts group by gene_GeneID_id',
+            self.con,
+        )
+        genes_with_count = df_gene_counts.loc[
+            df_gene_counts['gene_count'] == filter_transcript_count, 'gene_GeneID_id'
+        ].tolist()
+        return df_junctions[df_junctions['gene_ensembl_id'].isin(genes_with_count)]
+
+    def _load_database_data(self, gene_ids, ensembl_only=False):
+        """Load genes, transcripts, domains, and exons from database."""
+        clause, params = utils.gene_id_clause(gene_ids)
+        df_genes = pd.read_sql_query(
+            f"SELECT gene_ensembl_id, gene_GeneID_id, specie, strand FROM Genes WHERE {clause}",
+            self.con, params=params
+        )
+        gene_strand = dict(zip(utils.combined_gene_ids(df_genes), df_genes['strand']))
+        gene_specie = dict(zip(utils.combined_gene_ids(df_genes), df_genes['specie']))
+
+        df_transcripts = utils.get_genes_df_transcripts(self.con, gene_ids)
+
+        # Every transcript the database holds is considered. Ensembl-only was the
+        # default while domains were sourced per UniProt accession, which a
+        # RefSeq-only transcript usually lacks; they come from Pfam per protein
+        # now, so those transcripts can be assessed like any other. ensembl_only
+        # restores the restriction - worth reaching for when a predicted XM_ model
+        # winning the longest-CDS tie-break would be the wrong answer.
+        if ensembl_only:
+            invalid_ids = {'', 'nan', 'None'}
+            has_ensembl_id = df_transcripts.transcript_ensembl_id.notna() & \
+                ~df_transcripts.transcript_ensembl_id.isin(invalid_ids)
+            df_transcripts = df_transcripts[has_ensembl_id]
+
+        # Combine ensembl and refseq IDs, filtering out invalid entries
+        invalid_ids = {'', 'nan', 'None'}
+        transcript_ids = set(
+            df_transcripts.transcript_ensembl_id.fillna(df_transcripts.transcript_refseq_id)
+        ) - {None} - invalid_ids
+
+        df_domains = utils.get_domains_db(
+            self.con, transcript_ids
+        )
+
+        df_exons = utils.get_exons_for_transcripts(self.con, transcript_ids)
+
+        return df_genes, df_transcripts, df_domains, df_exons, gene_strand, gene_specie
+
+    def _prepare_lookup_structures(self, df_transcripts, df_exons, df_domains):
+        """Build lookup structures and transcript groupings."""
+        invalid_ids = {'', 'nan', 'None'}
+        all_transcript_ids = df_transcripts.transcript_ensembl_id.fillna(df_transcripts.transcript_refseq_id)
+        valid_mask = all_transcript_ids.notna() & ~all_transcript_ids.isin(invalid_ids)
+        is_canonical = valid_mask & (df_transcripts.canonical != 0)
+        canonical_transcript_ids = set(all_transcript_ids[is_canonical])
+        # id -> DoChaP canonical flag (1 RefSeq / 2 Ensembl / 3 both), so a gene
+        # with several canonical transcripts can prefer the strongest. Built here
+        # rather than passed as a frame: it crosses a process boundary per worker.
+        canonical_rank = dict(zip(all_transcript_ids[is_canonical],
+                                  df_transcripts.canonical[is_canonical].astype(int)))
+
+        # Grouped by the combined gene id, so a gene carrying only a GeneID is
+        # reachable under the id the junctions frame holds for it. Grouping on
+        # gene_ensembl_id alone dropped those genes: groupby() skips NaN keys, so
+        # every one of their transcripts vanished and the cluster reported
+        # gene_not_in_db.
+        transcripts_by_gene = {
+            gid: g for gid, g in df_transcripts.groupby(utils.combined_gene_ids(df_transcripts))
+        }
+
+        return canonical_transcript_ids, canonical_rank, transcripts_by_gene
+
+    def _prepare_cluster_groups(self, df_junctions):
+        """Group junctions into clusters."""
+        # specie is always present after normalize_junctions_frame(), so clusters
+        # group per species unconditionally. Grouping on cluster_name alone would
+        # merge same-named clusters from different species in a multi-species run.
+        #
+        # dropna=False because the value may still be None: it is derived from the
+        # Ensembl gene id, and an input keyed by GeneID or by a non-Ensembl
+        # identifier yields nothing to derive from. groupby() discards NaN keys by
+        # default, which would silently drop those clusters instead of analysing
+        # them - the same trap that lost every gene without a gene_ensembl_id.
+        group_columns = ['specie', 'cluster_name']
+        cluster_groups = list(df_junctions.groupby(group_columns, dropna=False))
+        return cluster_groups
+
+    def _run_parallel_analysis(self, cluster_groups, df_exons, df_domains, canonical_transcript_ids,
+                               gene_strand, transcripts_by_gene, num_workers, output_path,
+                               filter_non_comparable=False, canonical_rank=None,
+                               write_all_comparable=False, extra_columns=False,
+                               summary=None, collect_results=True):
+        """Execute cluster analysis in parallel with dedicated writer thread."""
+        total = len(cluster_groups)
+        actual_workers = min(num_workers, total)
+
+        # Cluster cost varies a lot and is source-correlated (grouped by .ioe file), so a
+        # few big contiguous chunks can leave some workers idle for hours. Deterministic
+        # shuffling plus many small chunks lets idle workers pick up more work instead.
+        shuffled_groups = cluster_groups.copy()
+        random.Random(42).shuffle(shuffled_groups)
+        chunk_size = max(1, min(200, -(-total // (actual_workers * 20))))  # ceil division
+
+        chunks = [shuffled_groups[i:i + chunk_size] for i in range(0, total, chunk_size)]
+        total_chunks = len(chunks)
+
+        # as_completed() yields chunks as they finish, in no relation to
+        # cluster_groups' order. PDF names embed a sequential count, so the
+        # original order is restored below.
+        has_specie_column = 'specie' in cluster_groups[0][1].columns if cluster_groups else False
+
+        def _group_identity(cluster_name, specie):
+            return (specie, cluster_name) if has_specie_column else (cluster_name,)
+
+        original_order = {
+            _group_identity(group_df['cluster_name'].iat[0], group_df['specie'].iat[0] if has_specie_column else None): idx
+            for idx, (_, group_df) in enumerate(cluster_groups)
+        }
+
+        self.logger.log(utils.PROGRESS,
+                        f"Analyzing {total} clusters with {actual_workers} workers")
+        self.logger.info(f"Processing {total_chunks} chunks (~{chunk_size} clusters per chunk)")
+
+        # Prepare column definitions for CSV. The two selection flags are written
+        # only under write_all_comparable, where several transcripts share a
+        # cluster and the reader needs to know which one the rule picked. With one
+        # comparison row per cluster they would be True on every row of it.
+        # canonical_junctions / alternative_junctions sit next to the two
+        # transcript id columns they describe: each lists the event's features
+        # that that transcript carries, so the pair reads as one block.
+        df_results_columns = ['event', 'group', 'gene_symbol', 'specie', 'event_type', 'canonical_transcript_id',
+                              'alternative_transcript_id',
+                              'canonical_junctions', 'alternative_junctions',
+                              'domain_id', 'domain_name',
+                              'canonical_domain_length', 'alternative_domain_length', 'canonical_domains_number', 'alternative_domains_number']
+        # The optional pair, off unless the run asked for them: whether the
+        # group's junctions fall in each side's CDS.
+        if extra_columns:
+            # 'rank' is still computed and carried on the frame - generate_gene_pdf
+            # reads it - but is no longer written to the results CSV.
+            df_results_columns += ['canonical_junction_in_cds', 'alternative_junction_in_cds']
+        if write_all_comparable:
+            df_results_columns += ['is_longest_cds', 'is_most_like_canonical']
+        # Last: a paragraph of InterPro prose per domain, which would otherwise push
+        # every column a reader scans for off the right of the screen.
+        df_results_columns += ['domain_description']
+
+        # Create queue for results (backpressure if writer lags)
+        result_queue = queue.Queue(maxsize=actual_workers * 2)
+
+        # Start dedicated writer thread
+        writer_thread = threading.Thread(
+            target=_csv_writer_worker,
+            args=(result_queue, output_path, df_results_columns, self.logger,
+                  filter_non_comparable, write_all_comparable, summary),
+            daemon=False
+        )
+        writer_thread.start()
+
+        chunks_with_info = [
+            (chunk_idx % actual_workers, chunk_idx, total_chunks, chunk)
+            for chunk_idx, chunk in enumerate(chunks)
+        ]
+
+        # Every comparison of the run, retained for the PDFs and for the return
+        # value. On a whole-transcriptome run that is millions of objects the
+        # writer thread has already put on disk, and the parent grew to 39 GB
+        # holding them. collect_results=False keeps only the counters the
+        # unmapped summary needs, for callers that read neither.
+        all_results = []
+        unmapped_counts = {}
+        processed_count = 0
+        last_time = time.perf_counter()
+
+        with ProcessPoolExecutor(
+            max_workers=actual_workers,
+            initializer=_init_worker,
+            initargs=(df_exons, df_domains, canonical_transcript_ids, gene_strand, transcripts_by_gene,
+                      canonical_rank, write_all_comparable, extra_columns),
+        ) as executor:
+            # A bounded window of chunks in flight, rather than submitting all of
+            # them up front. A Future keeps its results in _result until it is
+            # collected - future.result() hands them over but does not release
+            # them - so a list of every Future held every chunk's results for the
+            # whole run, and the parent reached tens of gigabytes carrying rows
+            # the writer thread had already put on disk. Only the window's worth
+            # of arguments is pickled at a time for the same reason.
+            queued = iter(chunks_with_info)
+            pending = {executor.submit(_process_cluster_chunk, info)
+                       for info in itertools.islice(queued, actual_workers * _CHUNK_WINDOW)}
+
+            while pending:
+                done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                refill = len(done)
+                for future in done:
+                    chunk_results = future.result()
+                    result_queue.put(chunk_results)  # Send to writer thread for CSV
+                    if collect_results:
+                        all_results.extend(chunk_results)
+                    else:
+                        self._accumulate_unmapped(unmapped_counts, chunk_results)
+                    processed_count += len(chunk_results)
+                    del chunk_results
+
+                    if processed_count % 10000 == 0:
+                        cur_time = time.perf_counter()
+                        self.logger.log(
+                            utils.PROGRESS,
+                            f"Analyzed {processed_count}/{total} clusters. "
+                            f"Last 10000 took {cur_time - last_time:.2f}s. "
+                            f"ETA: {(cur_time - last_time) * (total - processed_count) / 10000 / 60:.1f}min"
+                        )
+                        last_time = cur_time
+                # Drop the completed futures before submitting more, so their
+                # results are freed rather than held alongside the next window.
+                future = None
+                del done
+                pending |= {executor.submit(_process_cluster_chunk, info)
+                            for info in itertools.islice(queued, refill)}
+
+        # Signal writer to stop
+        result_queue.put(None)
+        writer_thread.join()  # Wait for writer to finish
+
+        all_results.sort(
+            key=lambda r: original_order.get(_group_identity(r.cluster_name, r.specie if has_specie_column else None), total)
+        )
+
+        self.logger.log(utils.PROGRESS,
+                        f"Analysis complete: {processed_count}/{total} clusters")
+        if collect_results:
+            self._log_unmapped_summary(all_results)
+        else:
+            self._log_unmapped_totals(unmapped_counts)
+        return all_results
+
+    @staticmethod
+    def _accumulate_unmapped(per_specie, results):
+        """Fold one chunk's results into the per-species unmapped counters.
+
+        Kept separate from _log_unmapped_summary() so a run that does not retain
+        its results can still report the same line: the counters are four ints
+        per species, where the results themselves are one object per cluster."""
+        for result in results:
+            features = len(result.junctions)
+            if not features:
+                continue
+            unmapped = sum(1 for event in result.events if event[0] == 'novel_junction')
+            counts = per_specie.setdefault(result.specie, [0, 0, 0, 0])
+            counts[0] += unmapped
+            counts[1] += features
+            counts[2] += 1 if unmapped else 0
+            counts[3] += 1 if unmapped == features else 0
+        return per_specie
+
+    def _log_unmapped_summary(self, results):
+        """How much of the input never reached a transcript, per species.
+
+        A per-cluster warning scrolls past in a large run; this is one line, and
+        in a two-species comparison the asymmetry between the two is itself the
+        diagnosis - one species at 0% against the other at 48.5% is an input
+        problem, not biology. That asymmetry existed for 1,684 of 3,484 clusters
+        and nothing reported it (see find_matching_junction_indices).
+        """
+        self._log_unmapped_totals(self._accumulate_unmapped({}, results))
+
+    def _log_unmapped_totals(self, per_specie):
+        if not per_specie:
+            return
+
+        parts = []
+        for specie in sorted(per_specie, key=lambda s: (s is None, s)):
+            unmapped, features, touched, wholly = per_specie[specie]
+            parts.append(
+                f"{specie or 'unknown'} {unmapped:,} of {features:,} "
+                f"({100 * unmapped / features:.1f}%) in {touched:,} clusters, "
+                f"{wholly:,} with NO feature mapped"
+            )
+        self.logger.log(utils.PROGRESS, "Features unmapped: " + "; ".join(parts))
+
+    # Events recorded for a transcript that was NOT actually compared to the
+    # canonical transcript (it was skipped for lacking junctions or lacking a
+    # unique junction).
+    # Transcripts whose domains were never compared to the canonical - not drawn
+    # under -show_only_compared. transcript_not_chosen belongs here: it carries
+    # its group's junctions and could have been compared, but another transcript
+    # of the group represented it, so its domains were never even fetched.
+    _SKIPPED_TRANSCRIPT_EVENTS = {
+        'transcript_doesnt_have_junctions', 'no_unique_junctions', 'subsumed_by_larger_group',
+        'transcript_not_chosen', 'unvalidated_domain_coordinates',
+    }
+
+    def _comparable_transcript_ids(self, cluster_result):
+        """Canonical transcript id plus every transcript id that was actually compared to it."""
+        comparable_ids = set()
+        if cluster_result.canonical_transcript_id:
+            comparable_ids.add(cluster_result.canonical_transcript_id)
+        df_cluster_results = cluster_result.get_results_df()
+        if len(df_cluster_results) > 0:
+            compared_mask = ~df_cluster_results['event'].isin(self._SKIPPED_TRANSCRIPT_EVENTS)
+            comparable_ids.update(df_cluster_results.loc[compared_mask, 'alternative_transcript_id'].dropna())
+        return comparable_ids
+
+    def _generate_pdfs(self, results, print_genes, restrict_to_comparable=False):
+        """Generate PDF visualizations for clusters.
+
+        restrict_to_comparable: if True, each PDF draws only the canonical
+        transcript and the ones compared to it; transcripts skipped during
+        analysis (no junctions, no unique junction) are omitted entirely.
+        """
+        print_gene_set = {gene.upper() for gene in print_genes} if print_genes is not None else None
+
+        def _gene_symbol_key(value):
+            if isinstance(value, str):
+                return value.upper()
+            return None
+
+        filtered_results = (
+            [cluster_result for cluster_result in results if _gene_symbol_key(cluster_result.gene_symbol) in print_gene_set]
+            if print_gene_set is not None
+            else results
+        )
+        preloaded_gene_data = prepare_gene_data_bulk(
+            self.con, [cluster_result.gene_ensembl_id for cluster_result in filtered_results if _gene_symbol_key(cluster_result.gene_symbol) is not None],
+        )
+
+        gene_visualizations = {}
+        for count, cluster_result in enumerate(results, start=1):
+            try:
+                df_cluster_junctions = pd.DataFrame(cluster_result.junctions, columns=['start', 'end'])
+                # Carry the feature type into the visualization, so a retained
+                # intron is matched there by containment too. Rebuilt from the
+                # coordinate pairs alone, the PDF treated every feature as a
+                # junction and showed the retaining transcript as not supporting it.
+                #
+                # Only when the event actually contains one: the column also lands
+                # in the first-page junction table, where a "junction" value on
+                # every row of every plain event would be noise. Present, it tells
+                # the reader which row the dotted in-exon span belongs to.
+                if (cluster_result.feature_types is not None
+                        and FEATURE_RETAINED_INTRON in cluster_result.feature_types):
+                    df_cluster_junctions[FEATURE_TYPE_COLUMN] = cluster_result.feature_types
+                cluster_gene_key = _gene_symbol_key(cluster_result.gene_symbol)
+                if print_gene_set is not None and cluster_gene_key not in print_gene_set:
+                    continue
+                viz = gene_visualizations.get(cluster_result.gene_ensembl_id)
+                if viz is None:
+                    gene_symbol = cluster_result.gene_symbol
+                    gene_ensembl_id = cluster_result.gene_ensembl_id
+                    preloaded = preloaded_gene_data.get(gene_ensembl_id) if isinstance(gene_ensembl_id, str) else None
+                    viz = self.gene_visualization_cls(
+                        self.con, gene_symbol, preloaded=preloaded,
+                    )
+                    gene_visualizations[gene_ensembl_id] = viz
+
+                file_name = f'{cluster_result.gene_symbol}_{count}_junction_comparison.pdf'
+                if cluster_result.as_event_type is not None:
+                    file_name = f'{cluster_result.as_event_type}_{file_name}'
+                if cluster_result.specie is not None:
+                    file_name = f'{cluster_result.specie}_{file_name}'
+
+                transcript_ids = self._comparable_transcript_ids(cluster_result) if restrict_to_comparable else None
+                no_comparison_note = None
+                if restrict_to_comparable and transcript_ids - {cluster_result.canonical_transcript_id} == set():
+                    no_comparison_note = "No transcripts available for comparison to the canonical transcript."
+                viz.create_pdf(
+                    file_name,
+                    protein_only=False,
+                    domains_only=False,
+                    df_junction=df_cluster_junctions,
+                    # The description is a CSV column, not a PDF one: it is a
+                    # paragraph of InterPro prose per domain, and the PDF draws
+                    # this frame as a narrow per-transcript table. The two
+                    # junction lists are dropped for the same reason - a cluster
+                    # of 30 features is a 600-character cell - and the picture
+                    # already says which transcript carries which junction, both
+                    # in the first-page table and as the brackets on each track.
+                    df_results=cluster_result.get_results_df().drop(
+                        columns=['domain_description', 'domain_name',
+                                 'canonical_junctions', 'alternative_junctions'],
+                        errors='ignore'),
+                    transcript_ids=transcript_ids,
+                    no_comparison_note=no_comparison_note,
+                    # Which transcript the comparison used as the reference - not
+                    # always the one the DB flags, where a gene carries two.
+                    canonical_transcript_id=cluster_result.canonical_transcript_id,
+                    # What the analysis decided, so the drawing does not decide it
+                    # again: the domains the ladder kept per transcript, and the
+                    # junctions each transcript was found to carry.
+                    analysis_domains=cluster_result.kept_domains,
+                    analysis_features=cluster_result.matched_features,
+                )
+            except ValueError as e:
+                self.logger.warning(f"Warning: Skipping PDF generation for {cluster_result.gene_symbol}, specie {cluster_result.specie}: {e}")
+
+    def analyze_junctions(self, df_junctions, output_path='compared.csv',
+                          specie=None, filter_transcript_count=0, create_pdf=True, print_genes=None,
+                          num_workers=4, ensembl_only=False, restrict_pdf_to_comparable=False,
+                          collect_results=True,
+                          filter_non_comparable=False,
+                          write_all_comparable=False, extra_columns=False,
+                          keep_input_order=False,
+                          input_source=None, input_format=None, hide_paths=False):
+        """
+        Analyze junctions and detect domain changes across alternative transcripts.
+
+        Every comparable transcript is compared to canonical (none are skipped); each
+        result row is tagged is_longest_cds/is_most_like_canonical for post-hoc filtering
+        (see get_results_df()).
+
+        Args:
+            df_junctions: DataFrame of junctions. Reading junctions from a file
+                (plain CSV, hadas-format Excel, IOE, ...) is alternative_splicing.py's
+                responsibility - pass the already-loaded DataFrame here.
+            output_path: Path for the CSV of transcripts actually compared to the
+                canonical one. The rows for everything else - the transcripts and
+                clusters that never reached a comparison, each naming why - go to
+                non_compared_path(output_path) alongside it, so the default pair
+                is compared.csv and non_compared.csv. Not written under
+                filter_non_comparable, which asks for those rows to be dropped.
+            filter_transcript_count: If > 0, only analyze genes with exactly this many transcripts
+            create_pdf: Whether to generate PDF visualizations
+            print_genes: List of gene symbols to generate PDFs for (or all if None)
+            num_workers: Number of parallel workers for analysis
+            ensembl_only: If True, consider only transcripts carrying an
+                ensembl id; refseq-only ones are filtered out before any
+                exon/domain lookup is built, so they never participate in the
+                analysis at all. Off by default - every transcript the database
+                holds is considered.
+            collect_results: If False, the per-cluster results are not retained -
+                the writer thread has already put every row on disk, and on a
+                whole-transcriptome run keeping them too cost the parent tens of
+                gigabytes. The unmapped summary is still reported, from counters
+                folded in as chunks arrive. The return value is then empty, so
+                leave it True for any caller that reads it or asks for PDFs.
+            restrict_pdf_to_comparable: If True, each generated PDF only draws
+                the canonical transcript and the transcripts that were actually
+                compared to it - every other transcript of the gene is omitted
+                from the visualization entirely.
+            write_all_comparable: If True, every comparable transcript is compared
+                to the canonical one and the CSV keeps a row per transcript, with
+                the is_most_like_canonical / is_longest_cds columns naming the one
+                the selection rule picks. If False (default), only that transcript
+                is compared - so the domains of the others are never fetched - and
+                the two columns are omitted, being True on every written row.
+            filter_non_comparable: If True, the rows whose event is a
+                non-comparison / skip event (see NON_COMPARISON_EVENTS) are
+                dropped rather than written, and the non_compared companion file
+                is not created at all. The returned ClusterAnalysisResult objects
+                and any PDFs are unaffected; only the written CSVs are filtered.
+            extra_columns: If True, the CSV carries two further columns, for
+                every input format: canonical_junction_in_cds and
+                alternative_junction_in_cds, saying whether the group's junctions
+                fall inside the canonical and the compared transcript's coding
+                sequence. Omitted by default.
+            keep_input_order: If True, the compared-rows CSV keeps the order the
+                analysis produced, which is the order the clusters were read in,
+                interleaved by whichever worker finished first. By default it is
+                written in OUTPUT_EVENT_ORDER instead - see sort_output_rows.
+                The non-comparison rows are written in analysis order either way:
+                the outcome order has nothing to say about them.
+
+            input_source: What the junctions were read from, recorded verbatim at
+                the top of the summary file. Only the caller knows it - the frame
+                arrives here already loaded - so an unset one leaves the line
+                reading "(not recorded)" rather than guessing.
+
+        A <output>_summary.txt is written beside the CSVs (see summary_path and
+        RunSummary): what the input held, how many of its junctions mapped to a
+        transcript, how many clusters reached a comparison and why the rest did
+        not, and the comparison events counted both by row and by cluster+gene.
+
+        The CSV always carries canonical_junctions and alternative_junctions:
+        every feature of the event that the canonical, and that the row's
+        compared transcript, was found to carry, as 'low-high;low-high' in
+        ascending order. Both lists are the transcript's whole set, not the
+        group's, so the junctions unique to the compared transcript - what the
+        group is defined by - are the difference between the two. Empty where the
+        transcript carries none, which is what a no_canonical_junctions or
+        transcript_doesnt_have_junctions row says in words.
+
+        Returns:
+            List of ClusterAnalysisResult objects
+        """
+        # Validate input
+        df_junctions = self._load_junctions_data(df_junctions, specie=specie)
+        df_junctions = self._filter_junctions_by_transcript_count(df_junctions, filter_transcript_count)
+
+        gene_ids = df_junctions.gene_ensembl_id.unique().tolist()
+        self.logger.log(utils.PROGRESS, f"Analyzing {len(gene_ids)} genes")
+
+        # Load data from database
+        df_genes, df_transcripts, df_domains, df_exons, gene_strand, gene_specie = self._load_database_data(
+            gene_ids, ensembl_only=ensembl_only
+        )
+
+        # The database knows the species of every gene it holds, including those
+        # keyed only by GeneID, which the Ensembl-prefix check cannot read. This is
+        # therefore the stronger check on the stated species: a wrong -species is
+        # caught on any gene present in DoChaP, not only Ensembl-keyed ones.
+        _assert_specie_matches_database(df_junctions, gene_specie)
+
+        # Prepare lookup structures
+        canonical_transcript_ids, canonical_rank, transcripts_by_gene = \
+            self._prepare_lookup_structures(df_transcripts, df_exons, df_domains)
+
+        # Group junctions into clusters
+        cluster_groups = self._prepare_cluster_groups(df_junctions)
+
+        # Seeded from the input here, where the frame and the clusters are both
+        # in hand; the writer thread fills the rest in as results arrive.
+        summary = RunSummary(input_source=input_source, ensembl_only=ensembl_only,
+                             input_format=input_format, hide_paths=hide_paths)
+        summary.seed(df_junctions, cluster_groups)
+
+        # Run parallel analysis (with dedicated writer thread for CSV output)
+        results = self._run_parallel_analysis(
+            cluster_groups, df_exons, df_domains, canonical_transcript_ids,
+            gene_strand, transcripts_by_gene, num_workers,
+            output_path, filter_non_comparable=filter_non_comparable,
+            canonical_rank=canonical_rank, write_all_comparable=write_all_comparable,
+            extra_columns=extra_columns, summary=summary,
+            collect_results=collect_results,
+        )
+
+        # Once the file is whole: the order is global, and the writer only ever
+        # sees one chunk at a time. `results` is untouched - it is the analysis's
+        # own object graph, and the order asked for here is the CSV's.
+        if not keep_input_order:
+            sort_output_csv(output_path)
+
+        # Generate PDFs if requested
+        if create_pdf:
+            self._generate_pdfs(
+                results, print_genes, restrict_to_comparable=restrict_pdf_to_comparable,
+            )
+
+        return results

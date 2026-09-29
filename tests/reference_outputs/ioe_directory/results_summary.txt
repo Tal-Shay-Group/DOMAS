@@ -1,0 +1,57 @@
+DOMAS run summary
+=================
+
+DOMAS version: 1.0.0
+Date: <run time>
+
+51 event-gene pairs have at least one domain change - 51.52% of comparable pairs.
+
+Input source
+------------
+    Species : human
+    <tests>/ioe/output_prefix_A3_strict.ioe
+    <tests>/ioe/output_prefix_A5_strict.ioe
+    <tests>/ioe/output_prefix_AF_strict.ioe
+    <tests>/ioe/output_prefix_AL_strict.ioe
+    <tests>/ioe/output_prefix_MX_strict.ioe
+    <tests>/ioe/output_prefix_RI_strict.ioe
+    <tests>/ioe/output_prefix_SE_strict.ioe
+
+
+Alternative splicing events:
+----------------------------
+    Input alternative splicing events : 140
+    1 gene(s) :       140  100.00% of events
+
+
+Each event is analysed for each of the genes it is assigned to: 140 event-gene pairs
+------------------------------------------------------------------------------------
+    Comparable     :        99   70.71%
+    Non-comparable :        41   29.29%
+        No canonical junctions : 41
+
+
+Junctions:
+----------
+    Unique junctions                             : 249
+    Junction-gene pairs                          : 340
+    Junction-gene pairs for genes in the database: 340
+
+
+Junction-gene pairing:
+----------------------
+    Matched to a transcript :       340  100.00% of evaluated
+    Not matched             :         0    0.00% of evaluated
+    Not evaluated           :         0
+
+
+Event / transcript-group / domain classification:
+-------------------------------------------------
+    Non-coding alternative :        33   16.02%
+    Domain gain            :         1    0.49%
+    Domain loss            :        27   13.11%
+    Longer domain          :         2    0.97%
+    Shorter domain         :        20    9.71%
+    No domain change       :        11    5.34%
+    No domains in region   :       112   54.37%
+    Total                  :       206  100.00%

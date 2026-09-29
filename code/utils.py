@@ -1,0 +1,1979 @@
+import logging
+import os
+import sqlite3
+from collections import OrderedDict
+
+import numpy as np
+import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+# One place to bump. Recorded in every run summary, so a result file says which
+# DOMAS produced it - the outcome vocabulary and the comparison rules have both
+# changed over this tool's life, and a summary without a version cannot be read
+# against a later one.
+DOMAS_VERSION = '1.0.0'
+
+# Milestones worth putting on the console. Sits between INFO and WARNING so a
+# console handler set to this level shows progress, warnings and errors, while
+# the log file set to INFO keeps the per-chunk detail as well.
+PROGRESS = 25
+logging.addLevelName(PROGRESS, 'PROGRESS')
+
+
+# rMATS-turbo per-event files, junction-count variant. JCEC carries identical
+# coordinates, so JC is enough for DOMAS's coordinate mapping.
+#
+# An RI record names one junction, the spliced form, because the retaining
+# isoform is defined by that junction's absence. It is emitted as two features at
+# the same coordinates - one FEATURE_JUNCTION, one FEATURE_RETAINED_INTRON - so a
+# transcript can hold a feature the canonical one lacks (_rmats_event_feature_types).
+_RMATS_EVENT_FILES = {
+    'SE': 'SE.MATS.JC.txt',
+    'A5SS': 'A5SS.MATS.JC.txt',
+    'A3SS': 'A3SS.MATS.JC.txt',
+    'MXE': 'MXE.MATS.JC.txt',
+    'RI': 'RI.MATS.JC.txt',
+}
+
+
+# ---------------------------------------------------------------------------
+# Gene identity.
+#
+# DoChaP identifies a gene by gene_ensembl_id OR gene_GeneID_id (the NCBI side).
+# 16,672 of 128,454 genes - 13% - carry only a GeneID, so a lookup keyed on the
+# Ensembl id alone drops them and all of their transcripts. Absent ids are NULL,
+# never an empty string.
+#
+# The junctions frame keeps one 'gene_ensembl_id' column holding whichever id the
+# input supplied; these helpers accept either kind, mirroring the
+# transcript_ensembl_id/transcript_refseq_id fallback used for transcripts.
+# ---------------------------------------------------------------------------
+
+GENE_ID_COLUMNS = ('gene_ensembl_id', 'gene_GeneID_id')
+
+
+def combined_transcript_ids(df):
+    """The transcript id to key on per row: transcript_ensembl_id where present,
+    else transcript_refseq_id - the same key ClusterAnalysisResult.analyze()
+    builds its gene_transcript_ids from, so a lookup built on this matches what
+    the analysis asks for.
+
+    A third of the transcripts in DoChaP carry no Ensembl id at all. Keying the
+    domain source on transcript_ensembl_id alone left every one of them with an
+    empty domain frame, which reads downstream as a transcript that lost all of
+    the canonical's domains rather than one nothing was known about.
+    """
+    if 'transcript_refseq_id' not in df.columns:
+        return df['transcript_ensembl_id']
+    return df['transcript_ensembl_id'].fillna(df['transcript_refseq_id'])
+
+
+def combined_gene_ids(df):
+    """The gene id to key on per row: gene_ensembl_id where present, else
+    gene_GeneID_id - matching what the readers put in the junctions frame."""
+    if 'gene_GeneID_id' not in df.columns:
+        return df['gene_ensembl_id']
+    return df['gene_ensembl_id'].fillna(df['gene_GeneID_id'])
+
+
+def gene_id_clause(gene_ids):
+    """(sql_fragment, params) matching `gene_ids` against either gene id column,
+    e.g. "(gene_ensembl_id IN (?,?) OR gene_GeneID_id IN (?,?))" with the ids
+    repeated once per column."""
+    ids = [str(g) for g in gene_ids]
+    placeholders = ','.join(['?'] * len(ids))
+    fragment = ' OR '.join(f'{column} IN ({placeholders})' for column in GENE_ID_COLUMNS)
+    return f'({fragment})', ids * len(GENE_ID_COLUMNS)
+
+
+# ---------------------------------------------------------------------------
+# The junctions frame: one contract for every reader.
+#
+# Each reader parses a different file and hands back the same frame, whose shape
+# is declared here. Optional columns are filled with their default at the
+# boundary (normalize_junctions_frame), so code past that point reads them
+# directly.
+# ---------------------------------------------------------------------------
+
+REQUIRED_JUNCTION_COLUMNS = ('gene_ensembl_id', 'start_position', 'end_position', 'cluster_name')
+
+# The input tool's own ranking statistic for the cluster, ordered ASCENDING: the
+# smaller the value, the more significant the event. An adjusted p-value or FDR
+# already reads that way and is carried through unchanged; a score where larger
+# is better (MAJIQ's probability that an LSV changes) is stored as 1 - score by
+# its reader, so one comparison orders every format.
+#
+# Only -max_clusters reads it, to keep the strongest events rather than an
+# arbitrary slice. None where the tool's output names no statistic for a cluster,
+# and absent entirely for the formats that carry none at all (SUPPA's .ioe, the
+# internal cross-species Excel, a plain junctions CSV) - see _limit_clusters(),
+# which falls back to the cluster name.
+SIGNIFICANCE_COLUMN = 'significance'
+
+# The cluster as the input tool named it, before DOMAS split a multi-gene cluster
+# into one entry per gene (_leafcutter_attach_genes renames those to
+# cluster:SYMBOL, so cluster_name no longer identifies the event). Set only by the
+# readers that do that splitting; None elsewhere, where cluster_name already is
+# the event.
+#
+# It is what counts an event: -max_clusters caps events, not cluster-gene pairs,
+# and the run summary reports both. Deriving it by parsing cluster_name would be
+# wrong - a MAJIQ LSV ID carries colons of its own.
+SOURCE_CLUSTER_COLUMN = 'source_cluster'
+
+
+def _order_junction_boundaries(df):
+    """Put every feature's two coordinates in genomic order, start <= end.
+
+    They are the feature's two BOUNDARIES, and an input is free to state them in
+    either order: the internal format writes a human/mouse ortholog pair in the
+    order their shared exon-pair label names the exons (E4_E3), so the mouse
+    coordinates run high-to-low wherever the two genes sit on opposite strands -
+    4,832 of its 9,971 mouse junctions.
+
+    Ordered here, at the one boundary every reader passes through, rather than in
+    each consumer. Three separate places had independently assumed start < end:
+    find_matching_junction_indices() mapped nothing, find_relevant_domain_windows()
+    built a truncated window from min-of-starts and max-of-ends, and
+    select_most_like_canonical() measured the event over the wrong range and so
+    could pick a different transcript to compare. The first was found by a wrong
+    result, the second by a domain that should have been in the window and was
+    not; a fourth would have been found the same slow way.
+    """
+    start = pd.to_numeric(df['start_position'], errors='coerce')
+    end = pd.to_numeric(df['end_position'], errors='coerce')
+    reversed_pair = (start > end).fillna(False)
+    if not reversed_pair.any():
+        return df
+
+    df = df.copy()
+    df.loc[reversed_pair, ['start_position', 'end_position']] = (
+        df.loc[reversed_pair, ['end_position', 'start_position']].to_numpy())
+    logger.info("Ordered the boundaries of %d of %d features written end-first.",
+                int(reversed_pair.sum()), len(df))
+    return df
+
+
+def _optional_junction_defaults():
+    """Optional columns and the value to fill them with.
+
+    A function rather than a module constant so it can name the feature-type
+    constants, which are defined further down with the matcher they belong to."""
+    return {
+        'chromosome': None,
+        'gene_symbol': None,
+        'event_type': None,      # the AS type the tool assigned (SE / A3SS / ...)
+        'specie': None,          # 'human', 'mouse', ... - see _SPECIE_DB_NAME
+        'junction_name': None,   # provenance only; nothing reads it
+        SIGNIFICANCE_COLUMN: None,   # ascending; see SIGNIFICANCE_COLUMN
+        SOURCE_CLUSTER_COLUMN: None,  # see SOURCE_CLUSTER_COLUMN
+        FEATURE_TYPE_COLUMN: FEATURE_JUNCTION,
+    }
+
+# The species DOMAS supports: the label carried on the junctions frame mapped to
+# the DoChaP Genes.specie value. Lives here so junction_analisys.py can check a
+# stated species against the database without importing alternative_splicing.py.
+SPECIE_DB_NAME = {
+    'human': 'H_sapiens',
+    'mouse': 'M_musculus',
+    'rat': 'R_norvegicus',
+    'zebrafish': 'D_rerio',
+    'frog': 'X_tropicalis',
+}
+
+SPECIE_FROM_DB_NAME = {db_name: label for label, db_name in SPECIE_DB_NAME.items()}
+
+# NCBI publishes no representative-transcript tag for zebrafish or frog, so
+# DoChaP marks a canonical for them only where Ensembl supplies one. A gene with
+# none falls back to its longest-CDS transcript (ClusterAnalysisResult._resolve_canonical),
+# which is why both are supported: it affects 17.7% of comparable zebrafish genes
+# and 6.1% of frog ones, against 0.4% for human.
+
+
+# Ensembl stamps the species into its gene ids. The order is explicit so a
+# species added later cannot shadow another by prefix.
+_ENSEMBL_GENE_PREFIX_SPECIE = (
+    ('ENSMUSG', 'mouse'),
+    ('ENSRNOG', 'rat'),
+    ('ENSDARG', 'zebrafish'),
+    ('ENSXETG', 'frog'),
+    ('ENSG', 'human'),
+)
+
+
+def specie_from_gene_id(gene_id):
+    """The species an Ensembl gene id belongs to, or None if it is not one.
+
+    rMATS, MAJIQ and SUPPA embed an Ensembl gene id per event but no species, so
+    their frames carried no specie column. That is not cosmetic: clusters are
+    grouped by (specie, cluster_name) where the column exists and by cluster_name
+    alone where it does not, so a multi-species run of those formats would merge
+    same-named clusters from different species into one.
+    """
+    if gene_id is None or (not isinstance(gene_id, str) and pd.isna(gene_id)):
+        return None
+    text = str(gene_id).strip().upper()
+    for prefix, specie in _ENSEMBL_GENE_PREFIX_SPECIE:
+        if text.startswith(prefix):
+            return specie
+    return None
+
+
+def normalize_junctions_frame(df, specie=None):
+    """Validate the required columns and fill every optional one with its default.
+
+    `specie` is the species the caller states the input belongs to - required at
+    the CLI, since three of the five formats carry no species field. It is
+    authoritative: it fills the column, and any gene id that demonstrably
+    contradicts it aborts the run.
+
+    Contradiction is not the same as silence. An Ensembl id names its species in
+    its prefix, so it can disagree; a GeneID or other non-Ensembl id names nothing
+    and simply takes the stated value. Treating the second as an error would
+    reject exactly the GeneID-only genes DOMAS goes out of its way to support.
+
+    Where no species is stated the prefix is used, so library callers that predate
+    the flag keep working.
+    """
+    missing = [c for c in REQUIRED_JUNCTION_COLUMNS if c not in df.columns]
+    if missing:
+        raise ValueError(f"Columns {missing} are required in df_junctions but not found.")
+
+    df = _order_junction_boundaries(df)
+
+    for column, default in _optional_junction_defaults().items():
+        if column not in df.columns:
+            df[column] = default
+
+    derived = df['gene_ensembl_id'].map(specie_from_gene_id)
+    if specie is None:
+        df['specie'] = df['specie'].fillna(derived) if df['specie'].notna().any() else derived
+        return df
+
+    if specie not in SPECIE_DB_NAME:
+        raise ValueError(f"Unknown specie {specie!r}. Expected one of: "
+                         f"{', '.join(sorted(SPECIE_DB_NAME))}.")
+
+    conflicting = df.loc[derived.notna() & (derived != specie), 'gene_ensembl_id']
+    if not conflicting.empty:
+        found = sorted(derived[conflicting.index].unique())
+        raise ValueError(
+            f"Input does not match -species {specie}: {len(conflicting)} of {len(df)} "
+            f"rows carry gene ids from {', '.join(found)} "
+            f"(e.g. {', '.join(str(g) for g in conflicting.unique()[:3])}). "
+            f"Re-run with the species the data actually came from."
+        )
+
+    # Rows whose species could not be derived keep the stated one; rows that agree
+    # are unaffected by writing it.
+    df['specie'] = specie
+    return df
+
+
+def _clean_ensembl_id(gene_id):
+    """rMATS GeneID like '"ENSG00000156256.15"' -> 'ENSG00000156256'."""
+    gid = str(gene_id).strip().strip('"').strip("'")
+    return gid.split('.')[0]
+
+
+def _ordered_pair(a, b):
+    """(a, b) as a genomically ordered (low, high) int pair."""
+    a, b = int(a), int(b)
+    return (a, b) if a <= b else (b, a)
+
+
+def _rmats_event_junctions(event_type, r):
+    """The (start, end) intron junctions implied by one rMATS event row `r`
+    (a pandas Series indexable by the MATS column names). A junction is a
+    (genomic_low, genomic_high) pair; JunctionsAnalysis's matcher resolves strand.
+
+    No base adjustment is applied to the coordinates. Despite the `_0base` column
+    names, these rMATS start values were verified to align *exactly* with DoChaP's
+    stored exon coordinates (626/626 exact across all event types, zero
+    off-by-one), so adding +1 would introduce a 1bp error rather than fix one. The
+    matcher's 1bp tolerance is for exon- vs intron-boundary conventions, not to
+    compensate for any base-offset here.
+
+    SE and MXE name their exons by *genomic* position - rMATS reports
+    upstreamEE <= exonStart_0base and exonEnd <= downstreamES on both strands
+    (verified 100% over the fixture) - so one set of pairs is correct either way.
+
+    A5SS and A3SS instead name the long/short forms of one exon plus its flanking
+    exon, so which genomic boundary distinguishes the two forms flips with strand:
+    the alternative donor of an A5SS event is the exon's genomic END on the plus
+    strand but its genomic START on the minus strand, and the flanking exon sits
+    on the other side. Reading the plus-strand boundary regardless of strand made
+    both forms yield the *same* junction, collapsing the event to a single
+    junction - which can never produce a comparable transcript, so every
+    minus-strand A5SS/A3SS event was silently unanalysable."""
+    strand = str(r['strand']) if 'strand' in r else '+'
+    if event_type == 'SE':
+        return [
+            _ordered_pair(r['upstreamEE'], r['exonStart_0base']),  # inclusion: upstream -> exon
+            _ordered_pair(r['exonEnd'], r['downstreamES']),        # inclusion: exon -> downstream
+            _ordered_pair(r['upstreamEE'], r['downstreamES']),     # skipping
+        ]
+    if event_type in ('A5SS', 'A3SS'):
+        # The two alternative-splice-site types exchange roles under strand
+        # reversal: a minus-strand A5SS has the same geometry as a plus-strand
+        # A3SS. Built only in this branch - MXE has no longExon*/short*/flanking*
+        # columns, and a KeyError here is swallowed by rmats2junctions().
+        varying_boundary_is_upper = (event_type == 'A5SS') == (strand != '-')
+        if varying_boundary_is_upper:
+            return [
+                _ordered_pair(r['longExonEnd'], r['flankingES']),          # long form
+                _ordered_pair(r['shortEE'], r['flankingES']),              # short form
+            ]
+        return [
+            _ordered_pair(r['flankingEE'], r['longExonStart_0base']),      # long form
+            _ordered_pair(r['flankingEE'], r['shortES']),                  # short form
+        ]
+    if event_type == 'MXE':
+        return [
+            _ordered_pair(r['upstreamEE'], r['1stExonStart_0base']),
+            _ordered_pair(r['1stExonEnd'], r['downstreamES']),
+            _ordered_pair(r['upstreamEE'], r['2ndExonStart_0base']),
+            _ordered_pair(r['2ndExonEnd'], r['downstreamES']),
+        ]
+    if event_type == 'RI':
+        # One interval, emitted twice: once as the junction the spliced isoform
+        # carries, once as the intron the retained isoform contains. Same
+        # coordinates - _rmats_event_feature_types() supplies the distinction.
+        intron = _ordered_pair(r['upstreamEE'], r['downstreamES'])
+        return [intron, intron]
+    return []
+
+
+# Columns _rmats_event_junctions() reads per event type, on top of the common
+# GeneID/geneSymbol/chr/strand. Checked once per file so a renamed column in a
+# future rMATS release fails on the header rather than row by row, where the
+# per-row handler would swallow it into a silently truncated analysis.
+_RMATS_REQUIRED_COLUMNS = {
+    'SE': ('upstreamEE', 'exonStart_0base', 'exonEnd', 'downstreamES'),
+    'A5SS': ('longExonStart_0base', 'longExonEnd', 'shortES', 'shortEE',
+             'flankingES', 'flankingEE'),
+    'A3SS': ('longExonStart_0base', 'longExonEnd', 'shortES', 'shortEE',
+             'flankingES', 'flankingEE'),
+    'MXE': ('upstreamEE', 'downstreamES', '1stExonStart_0base', '1stExonEnd',
+            '2ndExonStart_0base', '2ndExonEnd'),
+    'RI': ('upstreamEE', 'downstreamES'),
+}
+
+_RMATS_COMMON_COLUMNS = ('GeneID', 'geneSymbol', 'chr', 'strand')
+
+
+def _check_rmats_columns(event_type, columns, path):
+    """Raise if `path` lacks a column the event type needs."""
+    required = _RMATS_COMMON_COLUMNS + _RMATS_REQUIRED_COLUMNS.get(event_type, ())
+    missing = [c for c in required if c not in columns]
+    if missing:
+        raise ValueError(
+            f"{os.path.basename(path)} is missing the column(s) {missing} that DOMAS "
+            f"needs to build {event_type} junctions. Found: {sorted(columns)}. "
+            f"This usually means the file is not rMATS-turbo {event_type} output, or "
+            f"the format changed."
+        )
+
+
+def _rmats_event_feature_types(event_type):
+    """Feature type per junction returned by _rmats_event_junctions(), in order.
+
+    Only RI mixes types: its two entries share coordinates and are distinguished
+    solely by type, which is what lets one event match both isoforms."""
+    if event_type == 'RI':
+        return [FEATURE_JUNCTION, FEATURE_RETAINED_INTRON]
+    return None  # all plain junctions
+
+
+def rmats_input_files(rmats_dir):
+    """The [Event].MATS.JC.txt files rmats2junctions() will actually read, in
+    event order. A run is routinely given a directory holding only some of the
+    five, so listing the whole map would name files that were never opened."""
+    return [os.path.join(rmats_dir, filename)
+            for filename in _RMATS_EVENT_FILES.values()
+            if os.path.exists(os.path.join(rmats_dir, filename))]
+
+
+def rmats2junctions(rmats_dir):
+    """Parse an rMATS-turbo output directory (the five [Event].MATS.JC.txt files)
+    into a junctions DataFrame ready for JunctionsAnalysis.analyze_junctions().
+
+    Carries a FEATURE_TYPE_COLUMN: RI rows come in junction/retained-intron pairs,
+    every other event type is plain junctions.
+
+    rMATS provides the Ensembl GeneID and gene symbol directly, so no
+    symbol->ensembl DB lookup is needed. ALL events are taken (no
+    FDR/IncLevelDifference filtering) - pre-filter the input files if you only
+    want significant events. The FDR is carried on SIGNIFICANCE_COLUMN, which
+    only -max_clusters reads, to choose which events a capped run analyses.
+    """
+    junctions = []
+    idx = 0
+    for event_type, filename in _RMATS_EVENT_FILES.items():
+        path = os.path.join(rmats_dir, filename)
+        if not os.path.exists(path):
+            logger.warning(f"rMATS {event_type} file not found at {path} - no {event_type} "
+                           f"events will be analysed.")
+            continue
+        # Same existence test rmats_input_files() applies, so the run summary
+        # names exactly the files this loop goes on to read.
+        df = pd.read_csv(path, sep='\t')
+        _check_rmats_columns(event_type, df.columns, path)
+        # rMATS reports an FDR per event, already ascending - see SIGNIFICANCE_COLUMN.
+        fdr = (pd.to_numeric(df['FDR'], errors='coerce') if 'FDR' in df.columns
+               else pd.Series(np.nan, index=df.index))
+        malformed = 0
+        for row_index, r in df.iterrows():
+            gene_ensembl_id = _clean_ensembl_id(r['GeneID'])
+            gene_symbol = str(r['geneSymbol']).strip().strip('"')
+            chromosome = str(r['chr'])
+            if chromosome.startswith('chr'):
+                chromosome = chromosome[3:]  # DoChaP stores bare '21', not 'chr21'
+            idx += 1
+            cluster_name = f'{event_type}_{gene_ensembl_id}_{chromosome}_{idx}'
+            try:
+                event_junctions = _rmats_event_junctions(event_type, r)
+            except (ValueError, TypeError):
+                # One row with an unparseable coordinate. The columns are known to
+                # exist by now, so this is bad data, not a schema problem; it is
+                # counted and reported below rather than passed over.
+                malformed += 1
+                continue
+            feature_types = _rmats_event_feature_types(event_type)
+            for position, (start, end) in enumerate(event_junctions):
+                feature_type = FEATURE_JUNCTION if feature_types is None else feature_types[position]
+                junctions.append([chromosome, gene_ensembl_id, gene_symbol,
+                                  event_type, start, end, cluster_name, feature_type,
+                                  fdr.at[row_index]])
+
+        if malformed:
+            logger.warning(f"{os.path.basename(path)}: skipped {malformed} of {len(df)} "
+                           f"{event_type} row(s) with unparseable coordinates.")
+
+    if not junctions:
+        raise ValueError(f"No rMATS MATS.JC.txt events found under {rmats_dir}")
+
+    return pd.DataFrame(junctions, columns=[
+        'chromosome', 'gene_ensembl_id', 'gene_symbol', 'event_type',
+        'start_position', 'end_position', 'cluster_name', FEATURE_TYPE_COLUMN,
+        SIGNIFICANCE_COLUMN])
+
+
+def _parse_coord_pairs(text):
+    """'a-b;c-d' -> [(low, high), ...] as int pairs; blanks/malformed skipped."""
+    pairs = []
+    for token in str(text).split(';'):
+        token = token.strip()
+        if not token or '-' not in token:
+            continue
+        try:
+            a, b = token.split('-')[:2]
+            a, b = int(a), int(b)
+        except ValueError:
+            continue
+        pairs.append((a, b) if a <= b else (b, a))
+    return pairs
+
+
+def voila2junctions(tsv_path):
+    """Parse a MAJIQ voila TSV (`voila tsv` output, deltapsi or psi) into a
+    junctions DataFrame ready for JunctionsAnalysis.analyze_junctions().
+
+    One LSV -> one cluster; each coordinate in 'Junctions coords' (plus 'IR
+    coords', when present) -> one junction row. voila embeds the Ensembl Gene ID,
+    so - like the rMATS path - no symbol->ensembl lookup is needed. ALL LSVs are
+    taken (no probability/dPSI filtering); pre-filter the TSV for significant LSVs
+    if desired. The changing-probability is carried on SIGNIFICANCE_COLUMN, which
+    only -max_clusters reads, to choose which LSVs a capped run analyses.
+    event_type is built from MAJIQ's A5SS/A3SS/ES/IR classification.
+    """
+    df = pd.read_csv(tsv_path, sep='\t', dtype=str)  # header line starts with '#'
+
+    gene_name_col = '#Gene Name' if '#Gene Name' in df.columns else 'Gene Name'
+    # MAJIQ scores a deltapsi LSV by the probability that each of its junctions
+    # changes - one value per junction, and LARGER is more significant. The LSV
+    # is ranked by its strongest junction, stored as 1 - p so it reads ascending
+    # like every other format (see SIGNIFICANCE_COLUMN). A psi TSV carries no
+    # such column, and those runs fall back to the cluster name.
+    probability_col = next((c for c in df.columns if c.startswith('P(|dPSI|>=')), None)
+
+    junctions = []
+    for _, r in df.iterrows():
+        gene_ensembl_id = str(r['Gene ID']).split('.')[0].strip().strip('"')
+        gene_symbol = str(r[gene_name_col]).strip()
+        chromosome = str(r['chr']).strip()
+        if chromosome.startswith('chr'):
+            chromosome = chromosome[3:]  # DoChaP stores bare '5', not 'chr5'
+        cluster_name = str(r['LSV ID']).strip()
+
+        ir_coords = str(r['IR coords']).strip() if 'IR coords' in df.columns and pd.notna(r['IR coords']) else ''
+        types = [name for name in ('A5SS', 'A3SS', 'ES')
+                 if name in df.columns and str(r[name]).strip() == 'True']
+        if ir_coords:
+            types.append('IR')
+        event_type = '+'.join(types) if types else 'LSV'
+
+        # MAJIQ quantifies retention as one of the LSV's edges, so the retained
+        # intron also appears in 'Junctions coords'; 'IR coords' names which edge
+        # it is. That edge is emitted once, as a containment feature, and its
+        # 'Junctions coords' copy dropped - the spliced junction for the same
+        # intron is listed separately anyway, either at exactly (a-1, b+1) or
+        # inside a larger junction spanning it (860 and 686 of 1,546 over the
+        # fixture, none without either).
+        retained_intron_pairs = _parse_coord_pairs(ir_coords) if ir_coords else []
+        retained_intron_set = set(retained_intron_pairs)
+        event_features = [(pair, FEATURE_JUNCTION)
+                          for pair in _parse_coord_pairs(r['Junctions coords'])
+                          if pair not in retained_intron_set]
+        event_features += [(pair, FEATURE_RETAINED_INTRON) for pair in retained_intron_pairs]
+
+        significance = np.nan
+        if probability_col is not None:
+            probabilities = pd.to_numeric(pd.Series(str(r[probability_col]).split(';')),
+                                          errors='coerce').dropna()
+            if not probabilities.empty:
+                significance = 1.0 - float(probabilities.max())
+
+        for (start, end), feature_type in event_features:
+            junctions.append([chromosome, gene_ensembl_id, gene_symbol,
+                              event_type, start, end, cluster_name, feature_type,
+                              significance])
+
+    if not junctions:
+        raise ValueError(f"No LSV junctions found in {tsv_path}")
+
+    return pd.DataFrame(junctions, columns=[
+        'chromosome', 'gene_ensembl_id', 'gene_symbol', 'event_type',
+        'start_position', 'end_position', 'cluster_name', FEATURE_TYPE_COLUMN,
+        SIGNIFICANCE_COLUMN])
+
+
+def ioe2junctions(file_path):
+    """
+    Parses an IOE file and returns a DataFrame with the relevant data.
+
+    SUPPA writes a retained intron as
+    `<gene>;RI:<chr>:<s1>:<e1>-<s2>:<e2>:<strand>`, in which only one token holds
+    a junction - the spliced form - because the retained isoform is defined by that
+    junction's absence. Such an event is emitted as two features at the same
+    coordinates, one FEATURE_JUNCTION and one FEATURE_RETAINED_INTRON, so each
+    isoform matches the feature it actually carries. Emitted as a lone junction it
+    was structurally unanalysable: 9,092 of 9,092 RI clusters in
+    events_RI_strict.ioe held a single junction, while every other SUPPA event type
+    held none.
+
+    Args:
+        file_path (str): The path to the IOE file.
+    """
+    junctions = []
+    df_ioe = pd.read_csv(file_path, sep='\t')
+    count = 0
+    retained_intron_events = 0
+    for row in df_ioe.itertuples():
+        count += 1
+        chromosome = row.seqname
+        event_parts = row.event_id.split(';')
+        gene_ensembl_id = event_parts[0]
+        event_parts2 = event_parts[1].split(':')
+        event_type = event_parts2[0]
+        cluster_name = f'{event_type}_{gene_ensembl_id}_{chromosome}_{count}'
+        
+        current_junctions = []   
+        for junction in event_parts2[1:]:
+            if junction == '-':
+                continue
+            junction_parts = junction.split('-')
+            if len(junction_parts) != 2:
+                continue
+            
+            start = int(junction_parts[0])
+            end = int(junction_parts[1])
+            current_junctions.append((start, end))
+        if event_type == 'RI':
+            # One interval, two features: the junction the spliced isoform carries
+            # and the intron the retained isoform contains.
+            for start, end in current_junctions:
+                junctions.append([chromosome, gene_ensembl_id, event_type, start, end,
+                                  cluster_name, FEATURE_JUNCTION])
+                junctions.append([chromosome, gene_ensembl_id, event_type, start, end,
+                                  cluster_name, FEATURE_RETAINED_INTRON])
+                retained_intron_events += 1
+        elif event_type == 'SE':
+            # SE:<chr>:<e1>-<s2>:<e2>-<s3> names the two inclusion junctions -
+            # the skipped exon to each flanking exon - and leaves the skipping
+            # junction (e1-s3) to be constructed. All three are emitted, matching
+            # what rMATS gives for the same event; tests/test_cross_format.py
+            # holds the two readers to that.
+            if len(current_junctions) != 2:
+                continue
+            upstream_inclusion = current_junctions[0]
+            downstream_inclusion = current_junctions[1]
+            skipping = (current_junctions[0][0], current_junctions[1][1])
+            for start, end in (upstream_inclusion, downstream_inclusion, skipping):
+                junctions.append([chromosome, gene_ensembl_id, event_type, start, end,
+                                  cluster_name, FEATURE_JUNCTION])
+        else:
+            for start, end in current_junctions:
+                junctions.append([chromosome, gene_ensembl_id, event_type, start, end,
+                                  cluster_name, FEATURE_JUNCTION])
+
+
+    if retained_intron_events:
+        logger.info(f"{os.path.basename(file_path)}: {retained_intron_events} RI event(s) "
+                    f"emitted as junction + retained-intron feature pairs.")
+    if not junctions:
+        logger.warning(f"No analysable events found in {file_path}.")
+
+    df_junctions = pd.DataFrame(junctions, columns=['chromosome', 'gene_ensembl_id', 'event_type',
+                                                    'start_position', 'end_position', 'cluster_name',
+                                                    FEATURE_TYPE_COLUMN])
+    return df_junctions
+
+def _split_synonyms(value):
+    """The synonyms one Genes row lists.
+
+    DoChaP writes them '; '-separated, but the RefSeq builder currently stores
+    only the first of the GFF's comma-separated list (gffRefseqBuilder keeps
+    `syno[0]`), so most rows hold a single token. Both separators are accepted so
+    the split does not depend on which builder wrote the row, or on that being
+    fixed.
+    """
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return []
+    out = []
+    for part in str(value).replace(';', ',').split(','):
+        part = part.strip()
+        if part and part.lower() not in ('', '-', 'nan', 'none', 'na'):
+            out.append(part)
+    return out
+
+
+def _is_readthrough_component(synonym, symbol):
+    """True when `symbol` is a readthrough named after its constituents and
+    `synonym` is one of them - BORCS8-MEF2B listing MEF2B, SYNJ2BP-COX16 listing
+    COX16.
+
+    Those are NOT renames and must not resolve. A readthrough is a separate locus
+    with its own transcripts and its own protein; answering "MEF2B" with
+    BORCS8-MEF2B would analyse a different gene's domains and say nothing about
+    it. MEF2B is a real gene that this DoChaP build drops entirely (see
+    DoChaP-db/MEF2B_GENE_LOST.md), and reporting gene_not_in_db for it is the
+    honest answer - silently substituting the readthrough is not.
+    """
+    return '-' in str(symbol) and str(synonym).upper() in {
+        part.strip().upper() for part in str(symbol).split('-')}
+
+
+def resolve_gene_symbols(con, symbols, db_specie, logger_instance=None):
+    """{UPPER(symbol): gene id} for as many of `symbols` as the Genes table can
+    place, by current symbol first and by synonym second.
+
+    A symbol that names no gene is usually a gene DoChaP does not carry at all -
+    a pseudogene or lncRNA, which the build excludes by design. But some are
+    genes it does carry under a newer name: an input naming C16orf72, C7orf50 or
+    CBWD2 is naming HAPSTR1, CHLSN and ZNG1B, all present. Those were being
+    reported as gene_not_in_db and dropped before analysis.
+
+    Only the symbols the first pass could not place are looked up again, and a
+    synonym is accepted only when it names exactly ONE gene. Synonyms are not
+    unique - an old symbol can be listed by several genes - and picking one
+    arbitrarily would attribute an event to the wrong gene silently, which is
+    worse than not placing it. Ambiguous ones are logged and left unresolved.
+
+    The gene id is combined_gene_ids()'s: the Ensembl id where there is one, else
+    the GeneID, matching what the readers put in the junctions frame.
+    """
+    log = logger_instance or logger
+    symbols = [s for s in dict.fromkeys(symbols)
+               if s and str(s).strip().lower() not in ('nan', 'na', '.', 'none', '')]
+    if not symbols:
+        return {}
+
+    resolved = {}
+    for chunk in (symbols[i:i + 450] for i in range(0, len(symbols), 450)):
+        placeholders = ','.join(['?'] * len(chunk))
+        # gene_GeneID_id comes back too: 13% of DoChaP genes carry no
+        # gene_ensembl_id, and resolving to that column alone yields NaN.
+        df = pd.read_sql_query(
+            f'SELECT gene_ensembl_id, gene_GeneID_id, gene_symbol FROM Genes '
+            f'WHERE specie = ? AND UPPER(gene_symbol) IN ({placeholders})',
+            con, params=[db_specie] + [str(s).upper() for s in chunk])
+        resolved.update({str(sym).upper(): gid
+                         for gid, sym in zip(combined_gene_ids(df), df['gene_symbol'])})
+
+    missing = [s for s in symbols if str(s).upper() not in resolved]
+    if not missing:
+        return resolved
+
+    # One pass over the species' synonym-bearing rows, rather than a LIKE per
+    # missing symbol: the column is small enough to scan and there is no index
+    # that would serve a substring match anyway.
+    df_syn = pd.read_sql_query(
+        'SELECT gene_ensembl_id, gene_GeneID_id, gene_symbol, synonyms FROM Genes '
+        "WHERE specie = ? AND synonyms IS NOT NULL AND TRIM(synonyms) NOT IN ('', '-')",
+        con, params=(db_specie,))
+    if df_syn.empty:
+        return resolved
+
+    by_synonym = {}
+    for gid, symbol, synonyms in zip(combined_gene_ids(df_syn),
+                                     df_syn['gene_symbol'], df_syn['synonyms']):
+        for syn in _split_synonyms(synonyms):
+            if _is_readthrough_component(syn, symbol):
+                continue
+            by_synonym.setdefault(syn.upper(), {})[gid] = symbol
+
+    found, ambiguous = 0, 0
+    for s in missing:
+        candidates = by_synonym.get(str(s).upper())
+        if not candidates:
+            continue
+        if len(candidates) > 1:
+            ambiguous += 1
+            log.warning(
+                "Gene symbol %s is a synonym of %d genes (%s); not resolved - "
+                "attributing the event to one of them would be a guess.",
+                s, len(candidates), ', '.join(sorted(candidates.values())))
+            continue
+        gid, symbol = next(iter(candidates.items()))
+        resolved[str(s).upper()] = gid
+        found += 1
+        log.info('Gene symbol %s not found; resolved by synonym to %s (%s).',
+                 s, symbol, gid)
+
+    if found or ambiguous:
+        log.log(PROGRESS,
+                'Resolved %d of %d unknown gene symbol(s) by synonym%s',
+                found, len(missing),
+                f' ({ambiguous} left unresolved as ambiguous)' if ambiguous else '')
+    return resolved
+
+
+def get_gene_symbols(con, gene_ensembl_ids):
+    """
+    Retrieves gene symbols for a list of gene IDs, each either an Ensembl gene id
+    or a GeneID (see GENE_ID_COLUMNS).
+
+    Args:
+        gene_ensembl_ids (list): A list of gene IDs of either kind.
+    Returns:
+        dict: A dictionary mapping gene IDs to gene symbols.
+    """
+    clause, params = gene_id_clause(gene_ensembl_ids)
+    query = f"SELECT gene_ensembl_id, gene_GeneID_id, gene_symbol FROM genes WHERE {clause}"
+    df = pd.read_sql_query(query, con, params=params)
+    gene_symbol_dict = dict(zip(combined_gene_ids(df), df['gene_symbol']))
+    return gene_symbol_dict
+
+
+def get_genes_number_of_transcripts(con, gene_ensembl_ids):
+    """
+    Retrieves the number of transcripts for a list of Ensembl gene IDs.
+
+    Args:
+        gene_ensembl_ids (list): A list of Ensembl gene IDs.
+    Returns:
+        dict: A dictionary mapping Ensembl gene IDs to the number of transcripts.
+    """
+    clause, params = gene_id_clause(gene_ensembl_ids)
+    query = (f"SELECT gene_ensembl_id, gene_GeneID_id, "
+             f"COUNT(COALESCE(transcript_ensembl_id, transcript_refseq_id)) AS num_transcripts "
+             f"FROM transcripts WHERE {clause} "
+             f"GROUP BY COALESCE(gene_ensembl_id, gene_GeneID_id)")
+    df = pd.read_sql_query(query, con, params=params)
+    num_transcripts_dict = dict(zip(combined_gene_ids(df), df['num_transcripts']))
+    return num_transcripts_dict
+
+
+
+def get_canonical_exon_counts(con, gene_ensembl_ids):
+    """
+    Given a list of gene ensembl ids, return a dict mapping each id to the
+    number of exons (exon_count) in its canonical transcript.
+
+    @param gene_ensembl_ids: list/iterable of gene_ensembl_id strings
+    @param con: SQLite connection object
+    @return: dict {gene_ensembl_id: exon_count}. Genes with no canonical
+             transcript found in the db are mapped to None.
+    """
+    result = {gid: None for gid in gene_ensembl_ids}
+
+    cur = con.cursor()
+    clause, params = gene_id_clause(gene_ensembl_ids)
+    query = f'''
+        SELECT COALESCE(gene_ensembl_id, gene_GeneID_id), exon_count
+            FROM Transcripts
+            WHERE {clause}
+              AND canonical != 0
+        '''
+    cur.execute(query, params)
+    for gene_id, exon_count in cur.fetchall():
+        result[gene_id] = exon_count
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Event feature <-> exon matching.
+#
+# Lives here so junction_analisys.py and generate_gene_pdf.py share one
+# implementation: junction_analisys imports generate_gene_pdf, so the PDF layer
+# cannot import back from it.
+# ---------------------------------------------------------------------------
+
+# An event is a list of features, each a (low, high) genomic coordinate pair
+# carrying the type below. Both describe the same interval - an intron - but ask
+# opposite questions of a transcript, which is what lets one event distinguish
+# two isoforms:
+#
+#   FEATURE_JUNCTION       the intron is spliced OUT: two adjacent exons abut it
+#   FEATURE_RETAINED_INTRON the intron is retained: one exon contains it
+#
+# A retained-intron event emits both, at identical coordinates. The type is what
+# keeps them apart: matched type-blind, a spliced transcript would satisfy both
+# and no transcript could hold a feature the canonical one lacks - exactly the
+# collapse that makes intron retention unanalysable today.
+FEATURE_JUNCTION = 'junction'
+FEATURE_RETAINED_INTRON = 'retained_intron'
+
+# Optional column on the junctions DataFrame carrying the type per row. Absent
+# means every row is a plain junction, so a frame without the column is valid.
+FEATURE_TYPE_COLUMN = 'feature_type'
+
+
+def find_matching_junction_indices(df_transcript_exons, junctions, strand='+', feature_types=None):
+    """
+    Return the set of indices (into `junctions`) of event features that match
+    this transcript's exon structure.
+
+    A junction (start_position, end_position) matches the transcript if there
+    are two exons, adjacent in transcript order, such that one exon's
+    genomic_end_tx is within 1bp of the junction's intron-left boundary and the
+    other exon's genomic_start_tx is within 1bp of the junction's intron-right
+    boundary.
+
+    The pair is read as the junction's two BOUNDARIES, not as an ordered
+    (start, end): which of them is the genomically lower one is worked out here,
+    and orientation comes from `strand` alone. An input is free to write them in
+    either order - the internal format writes a human/mouse ortholog pair in the
+    order its shared exon-pair label names the exons (E4_E3), so the mouse
+    coordinates run high-to-low wherever the two genes sit on opposite strands,
+    which is 4,832 of its 9,971 mouse junctions. Requiring start < end silently
+    failed to map every one of them, and with it the whole mouse side of 1,684
+    of 3,484 clusters.
+
+    On the positive strand the intron-left boundary is the lower coordinate and
+    the intron-right boundary the higher one. On the negative strand the
+    transcript runs right-to-left in genomic coordinates, so the roles are
+    reversed: the intron-left boundary (in genomic terms) is the higher
+    coordinate and the intron-right boundary the lower.
+
+    `feature_types` is an optional sequence parallel to `junctions`, giving each
+    feature's type (see FEATURE_JUNCTION / FEATURE_RETAINED_INTRON). None - the
+    default - treats every feature as a junction, so existing callers and any
+    junctions frame without the column behave exactly as before.
+
+    A FEATURE_RETAINED_INTRON feature matches when a SINGLE exon contains the
+    interval, within the same 1bp tolerance. Strand is irrelevant to it:
+    containment is a genomic-coordinate test with no orientation.
+    """
+    if df_transcript_exons.empty or not junctions:
+        return set()
+
+    exon_starts = df_transcript_exons['genomic_start_tx'].to_numpy()
+    exon_ends = df_transcript_exons['genomic_end_tx'].to_numpy()
+    exon_orders = df_transcript_exons['order_in_transcript'].to_numpy()
+
+    matched = set()
+    for idx, (start_position, end_position) in enumerate(junctions):
+        # Normalised once, for both feature types: the input's ordering carries
+        # no coordinate meaning (see above), so everything below works from the
+        # genomically lower and higher boundary.
+        low, high = min(start_position, end_position), max(start_position, end_position)
+
+        if feature_types is not None and feature_types[idx] == FEATURE_RETAINED_INTRON:
+            # Retained: one exon spans the whole intron. Exons are disjoint, so
+            # at most one can, and `any` is enough.
+            if ((exon_starts <= low + 1) & (exon_ends >= high - 1)).any():
+                matched.add(idx)
+            continue
+        if strand == '-':
+            # Negative strand: transcript runs from high to low genomic coords.
+            # DB always stores genomic_start_tx < genomic_end_tx, so:
+            #   - the upstream exon's intron boundary is its genomic_start_tx (lower bound of the higher exon)
+            #   - the downstream exon's intron boundary is its genomic_end_tx (upper bound of the lower exon)
+            intron_left, intron_right = high, low
+            upstream_orders = exon_orders[np.abs(exon_starts - intron_left) <= 1]
+            downstream_orders = exon_orders[np.abs(exon_ends - intron_right) <= 1]
+        else:
+            intron_left, intron_right = low, high
+            upstream_orders = exon_orders[np.abs(exon_ends - intron_left) <= 1]
+            downstream_orders = exon_orders[np.abs(exon_starts - intron_right) <= 1]
+        if len(upstream_orders) == 1 and len(downstream_orders) == 1:
+            if abs(int(downstream_orders[0]) - int(upstream_orders[0])) == 1:
+                matched.add(idx)
+    return matched
+
+
+# ---------------------------------------------------------------------------
+# DoChaP database readers.
+#
+# Here rather than in alternative_splicing.py so junction_analisys.py can import
+# them directly: alternative_splicing.py imports junction_analisys, so the
+# dependency only runs one way.
+# ---------------------------------------------------------------------------
+
+def get_exons_for_transcripts(con, transcript_ids):
+    # 450 ids per chunk: each is bound twice, and SQLite allows 999 parameters.
+    chunk_size = 450
+    df_list = []
+    
+    t_ids = list(transcript_ids)  # Ensure it's a list if it's a different iterable
+    for i in range(0, len(t_ids), chunk_size):
+        chunk_ids = t_ids[i:i + chunk_size]
+        
+        placeholders = ','.join(['?'] * len(chunk_ids))
+        
+        query = f'''
+            SELECT * FROM Transcript_exon 
+            WHERE transcript_ensembl_id IN ({placeholders}) 
+            OR transcript_refseq_id IN ({placeholders})
+        '''
+        
+        # Once per IN clause.
+        params = chunk_ids * 2
+        
+        df_chunk = pd.read_sql_query(query, con, params=params)
+        df_list.append(df_chunk)
+
+    if not df_list:
+        # No transcript ids, so the chunk loop never ran and pd.concat([]) would
+        # raise. Happens whenever no event resolves a gene - every LeafCutter
+        # cluster unannotated, or a gene set absent from the database. Return the
+        # table's empty shape so the run finishes and reports each event's reason.
+        return pd.read_sql_query('SELECT * FROM Transcript_exon LIMIT 0', con)
+
+    df_exons = pd.concat(df_list, ignore_index=True)
+    return df_exons
+
+
+def get_genes_df_transcripts(con, gene_ids):
+    """
+    Load all transcripts (with their canonical flag) for a list of genes.
+
+    Args:
+        con: Database connection
+        gene_ids: List of gene IDs, each either an Ensembl gene id or a GeneID
+
+    Returns:
+        DataFrame with one row per transcript, including transcript_ensembl_id,
+        transcript_refseq_id, gene_ensembl_id, gene_GeneID_id and canonical columns.
+    """
+    dfs = []
+    # 450 per batch: gene_id_clause() binds each id once per gene id column, so
+    # 900 parameters, under SQLite's 999 limit.
+    batch_size = 450
+    for i in range(0, len(gene_ids), batch_size):
+        batch = gene_ids[i:i + batch_size]
+        clause, params = gene_id_clause(batch)
+        query = f'SELECT * FROM Transcripts WHERE {clause}'
+        dfs.append(pd.read_sql_query(query, con, params=params))
+    if not dfs:
+        return pd.DataFrame()
+    return pd.concat(dfs, ignore_index=True)
+
+
+def _link_proteins_by_refseq(df_transcript, df_protein, df_all_proteins):
+    """Recover the protein of a transcript whose protein_ensembl_id names no
+    Proteins row, by falling back to its protein_refseq_id.
+
+    Proteins holds one row per protein, with UNIQUE protein_refseq_id and
+    protein_ensembl_id, so it can only back-link to one transcript. Where two
+    transcripts encode the same protein - the pseudoautosomal genes, whose X and Y
+    copies are identical - the second transcript's protein_ensembl_id matches
+    nothing and its domains are unreachable, even though the protein and its
+    domains are in the database under the sibling. 35 coding transcripts across 12
+    PAR genes (SHOX, PLCXD1, CRLF2, CSF2RA, ...) are in that state; each one's
+    protein IS found by its protein_refseq_id.
+
+    The transcript's own protein_ensembl_id is the broken half, so it is rewritten
+    to the one the Proteins row carries - that is the id DomainEvent and
+    RepresentativeDomains are keyed on, and the point of the exercise is to reach
+    those domains.
+    """
+    linked = set(df_protein['transcript_ensembl_id'])
+    unlinked = df_transcript[~df_transcript['transcript_ensembl_id'].isin(linked)]
+    if 'protein_refseq_id' not in unlinked.columns or unlinked.empty:
+        return df_transcript, df_protein
+    refseq = unlinked['protein_refseq_id'].astype(str).str.strip()
+    unlinked = unlinked[refseq.notna() & ~refseq.isin(('', 'nan', 'None'))]
+    if unlinked.empty:
+        return df_transcript, df_protein
+
+    by_refseq = df_all_proteins.dropna(subset=['protein_refseq_id'])
+    by_refseq = by_refseq[by_refseq['protein_ensembl_id'].notna()]
+    by_refseq = by_refseq.drop_duplicates('protein_refseq_id').set_index('protein_refseq_id')
+
+    recovered, rewritten = [], {}
+    for _, transcript in unlinked.iterrows():
+        key = str(transcript['protein_refseq_id']).strip()
+        if key not in by_refseq.index:
+            continue
+        protein = by_refseq.loc[key].copy()
+        protein['protein_refseq_id'] = key
+        # The record is real; only its back-link names the sibling transcript.
+        protein['transcript_ensembl_id'] = transcript['transcript_ensembl_id']
+        protein['transcript_refseq_id'] = transcript['transcript_refseq_id']
+        recovered.append(protein)
+        rewritten[transcript['transcript_ensembl_id']] = protein['protein_ensembl_id']
+
+    if not recovered:
+        return df_transcript, df_protein
+
+    df_protein = pd.concat([df_protein, pd.DataFrame(recovered)], ignore_index=True)
+    df_transcript = df_transcript.copy()
+    mask = df_transcript['transcript_ensembl_id'].isin(rewritten)
+    df_transcript.loc[mask, 'protein_ensembl_id'] = (
+        df_transcript.loc[mask, 'transcript_ensembl_id'].map(rewritten))
+    logger.log(PROGRESS, 'Linked %d transcript(s) to their protein by protein_refseq_id', len(rewritten))
+    return df_transcript, df_protein
+
+
+TRANSCRIPT_KEY = '_transcript_key'      # combined_transcript_ids(), as a column
+
+
+def _read_transcripts_and_proteins(con, transcript_ids):
+    """Transcripts/Proteins rows for transcript_ids, keyed by TRANSCRIPT_KEY.
+    Shared by get_transcript_domains_db() and get_representative_domains_db() so
+    get_domains_db() reads these tables once.
+
+    Matched on the combined transcript id, not on transcript_ensembl_id: a
+    RefSeq-only transcript is a transcript the analysis will ask about, and it
+    reaches RepresentativeDomains through its protein's protein_interpro_id like
+    any other - that column is a property of the Proteins row, not of which
+    accessions it carries. 59,334 RefSeq-only proteins in DoChaP have entries
+    there, 26,987 of them a curated Domain or Repeat.
+
+    A protein with no protein_ensembl_id is therefore kept. What it cannot do is
+    take part in _link_proteins_by_refseq(), which repairs a BROKEN Ensembl link;
+    that still runs on the Ensembl-keyed rows alone.
+    """
+    df_transcript = pd.read_sql_query('select * from Transcripts', con)
+    df_transcript[TRANSCRIPT_KEY] = combined_transcript_ids(df_transcript)
+    df_transcript = df_transcript[df_transcript[TRANSCRIPT_KEY].isin(transcript_ids)]
+
+    df_all_proteins = pd.read_sql_query('select * from Proteins', con)
+    df_all_proteins[TRANSCRIPT_KEY] = combined_transcript_ids(df_all_proteins)
+    df_protein = df_all_proteins[df_all_proteins[TRANSCRIPT_KEY].isin(transcript_ids)]
+
+    # The Ensembl-keyed half, repaired as before; the RefSeq-only half joins on
+    # its own key and has no Ensembl link to repair.
+    has_ensembl = (df_protein.protein_ensembl_id.notna()
+                   & (df_protein.protein_ensembl_id.astype(str).str.strip() != ''))
+    df_transcript, df_ensembl = _link_proteins_by_refseq(
+        df_transcript, df_protein[has_ensembl], df_all_proteins)
+    df_protein = pd.concat([df_ensembl, df_protein[~has_ensembl]], ignore_index=True)
+    if TRANSCRIPT_KEY not in df_protein.columns or df_protein[TRANSCRIPT_KEY].isna().any():
+        # _link_proteins_by_refseq() appends recovered rows built by hand, which
+        # need not carry the key column.
+        df_protein[TRANSCRIPT_KEY] = combined_transcript_ids(df_protein)
+    return df_transcript, df_protein
+
+
+def get_transcript_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
+    logger.log(PROGRESS, 'Reading domains from DomainEvent/DomainType')
+    if df_transcript is None or df_protein is None:
+        df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
+    # DomainEvent is keyed by protein_ensembl_id, so this path can only ever see
+    # the Ensembl-keyed proteins. Restricted explicitly because the frame now
+    # also carries RefSeq-only rows, and pandas matches NaN to NaN in a merge -
+    # leaving them in would cross-join every such protein against every such
+    # transcript on the merge below.
+    df_protein = df_protein[df_protein.protein_ensembl_id.notna()
+                            & (df_protein.protein_ensembl_id.astype(str).str.strip() != '')]
+    proteins_ids = np.unique(df_protein.protein_ensembl_id.values).tolist()
+    df_domain_event = pd.read_sql_query('select * from DomainEvent', con)
+
+    df_domain_event = df_domain_event[df_domain_event.protein_ensembl_id.isin(proteins_ids)]
+    df_domain_event = df_domain_event.dropna(subset=['protein_ensembl_id'])
+    df_domain_event = df_domain_event[df_domain_event.protein_ensembl_id.str.strip() != '']
+    df_domain_type = pd.read_sql_query('select * from DomainType', con)
+    type_ids = np.unique(df_domain_event.type_id.values).tolist()
+    df_domain_type = df_domain_type[df_domain_type.type_id.isin(type_ids)]
+
+    merged_df = pd.merge(df_protein, df_transcript, on=['protein_ensembl_id', 'transcript_ensembl_id'])
+    merged_df = merged_df.drop(columns=['gene_GeneID_id', 'synonyms'])
+    merged_df = pd.merge(merged_df, df_domain_event, on='protein_ensembl_id')
+    merged_df = merged_df.drop(columns=['protein_refseq_id_x', 'length',
+                               'protein_refseq_id_y', 'nuc_start','nuc_end',
+                               'total_length','splice_junction', 'complete_exon'])
+    merged_df = pd.merge(merged_df, df_domain_type, on='type_id')
+    merged_df = merged_df.dropna(subset=['AA_start', 'AA_end'])
+    merged_df = merged_df.astype(str)
+    merged_df = merged_df.fillna('nan')
+    merged_df['AA_start'] = merged_df['AA_start'].astype(float).astype(int)
+    merged_df['AA_end'] = merged_df['AA_end'].astype(float).astype(int)
+
+    merged_df = merged_df.rename(columns={'protein_ensembl_id': 'protein_ensembl_id_version',
+                                          'transcript_ensembl_id': 'transcript_ensembl_id_version',
+                                          'description_y': 'short_description',
+                                          'gene_ensembl_id' : 'gene_ensembl_id'})
+    # DomainType.description is what this path already carries as short_description
+    # (description_y above; description_x is the protein's). Expose it under
+    # `description` too, so a domain frame from either source answers to the same
+    # column name and the results CSV does not care which source it came from.
+    merged_df['description'] = merged_df['short_description']
+    merged_df = merged_df.drop(columns=['type_id', 'ext_id', 'name', 'other_name', 'description_x'])
+    merged_df = merged_df.drop(columns=['transcript_refseq_id_x', 'tx_start', 'tx_end', 'cds_start', 'cds_end', 'exon_count'])
+    merged_df = merged_df.drop(columns=['transcript_refseq_id_y','protein_refseq_id'])
+    logger.log(PROGRESS, 'Read %d domain rows from DomainEvent/DomainType', len(merged_df))
+    return merged_df
+
+
+REPRESENTATIVE_DOMAINS_COLUMNS = [
+    'protein_ensembl_id_version', 'transcript_ensembl_id_version', 'protein_interpro_id',
+    'gene_ensembl_id', 'canonical', 'AA_start', 'AA_end', 'short_description',
+    # The entry's prose description, reported per domain in the results CSV.
+    # RepresentativeDomains carries its own; the DomainEvent/DomainType path
+    # supplies DomainType.description under the same name, so a frame from
+    # either source answers to 'description'.
+    'description',
+    'CDD_id', 'cdd', 'pfam', 'smart', 'tigr', 'interpro',
+    # domain_id and the InterPro entry `type` are carried through so
+    # junction_analisys.filter_representative_domains() can rank the domain set
+    # by curated type (Domain/Repeat above Family/Homologous_superfamily). `type`
+    # is NULL in DBs whose RepresentativeDomains lacks the column; the filter
+    # then passes the frame through unchanged.
+    'domain_id', 'type',
+    # How this row's coordinates were arrived at - see PROJECTION_* below and
+    # _reproject_inherited_domains().
+    'projection_status',
+]
+
+# How a domain row's amino-acid coordinates were arrived at. Carried per row
+# because a caller cannot otherwise tell a repositioned row from one the
+# projection was unable to validate: both come back holding coordinates.
+PROJECTION_OWN = 'own'                  # the protein owns this accession's domains
+PROJECTION_PROJECTED = 'projected'      # borrowed, re-derived, fully retained in frame
+PROJECTION_TRUNCATED = 'truncated'      # borrowed, re-derived, only partly encoded
+PROJECTION_UNVALIDATED = 'unvalidated'  # borrowed, and NOT re-derived: no owning
+                                        # protein on the accession, or no usable CDS
+                                        # map. The coordinates are still the ones
+                                        # inherited from another isoform.
+PROJECTION_UNKNOWN = 'unknown'          # provenance undetermined: the builder could
+                                        # not establish whether these coordinates
+                                        # belong to this protein. Distinct from
+                                        # 'unvalidated', which knows they do not.
+
+#: Statuses whose coordinates were established against the protein they sit on,
+#: and may therefore be compared. 'truncated' IS included: its coordinates are
+#: established exactly as 'projected' ones are, and the partial encoding they
+#: describe is a finding about the isoform rather than a doubt about the
+#: measurement - excluding it would discard the events this analysis exists to
+#: detect. Only 'unvalidated' (known borrowed, not re-derivable) and 'unknown'
+#: (provenance never established) are outside it.
+#:
+#: There is deliberately no second set for "the domain is whole". Nothing needs
+#: one, and a set of that shape reads as a safety gate, which is how 'truncated'
+#: would quietly get dropped. A caller wanting completeness tests
+#: `status == PROJECTION_PROJECTED` at its own call site, where the intent shows.
+PROJECTION_COMPARABLE = frozenset({PROJECTION_OWN, PROJECTION_PROJECTED,
+                                   PROJECTION_TRUNCATED})
+
+#: get_pfam_domains_db()'s frame: the representative columns minus the InterPro
+#: entry `type`, which a Pfam-sourced set has no value for.
+_PFAM_COLUMNS = [c for c in REPRESENTATIVE_DOMAINS_COLUMNS if c != 'type']
+
+#: Which table get_domains_db() reads. 'pfam' takes Pfam signatures from
+#: DomainEvent, keyed on the protein in BOTH the Ensembl and RefSeq id spaces,
+#: so every row's coordinates were computed on the protein carrying them and no
+#: projection is involved. 'representative' is the older accession-keyed
+#: InterPro source, which needs _reproject_inherited_domains() to be correct.
+#: Override for one run with DOMAS_DOMAIN_SOURCE.
+DEFAULT_DOMAIN_SOURCE = 'pfam'
+
+
+def _route_domain_id_to_column(domain_id):
+    """Map an InterPro match-XML accession (RepresentativeDomains.domain_id) to the
+    DomainType-style identifier column it belongs to. Only affects which bucket the id is
+    displayed under - domain matching in junction_analisys.py checks all buckets together."""
+    if domain_id.startswith('IPR'):
+        return 'interpro'
+    if domain_id.startswith('PF'):
+        return 'pfam'
+    if domain_id.startswith('SM'):
+        return 'smart'
+    if domain_id.startswith('TIGR'):
+        return 'tigr'
+    if domain_id.lower().startswith('cd'):
+        return 'CDD_id'
+    return 'interpro'
+
+
+def _clip_domains_to_protein(df):
+    """Drop or trim domains that do not fit the protein they are attached to.
+
+    RepresentativeDomains is keyed by UniProt accession, and several Ensembl
+    proteins of different lengths cross-reference the same accession - UniProt
+    holds one canonical sequence per entry, and isoforms without an accession of
+    their own point at it. Every one of them therefore inherits the same domain
+    coordinates, measured on UniProt's sequence. THEMIS2's 123 aa isoform came
+    back carrying a CABIT domain at 275-515.
+
+    A domain starting past the protein's end is unreachable anyway - the window's
+    amino-acid interval is bounded by the transcript's own coding length - so
+    dropping it changes no comparison, only the drawing. One that STARTS inside
+    and ENDS past the end does reach the window, and total_covered_length() then
+    measures it from the stored coordinates and counts residues the protein does
+    not have: 3.1% of human Domain/Repeat rows, and 785 of them overstating the
+    length by more than half. Those are trimmed to the last residue that exists.
+
+    Proteins with no recorded length are left alone rather than guessed at.
+    """
+    if 'length' not in df.columns:
+        return df
+    length = pd.to_numeric(df['length'], errors='coerce')
+    fits = length.isna() | (df['AA_start'] <= length)
+    df = df[fits].copy()
+    length = pd.to_numeric(df['length'], errors='coerce')
+    trim = length.notna() & (df['AA_end'] > length)
+    df.loc[trim, 'AA_end'] = length[trim].astype(int)
+    return df
+
+
+#: How many CdsMaps one connection's cache keeps. Mirrors
+#: junction_analisys._LOOKUP_CACHE_SIZE, which bounds the same kind of cache for
+#: the same reason: a full IOE run touches every transcript in the database, and
+#: an unbounded cache would retain one map per transcript - measured at ~2.2 KB
+#: each, or ~1.2 GB over 545,697 transcripts - for the life of the process.
+_CDS_MAP_CACHE_SIZE = 4096
+
+
+#: Bounded cache of CdsMaps, keyed on (database file, transcript).
+_CDS_MAP_CACHE = OrderedDict()
+
+
+def _database_file(con):
+    """The file this connection is attached to, or None for an in-memory one."""
+    try:
+        for _seq, name, path in con.execute("PRAGMA database_list"):
+            if name == 'main':
+                return path or None
+    except Exception:
+        return None
+    return None
+
+
+def _cds_map_for(con, transcript_key, strand_by_gene):
+    """A CdsMap for one transcript, built from its own Transcript_Exon rows.
+
+    Cached on (database file, transcript): a gene's transcripts are asked for
+    once per domain row, and the exon query is the expensive part.
+
+    The key is the DATABASE, not the connection, because that is what the map is
+    a property of - two connections to one file yield identical maps, and a
+    connection to a different file must not share them. It is deliberately not
+    `id(con)`, which an earlier version used: CPython reuses an address as soon
+    as the object at it is freed (six connections opened and closed in sequence
+    take two distinct ids between them), so a map built against a CLOSED
+    connection could be served to a new one landing on the same address. Within
+    one run that is harmless since the data is the same; across two databases in
+    one process - which is what the test suite does with --db-path - it would
+    silently return coordinates derived from the wrong database.
+
+    An in-memory database has no file to name, and two unrelated ones would
+    collide on the empty string, so those are simply not cached.
+    """
+    from domain_projection import build_cds_map   # local: utils is imported early
+
+    database = _database_file(con)
+    cache_key = (database, transcript_key) if database else None
+    if cache_key is not None and cache_key in _CDS_MAP_CACHE:
+        _CDS_MAP_CACHE.move_to_end(cache_key)
+        return _CDS_MAP_CACHE[cache_key]
+
+    row = con.execute(
+        "SELECT cds_start, cds_end, gene_ensembl_id, gene_GeneID_id FROM Transcripts "
+        "WHERE transcript_ensembl_id = ? OR transcript_refseq_id = ?",
+        (transcript_key, transcript_key)).fetchone()
+    result = None
+    if row is not None:
+        df_exons = pd.read_sql_query(
+            "SELECT * FROM Transcript_Exon "
+            "WHERE transcript_ensembl_id = ? OR transcript_refseq_id = ?",
+            con, params=[transcript_key, transcript_key])
+        # Either gene key: DoChaP identifies a gene by its Ensembl id or by its
+        # GeneID, and a RefSeq-only gene carries no Ensembl id at all. Reading
+        # only the Ensembl column would drop those transcripts as unmappable
+        # even though their gene, and its strand, are recorded.
+        strand = strand_by_gene.get(row[2]) or strand_by_gene.get(row[3])
+        if strand:
+            result = build_cds_map(df_exons, strand, row[0], row[1])
+    if cache_key is not None:
+        _CDS_MAP_CACHE[cache_key] = result
+        while len(_CDS_MAP_CACHE) > _CDS_MAP_CACHE_SIZE:
+            _CDS_MAP_CACHE.popitem(last=False)
+    return result
+
+
+def _strand_by_gene(con):
+    """Strand for every gene, under BOTH of the keys a transcript may name it by."""
+    strands = {}
+    for ensembl_id, geneid, strand in con.execute(
+            "SELECT gene_ensembl_id, gene_GeneID_id, strand FROM Genes"):
+        if strand is None:
+            continue
+        if ensembl_id:
+            strands[ensembl_id] = strand
+        if geneid:
+            strands[geneid] = strand
+    return strands
+
+
+def _reproject_inherited_domains(con, merged_df):
+    """Put each isoform's domains in ITS OWN amino-acid coordinates.
+
+    RepresentativeDomains is keyed on protein_interpro_id and nothing else, so
+    the merge above hands every transcript sharing an accession one identical
+    domain list - measured on whichever sequence UniProt displays for that
+    entry. Where the isoforms are the same protein that is correct. Where they
+    are not, the others inherit coordinates that were never theirs: ARAP1's
+    1205 aa isoform comes back carrying SAM at aa 3-70, encoded by an exon it
+    does not contain, and a PH domain at 1277-1432 that does not fit inside it.
+
+    _clip_domains_to_protein() catches only the part that overruns the far end.
+    A domain sitting comfortably inside the shorter protein but encoded by a
+    missing exon is invisible to a length check - which is exactly the ARAP1
+    case - and one that IS present is left at the wrong offset.
+
+    Proteins.interpro_domains_are_own (written by DoChaP-db's
+    RepresentativeDomainsBuilder from the Swiss-Prot isoform tags) says which
+    rows are borrowed. For each borrowed protein this re-derives the domain's
+    position from the two transcripts' own CDS structures, dropping what the
+    isoform does not encode and shifting what it does.
+
+    The reference is NOT assumed to be the canonical transcript. In 1,205 genes
+    the canonical is itself flagged as borrowing while a non-canonical sibling
+    holds the displayed sequence - RNF216, where UniProt displays isoform 2 and
+    DoChaP's canonical is isoform 1 - so the reference is whichever protein on
+    the accession is marked as owning its domains.
+
+    A database without the column, or an accession with no owning protein, is
+    left exactly as it is: unchanged behaviour, never a guess.
+    """
+    from domain_projection import project_domain, KEPT, TRUNCATED
+
+    # Every exit adds the column, so the frame's shape does not depend on
+    # whether anything needed projecting - a caller can always read it.
+    if merged_df.empty or 'interpro_domains_are_own' not in merged_df.columns:
+        merged_df = merged_df.copy()
+        # A database without the column predates the isoform step, so nothing is
+        # known about any row's provenance. (An empty frame has no rows to label,
+        # so the value only has to keep the column's dtype consistent.)
+        merged_df['projection_status'] = PROJECTION_UNKNOWN
+        return merged_df
+
+    ownership = pd.to_numeric(merged_df['interpro_domains_are_own'],
+                              errors='coerce')
+    borrowed = ownership == 0
+
+    # Every row says how its coordinates were arrived at. Without this a row the
+    # projection could not validate is indistinguishable from one it
+    # repositioned, because both come back carrying coordinates.
+    #
+    # A NULL flag is not a quiet "no". The builder writes it where UniProt cannot
+    # say which sequence the accession's domains were computed on - almost always
+    # a TrEMBL accession, which has no curated isoform model to consult. Such a
+    # row cannot be projected either: projection needs a sibling the builder
+    # marked own=1, and on these accessions there is none. Folding it into 'own'
+    # would claim a verification that never ran.
+    status = pd.Series(PROJECTION_OWN, index=merged_df.index, dtype=object)
+    status[ownership.isna()] = PROJECTION_UNKNOWN
+
+    if not borrowed.any():
+        merged_df = merged_df.copy()
+        merged_df['projection_status'] = status
+        return merged_df
+
+    # The owning protein for each accession, looked up across the WHOLE table:
+    # the reference transcript need not be in this run's transcript set.
+    accessions = merged_df.loc[borrowed, 'protein_interpro_id'].unique().tolist()
+    reference = {}
+    for start in range(0, len(accessions), 500):
+        batch = accessions[start:start + 500]
+        placeholders = ','.join(['?'] * len(batch))
+        for accession, ensembl_tx, refseq_tx in con.execute(
+                f"SELECT protein_interpro_id, transcript_ensembl_id, transcript_refseq_id "
+                f"FROM Proteins WHERE interpro_domains_are_own = 1 "
+                f"  AND protein_interpro_id IN ({placeholders})", batch):
+            reference.setdefault(accession, ensembl_tx or refseq_tx)
+
+    strand_by_gene = _strand_by_gene(con)
+
+    keep = pd.Series(True, index=merged_df.index)
+    new_start = merged_df['AA_start'].copy()
+    new_end = merged_df['AA_end'].copy()
+    counts = {'reprojected': 0, 'dropped': 0, 'no_reference': 0, 'unmappable': 0}
+
+    for index in merged_df.index[borrowed]:
+        row = merged_df.loc[index]
+        reference_tx = reference.get(row['protein_interpro_id'])
+        if reference_tx is None:
+            counts['no_reference'] += 1
+            status.at[index] = PROJECTION_UNVALIDATED
+            continue
+        target_tx = row['transcript_ensembl_id_version']
+        reference_map = _cds_map_for(con, reference_tx, strand_by_gene)
+        target_map = _cds_map_for(con, target_tx, strand_by_gene)
+        if reference_map is None or target_map is None:
+            counts['unmappable'] += 1
+            status.at[index] = PROJECTION_UNVALIDATED
+            continue
+        # Normalised, not passed through: project_domain() clips against this
+        # with int(), and a NaN is truthy while int(NaN) raises - so an absent
+        # length would crash the branch meant to tolerate it. The clip below
+        # (_clip_domains_to_protein) already coerces the same column this way;
+        # doing it here keeps the two from disagreeing about whether a length
+        # can be missing.
+        alt_length = pd.to_numeric(row.get('length'), errors='coerce')
+        alt_length = int(alt_length) if pd.notna(alt_length) else None
+        projected = project_domain(row['AA_start'], row['AA_end'],
+                                   reference_map, target_map, alt_length)
+        if projected.status in (KEPT, TRUNCATED):
+            new_start.at[index] = projected.aa_start
+            new_end.at[index] = projected.aa_end
+            status.at[index] = (PROJECTION_PROJECTED if projected.status == KEPT
+                                else PROJECTION_TRUNCATED)
+            counts['reprojected'] += 1
+        else:
+            # absent (the isoform lacks the encoding exons) or frameshifted
+            # (it reads them in another frame, so the peptide differs).
+            keep.at[index] = False
+            counts['dropped'] += 1
+
+    merged_df = merged_df.copy()
+    merged_df['AA_start'] = new_start
+    merged_df['AA_end'] = new_end
+    merged_df['projection_status'] = status
+    merged_df = merged_df[keep]
+    logger.log(PROGRESS,
+               'Inherited domain rows: %d repositioned, %d dropped as absent, '
+               '%d with no owning protein, %d unmappable',
+               counts['reprojected'], counts['dropped'],
+               counts['no_reference'], counts['unmappable'])
+    return merged_df
+
+
+def get_representative_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
+    """
+    Domains sourced from the RepresentativeDomains table (populated by
+    DoChaP-db/InterProRepresentativeDomains.py) instead of DomainEvent/DomainType.
+
+    Returns a DataFrame with the same columns as get_transcript_domains_db() so it's a
+    drop-in replacement for build_domain_lookup(), but only contains rows for proteins
+    that actually have a RepresentativeDomains entry - see get_domains_db() for combining
+    it with the DomainEvent/DomainType fallback for proteins that don't.
+    """
+    logger.log(PROGRESS, 'Reading domains from RepresentativeDomains')
+    if df_transcript is None or df_protein is None:
+        df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
+
+    if 'protein_interpro_id' not in df_protein.columns:
+        logger.warning('Proteins table has no protein_interpro_id column '
+                       '(InterProRepresentativeDomains.py has not been run against this DB).')
+        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
+
+    df_protein = df_protein.dropna(subset=['protein_interpro_id'])
+    df_protein = df_protein[df_protein.protein_interpro_id.str.strip() != '']
+    if df_protein.empty:
+        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
+
+    interpro_ids = np.unique(df_protein.protein_interpro_id.values).tolist()
+    try:
+        df_rep = pd.read_sql_query('select * from RepresentativeDomains', con)
+    except (sqlite3.OperationalError, pd.errors.DatabaseError):
+        logger.warning('RepresentativeDomains table not found in this DB.')
+        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
+
+    df_rep = df_rep[df_rep.protein_interpro_id.isin(interpro_ids)]
+    df_rep = df_rep.dropna(subset=['start', 'end'])
+    if df_rep.empty:
+        return pd.DataFrame(columns=REPRESENTATIVE_DOMAINS_COLUMNS)
+
+    # Some DBs have no `type` column; add it as NULL to keep the frame uniform.
+    if 'type' not in df_rep.columns:
+        df_rep['type'] = None
+
+    # On the combined transcript key rather than the Ensembl id pair: the pair
+    # excluded every RefSeq-only transcript from the domain source outright. The
+    # protein columns are dropped from one side first so the merge does not
+    # suffix them - the protein's are the ones the rest of this function reads.
+    merged_df = pd.merge(
+        df_protein,
+        df_transcript.drop(columns=['protein_ensembl_id', 'protein_refseq_id'],
+                           errors='ignore'),
+        on=TRANSCRIPT_KEY, suffixes=('', '_tx'))
+    merged_df = pd.merge(merged_df, df_rep, on='protein_interpro_id')
+
+    # The lookup is keyed on transcript_ensembl_id_version below, and the
+    # analysis asks for the combined id - so that is what has to go in it.
+    merged_df['transcript_ensembl_id'] = merged_df[TRANSCRIPT_KEY]
+
+    domain_column = merged_df['domain_id'].map(_route_domain_id_to_column)
+    for col in ('CDD_id', 'cdd', 'pfam', 'smart', 'tigr', 'interpro'):
+        merged_df[col] = merged_df['domain_id'].where(domain_column == col)
+
+    merged_df = merged_df.rename(columns={
+        'protein_ensembl_id': 'protein_ensembl_id_version',
+        'transcript_ensembl_id': 'transcript_ensembl_id_version',
+        'start': 'AA_start',
+        'end': 'AA_end',
+        'domain_name': 'short_description',
+        # Proteins and RepresentativeDomains both have a `description`, so the
+        # merge suffixes them: _x is the protein's, _y the domain entry's. It is
+        # the domain's that belongs on a domain row.
+        'description_y': 'description',
+    })
+    merged_df['AA_start'] = merged_df['AA_start'].astype(int)
+    merged_df['AA_end'] = merged_df['AA_end'].astype(int)
+    # Before the length clip, not after: reprojection puts each isoform's
+    # domains in its own coordinates, and the clip is only meaningful once they
+    # are. Run the other way round, the clip would trim borrowed coordinates
+    # against the borrower's length - which is what produced the wrong domain
+    # set in the first place.
+    merged_df = _reproject_inherited_domains(con, merged_df)
+    merged_df = _clip_domains_to_protein(merged_df)
+
+    logger.log(PROGRESS, 'Read %d domain rows from RepresentativeDomains', len(merged_df))
+    return merged_df[REPRESENTATIVE_DOMAINS_COLUMNS]
+
+
+#: Mirrors junction_analisys._SAME_ID_OVERLAP. Duplicated rather than imported
+#: because junction_analisys imports this module; the two must stay in step.
+_SAME_ID_OVERLAP = 0.5
+
+
+def _collapse_duplicate_spans(df):
+    """Collapse duplicate hits of the SAME signature on the SAME protein.
+
+    Applies the identical rule to junction_analisys.filter_representative_domains():
+    two entries with the same id whose overlap covers at least _SAME_ID_OVERLAP of
+    the SHORTER one are one domain, and the longer is kept; below that they are two
+    instances (tandem repeats) and both survive. Coordinates are inclusive, and the
+    kept row's own start/end are reported - never a union of the two, which would be
+    a span neither annotation claimed.
+
+    This matters more here than on the representative path: a Pfam frame carries no
+    InterPro `type`, so filter_representative_domains() returns it untouched and this
+    is the only de-duplication that runs.
+    """
+    if df.empty:
+        return df
+    df = df.sort_values(['transcript_ensembl_id_version', 'domain_id', 'AA_start', 'AA_end'])
+    dropped = set()
+    for _, group in df.groupby(['transcript_ensembl_id_version', 'domain_id'], sort=False):
+        rows = list(group.itertuples(index=True))
+        for a in range(len(rows)):
+            ra = rows[a]
+            if ra.Index in dropped:
+                continue
+            for b in range(a + 1, len(rows)):
+                rb = rows[b]
+                if rb.Index in dropped:
+                    continue
+                lo, hi = max(ra.AA_start, rb.AA_start), min(ra.AA_end, rb.AA_end)
+                if hi < lo:
+                    continue
+                shorter = min(ra.AA_end - ra.AA_start + 1, rb.AA_end - rb.AA_start + 1)
+                if shorter <= 0 or (hi - lo + 1) / shorter < _SAME_ID_OVERLAP:
+                    continue
+                len_a = ra.AA_end - ra.AA_start
+                len_b = rb.AA_end - rb.AA_start
+                dropped.add(rb.Index if len_a >= len_b else ra.Index)
+                if ra.Index in dropped:
+                    break
+    return df.drop(index=list(dropped))
+
+
+def _pfam_accession(ext_id):
+    """The Pfam accession named in a DomainEvent.ext_id, or None if it names none.
+
+    ext_id is a SET of ids joined with '; ', not an ordered pair: SpeciesDB
+    collapses rows that share coordinates and joins whatever matched, so a row
+    reads 'pfam00536; IPR001660' but equally 'smart00208; IPR001368; pfam00020'.
+    Position therefore carries no meaning. Anchoring at the start instead
+    (ext_id LIKE 'pfam%' with .split(';')[0]) missed 10,121 genuine Pfam hits,
+    and on the 95,419 rows naming both a Pfam and a SMART id it let Python's set
+    iteration order decide - so a rebuild of the database could change which
+    rows the analysis sees, with no change to this code.
+
+    The prefix itself is reliable: InterproCollector rewrites InterPro's own
+    cross-references through sourceDict ({'pfam': 'pf', 'smart': 'sm', ...}), so
+    PF00536 is stored as pfam00536. A token starting 'pfam' is a Pfam accession.
+
+    Where a row names more than one (exactly one row in the current build) the
+    lowest is taken, so the answer does not depend on that order either.
+    """
+    tokens = [token.strip() for token in str(ext_id).split(';') if token.strip()]
+    accessions = sorted(t for t in tokens if t.lower().startswith('pfam'))
+    return accessions[0] if accessions else None
+
+
+def _protein_key(frame):
+    """A single hashable key per protein. Built as a string rather than a tuple
+    per row: the frame runs to over a million rows, and .apply() over it costs
+    minutes."""
+    return (frame['protein_ensembl_id'].fillna('').astype(str) + '|'
+            + frame['protein_refseq_id'].fillna('').astype(str))
+
+
+def _overlaps_a_stated_instance(df_fallback, df_direct):
+    """Which fallback rows describe a region a stated-Pfam row already covers.
+
+    Positional, and keyed on the ACCESSION rather than the type_id: it is the
+    accession that would collide downstream, _collapse_duplicate_spans() groups
+    by it, and two type_ids can resolve to one. Per type_id instead, a protein
+    with any stated row for a family lost every repeat of it that had none -
+    32,631 rows in this build, against 1,539 that genuinely described a region
+    twice.
+
+    _SAME_ID_OVERLAP, not any overlap at all, for the reason that constant exists:
+    two tandem copies of a repeat can share a boundary, and suppressing a whole
+    instance over one residue is what the majority rule is there to prevent.
+
+    Anything this does NOT suppress is simply added; the same 50% rule then runs
+    over the combined frame in _collapse_duplicate_spans(), so one region
+    annotated by cd AND smart still collapses to one domain. Suppressing here as
+    well is what keeps the surviving row's coordinates Pfam's own: the collapse
+    keeps the LONGER span, which for ARHGEF1 would report CDD's 187 residues in
+    place of Pfam's 184.
+    """
+    if df_fallback.empty or df_direct.empty:
+        return pd.Series(False, index=df_fallback.index)
+
+    # A pair-wise question answered pair-wise: every fallback row against every
+    # stated row sharing its protein and accession. Done as one inner join rather
+    # than a row-at-a-time loop, which cost 13 seconds of every run on the current
+    # build - a fixed price paid whether the run analyses 100 clusters or all of
+    # them. The join is 1.86M pairs here, about 60 MB, because a protein carries
+    # only a handful of instances of any one accession.
+    #
+    # Keys are factorized together so both sides share one integer space: the join
+    # then hashes ints rather than the concatenated id strings, which is most of
+    # what is left of the cost.
+    fallback_key = (_protein_key(df_fallback) + '|'
+                    + df_fallback['domain_id'].astype(str)).to_numpy()
+    direct_key = (_protein_key(df_direct) + '|'
+                  + df_direct['domain_id'].astype(str)).to_numpy()
+    codes = pd.factorize(np.concatenate([fallback_key, direct_key]))[0]
+
+    left = pd.DataFrame({
+        'key': codes[:len(df_fallback)],
+        # Position, not the frame's index, so the result can be scattered back
+        # with one assignment whatever the caller's index looks like.
+        'position': np.arange(len(df_fallback)),
+        'start': df_fallback['AA_start'].to_numpy(),
+        'end': df_fallback['AA_end'].to_numpy(),
+    })
+    right = pd.DataFrame({
+        'key': codes[len(df_fallback):],
+        'stated_start': df_direct['AA_start'].to_numpy(),
+        'stated_end': df_direct['AA_end'].to_numpy(),
+    })
+    pairs = left.merge(right, on='key', sort=False)
+    if pairs.empty:
+        return pd.Series(False, index=df_fallback.index)
+
+    start = pairs['start'].to_numpy()
+    end = pairs['end'].to_numpy()
+    stated_start = pairs['stated_start'].to_numpy()
+    stated_end = pairs['stated_end'].to_numpy()
+    overlap = np.maximum(np.minimum(end, stated_end)
+                         - np.maximum(start, stated_start) + 1, 0)
+    shorter = np.minimum(end - start + 1, stated_end - stated_start + 1)
+    # A coordinate can be null here - AA_start is only cast to int downstream, in
+    # get_pfam_domains_db() - so the division is guarded rather than assumed safe.
+    # A null propagates to NaN, and NaN >= _SAME_ID_OVERLAP is False, which is the
+    # same answer the row-at-a-time version gave.
+    with np.errstate(divide='ignore', invalid='ignore'):
+        fraction = np.where(shorter > 0, overlap / shorter, 0.0)
+
+    # Assignment, not accumulation: a fallback row is suppressed if ANY stated
+    # instance overlaps it, so repeated positions setting True is exactly right.
+    suppressed = np.zeros(len(df_fallback), dtype=bool)
+    suppressed[pairs['position'].to_numpy()[fraction >= _SAME_ID_OVERLAP]] = True
+    return pd.Series(suppressed, index=df_fallback.index)
+
+
+#: How many protein ids go into one IN (...) list. Two lists per statement, so a
+#: batch spends 800 bind parameters - comfortably under SQLite's default ceiling
+#: of 999, which is what a single list of every protein in a run would blow past.
+_PROTEIN_ID_BATCH = 400
+
+#: Above this many proteins, reading the whole table beats looking each one up.
+#: Measured against the current build: an indexed lookup settles at about 6 us per
+#: protein (60,000 proteins in 0.39s) while the unrestricted scan costs 2.7s, so
+#: the two meet near 450,000. The limit sits below that, and above any run that is
+#: not effectively the whole transcriptome.
+_PROTEIN_FILTER_LIMIT = 250_000
+
+
+def _protein_id_batches(df_protein):
+    """(sql, params) per batch, restricting DomainEvent to `df_protein`'s proteins.
+
+    Empty when there is nothing to gain by restricting - no frame, no usable ids,
+    or so many that the scan is cheaper - and the caller then reads the table as it
+    always did.
+
+    Both id spaces are tested in one clause because SQLite plans it as a MULTI-INDEX
+    OR, searching domainEventsTableIndexByEnsembl and domainEventsTableIndexByProtein
+    and merging the results. Splitting it into two statements would be no faster and
+    would need the same de-duplication afterwards.
+    """
+    if df_protein is None or df_protein.empty:
+        return []
+    ensembl = sorted({str(v).strip() for v in df_protein.get('protein_ensembl_id', pd.Series(dtype=object)).dropna()
+                      if str(v).strip()})
+    refseq = sorted({str(v).strip() for v in df_protein.get('protein_refseq_id', pd.Series(dtype=object)).dropna()
+                     if str(v).strip()})
+    if not ensembl and not refseq:
+        return []
+    if len(ensembl) + len(refseq) > _PROTEIN_FILTER_LIMIT:
+        return []
+
+    batches = []
+    for start in range(0, max(len(ensembl), len(refseq)), _PROTEIN_ID_BATCH):
+        e = ensembl[start:start + _PROTEIN_ID_BATCH]
+        r = refseq[start:start + _PROTEIN_ID_BATCH]
+        tests = []
+        if e:
+            tests.append(f"de.protein_ensembl_id IN ({','.join('?' * len(e))})")
+        if r:
+            tests.append(f"de.protein_refseq_id IN ({','.join('?' * len(r))})")
+        batches.append((' AND (' + ' OR '.join(tests) + ')', e + r))
+    return batches
+
+
+def _read_domain_events(con, sql, df_protein):
+    """`sql` - carrying a {restriction} slot - run once, or once per protein batch.
+
+    A row is returned by every batch holding either of its ids, and a protein's two
+    ids need not land in the same batch, so the rowid comes back with each row and
+    de-duplicates the result. Without it a domain could be counted twice, which
+    _collapse_duplicate_spans() would then read as two instances of one domain.
+    """
+    batches = _protein_id_batches(df_protein)
+    if not batches:
+        frame = pd.read_sql_query(sql.format(restriction=''), con)
+        return frame.drop(columns=['_rowid'])
+    frames = [pd.read_sql_query(sql.format(restriction=clause), con, params=params)
+              for clause, params in batches]
+    frame = pd.concat(frames, ignore_index=True)
+    return frame.drop_duplicates(subset='_rowid').drop(columns=['_rowid'])
+
+
+def _pfam_domain_events(con, df_protein=None):
+    """DomainEvent rows carrying a Pfam accession, from ext_id where it names one
+    and from the row's DomainType where it does not.
+
+    ext_id is what a domain row states about itself, so it is always preferred.
+    But the same region is annotated by several sources, and which ids SpeciesDB
+    happened to collapse into one row varies between isoforms of the same gene:
+    AKAP13's alternative protein carries PE/DAG-bd as
+    'pfam00130; IPR002219; smart00109', its canonical as 'smart00109; IPR002219'
+    alone. Both are type_id 117, whose DomainType names pfam00130. Reading ext_id
+    only, the domain existed in one isoform and not the other, and a 47 aa domain
+    present at identical length on both sides was reported as domain_gain.
+
+    The fallback is deliberately narrow, because the whole point of this source is
+    that a Pfam-only set is non-redundant (see get_pfam_domains_db):
+
+      * only where the protein has NO ext_id-derived Pfam row for that type_id.
+        Otherwise the cd/smart/pfam rows describing one region would all resolve
+        to the same accession - 489,633 rows in the current build, which is how
+        one RhoGEF domain becomes three and a domain count stops meaning anything.
+      * only where the DomainType names exactly ONE Pfam accession. 231,012
+        recoverable rows sit under a type naming up to six; picking one would
+        invent an identity the row never stated.
+      * one row per protein and type_id, the widest span, so several non-Pfam rows
+        for one region do not reintroduce the duplication inside the recovered set.
+
+    That leaves the genuine recoveries - the AKAP13 case - and drops the rest.
+    """
+    # Membership, not position - see _pfam_accession(). Spaces are stripped and a
+    # ';' prepended so the test anchors each token: ';pfam' matches the id wherever
+    # it sits in the set, and never matches a token that merely ends in one.
+    STATES_PFAM = "';' || REPLACE(de.ext_id, ' ', '') LIKE '%;pfam%'"
+    COLUMNS = ("de.rowid AS _rowid, de.protein_ensembl_id, de.protein_refseq_id, "
+               "de.type_id, de.AA_start, de.AA_end, de.ext_id")
+
+    df_direct = _read_domain_events(
+        con, f"SELECT {COLUMNS} FROM DomainEvent de WHERE {STATES_PFAM}{{restriction}}",
+        df_protein)
+    df_direct['domain_id'] = df_direct['ext_id'].map(_pfam_accession)
+    df_direct = df_direct[df_direct['domain_id'].notna()]
+
+    # INSTR(...) = 0: no ';' in the DomainType's pfam column, i.e. it names one
+    # accession. The multi-accession types are excluded in SQL rather than loaded
+    # and dropped, which keeps ~231k rows out of memory.
+    df_fallback = _read_domain_events(
+        con,
+        f"SELECT {COLUMNS}, TRIM(dt.pfam) AS type_pfam "
+        "FROM DomainEvent de JOIN DomainType dt ON dt.type_id = de.type_id "
+        f"WHERE NOT ({STATES_PFAM}) "
+        "  AND dt.pfam IS NOT NULL AND TRIM(dt.pfam) <> '' "
+        "  AND INSTR(TRIM(dt.pfam), ';') = 0{restriction}",
+        df_protein)
+    if df_fallback.empty:
+        return df_direct
+
+    df_fallback['domain_id'] = df_fallback['type_pfam']
+    df_fallback = df_fallback.drop(columns=['type_pfam'])
+    offered = len(df_fallback)
+    df_fallback = df_fallback[~_overlaps_a_stated_instance(df_fallback, df_direct)]
+
+    logger.log(PROGRESS,
+               'Pfam accession taken from DomainType for %d domain rows whose ext_id '
+               'named none (%d more describe a region a stated row already covers)',
+               len(df_fallback), offered - len(df_fallback))
+    return pd.concat([df_direct, df_fallback], ignore_index=True)
+
+
+def get_pfam_domains_db(con, transcript_ids, df_transcript=None, df_protein=None):
+    """Domains from DomainEvent/DomainType, restricted to Pfam signatures.
+
+    The point of this source is provenance. DomainEvent is keyed on the PROTEIN,
+    so every row's coordinates were computed on the protein carrying them - no
+    accession is shared between isoforms, nothing is inherited, and no projection
+    is needed or performed. What made DomainEvent unusable as a representative set
+    was cross-source redundancy: one region matched by Pfam, SMART and CDD yields
+    three overlapping rows under one DomainType, and there is no InterPro entry
+    type to rank them by. Keeping only the Pfam hit removes that at a stroke
+    (ARAP1's canonical drops from 24 rows to 7).
+
+    Both id spaces are used. DomainEvent carries protein_ensembl_id and
+    protein_refseq_id, and 224,530 of its Pfam rows are reachable ONLY through the
+    RefSeq key (284,621 proteins have no Ensembl id at all), so matching on the
+    Ensembl column alone would silently drop every RefSeq-only transcript - a fifth
+    of the data - while looking like a coverage property of Pfam.
+
+    Frame shape matches get_representative_domains_db() so it is a drop-in for
+    build_domain_lookup(), except that `type` is deliberately absent - see below.
+    Only the `pfam` id column is populated: the analysis groups domains by shared
+    identifiers, and filling the others would merge distinct Pfam families that
+    happen to share an InterPro parent.
+    """
+    logger.log(PROGRESS, 'Reading domains from DomainEvent/DomainType (Pfam only)')
+    if df_transcript is None or df_protein is None:
+        df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
+    if df_protein.empty:
+        return pd.DataFrame(columns=_PFAM_COLUMNS)
+
+    try:
+        df_event = _pfam_domain_events(con, df_protein=df_protein)
+    except (sqlite3.OperationalError, pd.errors.DatabaseError):
+        logger.warning('DomainEvent table not found in this DB.')
+        return pd.DataFrame(columns=_PFAM_COLUMNS)
+    df_event = df_event.dropna(subset=['AA_start', 'AA_end'])
+    if df_event.empty:
+        return pd.DataFrame(columns=_PFAM_COLUMNS)
+    df_event['AA_start'] = df_event['AA_start'].astype(float).astype(int)
+    df_event['AA_end'] = df_event['AA_end'].astype(float).astype(int)
+
+    merged_df = pd.merge(
+        df_protein,
+        df_transcript.drop(columns=['protein_ensembl_id', 'protein_refseq_id'],
+                           errors='ignore'),
+        on=TRANSCRIPT_KEY, suffixes=('', '_tx'))
+    merged_df['transcript_ensembl_id'] = merged_df[TRANSCRIPT_KEY]
+
+    # Matched on whichever id each side actually has: a protein or event row
+    # carrying both appears under both keys and the duplicate pair is dropped
+    # after the merge.
+    def _long(frame, prefix_cols):
+        parts = []
+        for tag, col in prefix_cols:
+            if col not in frame.columns:
+                continue
+            # astype(str) renders NULL as 'nan' OR 'None' depending on dtype;
+            # both must go, or every null-keyed row joins to every other one.
+            ids = frame[col].astype(str).str.strip()
+            mask = (frame[col].notna() & (ids != '')
+                    & ~ids.str.lower().isin(['nan', 'none', '<na>']))
+            sub = frame[mask].copy()
+            if sub.empty:
+                continue
+            sub['_join_key'] = tag + '|' + sub[col].astype(str).str.strip()
+            parts.append(sub)
+        return pd.concat(parts, ignore_index=True) if parts else frame.iloc[0:0].assign(_join_key=None)
+
+    KEYS = [('E', 'protein_ensembl_id'), ('R', 'protein_refseq_id')]
+    merged_df = pd.merge(_long(merged_df, KEYS),
+                         _long(df_event, KEYS).drop(
+                             columns=['protein_ensembl_id', 'protein_refseq_id'],
+                             errors='ignore'),
+                         on='_join_key')
+    if merged_df.empty:
+        return pd.DataFrame(columns=_PFAM_COLUMNS)
+    merged_df = merged_df.drop_duplicates(
+        subset=[TRANSCRIPT_KEY, 'domain_id', 'AA_start', 'AA_end'])
+
+    df_type = pd.read_sql_query('SELECT type_id, name, description FROM DomainType', con)
+    merged_df = pd.merge(merged_df, df_type, on='type_id', how='left')
+
+    merged_df = merged_df.rename(columns={
+        'protein_ensembl_id': 'protein_ensembl_id_version',
+        'transcript_ensembl_id': 'transcript_ensembl_id_version',
+        'name': 'short_description',
+        'description_y': 'description',
+    })
+    if 'description' not in merged_df.columns:
+        merged_df['description'] = merged_df.get('description_x')
+    merged_df['pfam'] = merged_df['domain_id']
+    for col in ('CDD_id', 'cdd', 'smart', 'tigr', 'interpro'):
+        merged_df[col] = None
+    # Every row was computed on its own protein; there is nothing to project.
+    merged_df['projection_status'] = PROJECTION_OWN
+    if 'protein_interpro_id' not in merged_df.columns:
+        merged_df['protein_interpro_id'] = None
+
+    merged_df = _collapse_duplicate_spans(merged_df)
+    merged_df = _clip_domains_to_protein(merged_df)
+    logger.log(PROGRESS, 'Read %d Pfam domain rows from DomainEvent', len(merged_df))
+    # The `type` column is deliberately ABSENT, not null. Its values are InterPro
+    # entry types, and filter_representative_domains() keeps only Domain/Repeat -
+    # so a Pfam frame carrying type=None has every row dropped and the run silently
+    # reports no domains anywhere. Omitting the column is the documented signal for
+    # "no entry type to rank by", under which the filter returns its input
+    # untouched. Correct here: a Pfam-only set is already non-redundant (see
+    # _collapse_duplicate_spans) and there is no InterPro curation to rank it with.
+    return merged_df[_PFAM_COLUMNS]
+
+
+def get_domains_db(con, transcript_ids):
+    """
+    Domain source used by JunctionsAnalysis.analyze_junctions(): RepresentativeDomains,
+    and nowhere else.
+
+    A protein with no entry there has no domains. It does NOT fall back to
+    DomainEvent/DomainType, which the analysis no longer reads at all: those tables
+    carry different coordinates and a different notion of what a domain is, and
+    state no InterPro entry type, so nothing in them can be ranked by the
+    Domain/Repeat rule the analysis applies. A protein that drops out is visible as
+    no_domains_in_region, not as a silent substitution.
+
+    get_transcript_domains_db() still exists for the DB-inspection scripts
+    (check_db.py, domain_contribution_analysis.py); it is not part of the analysis.
+    """
+    df_transcript, df_protein = _read_transcripts_and_proteins(con, transcript_ids)
+    source = (os.environ.get('DOMAS_DOMAIN_SOURCE', '').strip().lower()
+              or DEFAULT_DOMAIN_SOURCE)
+    if source == 'pfam':
+        return get_pfam_domains_db(con, transcript_ids, df_transcript=df_transcript,
+                                   df_protein=df_protein)
+    if source in ('representative', 'interpro'):
+        return get_representative_domains_db(con, transcript_ids, df_transcript=df_transcript,
+                                             df_protein=df_protein)
+    raise ValueError(f"DOMAS_DOMAIN_SOURCE={source!r} is not a domain source "
+                     f"(expected 'pfam' or 'representative')")

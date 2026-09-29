@@ -1,0 +1,61 @@
+DOMAS run summary
+=================
+
+DOMAS version: 1.0.0
+Date: 2026-09-29 15:30:49
+
+37 event-gene pairs have at least one domain change - 52.86% of comparable pairs.
+
+Input source
+------------
+    Format  : leafcutter
+    Species : human
+    input/placenta_leafcutter_significance.txt
+    input/placenta_leafcutter_effect_sizes.txt
+
+
+Alternative splicing events:
+----------------------------
+    Input alternative splicing events : 100
+    14 events are assigned to more than one gene:
+    0 gene(s) :         4    4.00% of events
+    1 gene(s) :        82   82.00% of events
+    2 gene(s) :        13   13.00% of events
+    7 gene(s) :         1    1.00% of events
+
+
+Each event is analysed for each of the genes it is assigned to: 119 event-gene pairs
+------------------------------------------------------------------------------------
+    Comparable     :        70   58.82%
+    Non-comparable :        49   41.18%
+        All known junctions are canonical : 31
+        Gene not in database              : 11
+        No gene named                     : 4
+        No canonical junctions            : 3
+
+
+Junctions:
+----------
+    Unique junctions                             : 500
+    Junction-gene pairs                          : 632
+    Junction-gene pairs for genes in the database: 527
+
+
+Junction-gene pairing:
+----------------------
+    Matched to a transcript :       339   64.33% of evaluated
+    Not matched             :       188   35.67% of evaluated
+    Not evaluated           :       105
+    Junctions are not evaluated because their event had no gene named, no gene in the database, or the gene has only one transcript.
+
+
+Event / transcript-group / domain classification:
+-------------------------------------------------
+    Non-coding alternative :        13    7.74%
+    Domain gain            :         1    0.60%
+    Domain loss            :        46   27.38%
+    Longer domain          :         6    3.57%
+    Shorter domain         :        12    7.14%
+    No domain change       :        28   16.67%
+    No domains in region   :        62   36.90%
+    Total                  :       168  100.00%

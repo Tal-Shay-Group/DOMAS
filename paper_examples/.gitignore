@@ -1,0 +1,5 @@
+# Written beside the results on every run. Useful to read - which transcript
+# represented which group, which gene symbols resolved by synonym - but every line
+# is timestamped, so committing it would rewrite the whole file each time the
+# examples are regenerated.
+results/*/domas.log
