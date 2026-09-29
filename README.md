@@ -66,8 +66,26 @@ and the run summary. The summary is also shown on the page.
   ```bash
   pip install -r requirements.txt
   ```
-- **Database:** requires access to a local instance of the **DoChaP DB**.
-  See Gal-Oz et al. (2021) for installation instructions.
+- **Database:** DOMAS reads the **DoChaP database**, a single SQLite file. It is not
+  part of this repository because of its size; download it from the releases page:
+
+  <https://github.com/Tal-Shay-Group/DOMAS/releases/tag/db-v1>
+
+  `DB_merged.sqlite.tar.gz` is 933 MB compressed and 3.9 GB unpacked. Unpack it with
+  `tar`, which is built in on Linux, macOS and Windows 10 or later:
+
+  ```bash
+  tar -xzf DB_merged.sqlite.tar.gz
+  ```
+
+  The archive is 978,165,954 bytes, sha256
+  `f16675ec6bfcfbe906a36251058095bff27886e43e83db251d1ff032f08146bc`.
+  Checking it is worth the minute it takes: a download this size that is silently
+  truncated leaves a file that opens as a database but is missing rows.
+
+  Every command below takes the path to the unpacked `DB_merged.sqlite`. See Gal-Oz
+  et al. (2021) for how the database is built, and the
+  [DoChaP download page](https://dochap.bgu.ac.il/#!/downloads) for what it contains.
 
 ## Usage
 
@@ -81,7 +99,8 @@ command line for each of the input formats — read it
 for the invocation you need and swap in your own input file names. It runs DOMAS once per format
 against the fixtures in `tests/` and checks each result against the reference stored
 in `tests/run_examples/`. The DoChaP database is not in this repository, so pass its
-path:
+path (see [Installation and requirements](#installation-and-requirements) for where to
+get it):
 
 ```bash
 ./run_examples.sh /path/to/DB_merged.sqlite [output_dir]
@@ -93,7 +112,8 @@ The whole set takes about two minutes.
 
 `paper_examples/` holds the two use cases reported in the paper — the immune and the
 placenta comparison — as the input files, a run script each, and the results those
-scripts produce. Running them needs only the database:
+scripts produce. Running them needs only the database
+(see [Installation and requirements](#installation-and-requirements)):
 
 ```bash
 cd paper_examples

@@ -14,7 +14,18 @@ can be checked without assembling anything.
 
 ## Running them
 
-The DoChaP database is not in this repository — download it and pass its path:
+The DoChaP database is not in this repository because of its size. Download
+`DB_merged.sqlite.tar.gz` (933 MB compressed, 3.9 GB unpacked) from the releases page:
+
+<https://github.com/Tal-Shay-Group/DOMAS/releases/tag/db-v1>
+
+```bash
+tar -xzf DB_merged.sqlite.tar.gz
+```
+
+The archive is 978,165,954 bytes, sha256
+`f16675ec6bfcfbe906a36251058095bff27886e43e83db251d1ff032f08146bc`.
+Then pass the path of the unpacked file to either script:
 
 ```bash
 ./run_immune.sh   /path/to/DB_merged.sqlite
